@@ -1,12 +1,18 @@
 import { createServer } from "node:http";
 
-import { WebSocketServer } from "ws";
+import { WebSocketServer, WebSocket } from "ws";
 
+import { createCliView, formatCodexEvent, pushLogLine, summarizeAssistantText } from "./cli-projector.mjs";
+import { readLatestRateLimits } from "./codex-rate-limits.mjs";
 import { loadConfig } from "./config.mjs";
+import { CodexSessionManager } from "./codex-session.mjs";
 import { transcribePcm16Mono } from "./stt.mjs";
 import { injectText } from "./text-injector.mjs";
 
 const config = loadConfig();
+const codexSession = new CodexSessionManager(config);
+const cliView = createCliView(config);
+applyRateLimitSnapshot(readLatestRateLimits());
 
 function log(...args) {
   console.log(new Date().toISOString(), ...args);
@@ -16,6 +22,14 @@ function sendJson(ws, payload) {
   ws.send(JSON.stringify(payload));
 }
 
+function broadcastJson(payload) {
+  for (const client of wss.clients) {
+    if (client.readyState === WebSocket.OPEN) {
+      sendJson(client, payload);
+    }
+  }
+}
+
 function createClientState() {
   return {
     deviceId: "unknown",
@@ -23,6 +37,149 @@ function createClientState() {
     chunks: [],
     pendingTranscript: ""
   };
+}
+
+function emitCliSnapshot(ws) {
+  sendJson(ws, {
+    type: "cli_session_state",
+    phase: cliView.phase,
+    statusLine: cliView.statusLine,
+    threadId: cliView.threadId,
+    repoName: cliView.repoName,
+    cwd: cliView.cwd,
+    quota5hRemainingPct: cliView.quota5hRemainingPct,
+    quotaWeekRemainingPct: cliView.quotaWeekRemainingPct,
+    quotaPlanType: cliView.quotaPlanType
+  });
+  sendJson(ws, {
+    type: "cli_summary",
+    latestUserText: cliView.latestUserText,
+    latestAssistantText: cliView.latestAssistantText,
+    statusLine: cliView.statusLine,
+    threadId: cliView.threadId,
+    repoName: cliView.repoName
+  });
+  sendJson(ws, {
+    type: "cli_log_tail",
+    lines: cliView.logLines
+  });
+}
+
+function broadcastCliState() {
+  broadcastJson({
+    type: "cli_session_state",
+    phase: cliView.phase,
+    statusLine: cliView.statusLine,
+    threadId: cliView.threadId,
+    repoName: cliView.repoName,
+    cwd: cliView.cwd,
+    quota5hRemainingPct: cliView.quota5hRemainingPct,
+    quotaWeekRemainingPct: cliView.quotaWeekRemainingPct,
+    quotaPlanType: cliView.quotaPlanType
+  });
+}
+
+function broadcastCliSummary() {
+  broadcastJson({
+    type: "cli_summary",
+    latestUserText: cliView.latestUserText,
+    latestAssistantText: cliView.latestAssistantText,
+    statusLine: cliView.statusLine,
+    threadId: cliView.threadId,
+    repoName: cliView.repoName
+  });
+}
+
+function broadcastCliLogTail() {
+  broadcastJson({
+    type: "cli_log_tail",
+    lines: cliView.logLines
+  });
+}
+
+function appendCliLog(line) {
+  cliView.logLines = pushLogLine(cliView.logLines, line);
+  broadcastCliLogTail();
+}
+
+function setCliState(patch) {
+  Object.assign(cliView, patch);
+  broadcastCliState();
+}
+
+function setCliSummary(patch) {
+  Object.assign(cliView, patch);
+  broadcastCliSummary();
+}
+
+function applyRateLimitSnapshot(snapshot) {
+  if (!snapshot) {
+    return;
+  }
+
+  cliView.quota5hRemainingPct = snapshot.primaryRemainingPct;
+  cliView.quotaWeekRemainingPct = snapshot.secondaryRemainingPct;
+  cliView.quotaPlanType = snapshot.planType || cliView.quotaPlanType || "";
+}
+
+function refreshRateLimits(threadId = "") {
+  const snapshot = readLatestRateLimits(threadId || cliView.threadId);
+  if (!snapshot) {
+    return;
+  }
+
+  applyRateLimitSnapshot(snapshot);
+  broadcastCliState();
+}
+
+async function runCodexPrompt(prompt) {
+  cliView.latestUserText = prompt;
+  cliView.latestAssistantText = "";
+  setCliState({
+    phase: "running",
+    statusLine: "Running Codex...",
+    threadId: codexSession.getThreadId()
+  });
+  broadcastCliSummary();
+  appendCliLog(`user: ${summarizeAssistantText(prompt)}`);
+
+  await codexSession.sendPrompt(prompt, {
+    onState(patch) {
+      setCliState(patch);
+    },
+    onSummary(patch) {
+      setCliSummary({
+        ...patch,
+        latestAssistantText: summarizeAssistantText(patch.latestAssistantText)
+      });
+    },
+    onEvent(event) {
+      appendCliLog(formatCodexEvent(event));
+      if (event.type === "thread.started" && event.thread_id) {
+        cliView.threadId = String(event.thread_id);
+        broadcastCliState();
+        broadcastCliSummary();
+      }
+    },
+    onLogLine(line) {
+      appendCliLog(line);
+    }
+  });
+
+  refreshRateLimits(codexSession.getThreadId());
+}
+
+function launchCodexPrompt(prompt) {
+  void runCodexPrompt(prompt).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    log("codex error", message);
+    appendCliLog(`error: ${message}`);
+    setCliState({
+      phase: "error",
+      statusLine: message,
+      threadId: codexSession.getThreadId()
+    });
+  });
 }
 
 async function finalizeSegment(ws, state) {
@@ -63,11 +220,33 @@ async function finalizeSegment(ws, state) {
     return;
   }
 
-  await injectText(transcript, config.textInjectionMode, {
-    dryRun: config.dryRunTextInjection
-  });
+  if (config.sendTarget === "codex_exec") {
+    if (codexSession.isRunning()) {
+      throw new Error("Codex session is busy");
+    }
+    state.pendingTranscript = "";
+    sendJson(ws, { type: "status", status: "typed", text: transcript });
+    launchCodexPrompt(transcript);
+    return;
+  }
+
+  await dispatchPrompt(transcript);
   state.pendingTranscript = "";
   sendJson(ws, { type: "status", status: "typed", text: transcript });
+}
+
+async function dispatchPrompt(prompt) {
+  if (config.sendTarget === "codex_exec") {
+    if (codexSession.isRunning()) {
+      throw new Error("Codex session is busy");
+    }
+    await runCodexPrompt(prompt);
+    return;
+  }
+
+  await injectText(prompt, config.textInjectionMode, {
+    dryRun: config.dryRunTextInjection
+  });
 }
 
 async function sendPendingTranscript(ws, state) {
@@ -77,11 +256,19 @@ async function sendPendingTranscript(ws, state) {
     return;
   }
 
-  await injectText(transcript, "type_and_enter", {
-    dryRun: config.dryRunTextInjection
-  });
+  if (config.sendTarget === "codex_exec" && codexSession.isRunning()) {
+    sendJson(ws, { type: "status", status: "cli_busy" });
+    return;
+  }
+
   state.pendingTranscript = "";
   sendJson(ws, { type: "status", status: "typed", text: transcript });
+  if (config.sendTarget === "codex_exec") {
+    launchCodexPrompt(transcript);
+    return;
+  }
+
+  await dispatchPrompt(transcript);
 }
 
 function undoPendingTranscript(ws, state) {
@@ -107,8 +294,10 @@ wss.on("connection", (ws, req) => {
   sendJson(ws, {
     type: "server_ready",
     textInjectionMode: config.textInjectionMode,
-    transcriptDeliveryMode: config.transcriptDeliveryMode
+    transcriptDeliveryMode: config.transcriptDeliveryMode,
+    sendTarget: config.sendTarget
   });
+  emitCliSnapshot(ws);
 
   ws.on("message", async (data, isBinary) => {
     try {
@@ -156,6 +345,14 @@ wss.on("connection", (ws, req) => {
       const message = error instanceof Error ? error.message : String(error);
       log("message error", message);
       sendJson(ws, { type: "error", error: message });
+      if (config.sendTarget !== "codex_exec") {
+        appendCliLog(`error: ${message}`);
+        setCliState({
+          phase: "error",
+          statusLine: message,
+          threadId: codexSession.getThreadId()
+        });
+      }
     }
   });
 

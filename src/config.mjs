@@ -32,9 +32,17 @@ export function loadConfig() {
   return {
     bindHost: process.env.LAN_VOICE_BIND || "0.0.0.0",
     port: Number(process.env.LAN_VOICE_PORT || "8765"),
+    sendTarget: process.env.SEND_TARGET || "text_injector",
     transcriptDeliveryMode: process.env.TRANSCRIPT_DELIVERY_MODE || "immediate",
     textInjectionMode: process.env.TEXT_INJECTION_MODE || "type_only",
     dryRunTextInjection: process.env.DRY_RUN_TEXT_INJECTION === "1",
+    codexCommand:
+      process.env.CODEX_COMMAND ||
+      (process.platform === "win32"
+        ? path.join(process.env.APPDATA || "", "npm", "codex.ps1")
+        : "codex"),
+    codexCwd: process.env.CODEX_CWD || process.cwd(),
+    codexSkipGitRepoCheck: process.env.CODEX_SKIP_GIT_REPO_CHECK === "1",
     sttProvider: process.env.STT_PROVIDER || "",
     openaiApiKey: process.env.OPENAI_API_KEY || "",
     openaiModel: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1",
