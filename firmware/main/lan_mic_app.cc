@@ -322,23 +322,25 @@ bool LanMicApp::EnsureWebSocketConnected() {
     ws_->OnConnected([this]() {
         ESP_LOGI(kTag, "WebSocket connected");
         network_state_ = NetworkState::Server;
-        status_text_ = "Server connected";
-        hint_text_ = "Hold BOOT to talk";
+        status_text_ = "Connected";
+        hint_text_ = "";  // BuildPromptBody() will show "Hold BOOT to talk"
+        phase_ = Phase::Idle;
         UpdateDisplay();
     });
     ws_->OnDisconnected([this]() {
         ESP_LOGW(kTag, "WebSocket disconnected");
         hello_sent_ = false;
         network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
-        status_text_ = "Server disconnected";
-        hint_text_ = "Retrying...";
+        status_text_ = "Disconnected";
+        hint_text_ = "Will retry automatically";
+        phase_ = Phase::Idle;
         UpdateDisplay();
     });
     ws_->OnError([this](int error) {
         ESP_LOGW(kTag, "WebSocket error=%d", error);
         network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
         status_text_ = "Server error";
-        hint_text_ = "Retrying...";
+        hint_text_ = "Will retry automatically";
         phase_ = Phase::Error;
         UpdateDisplay();
     });
@@ -978,14 +980,14 @@ void LanMicApp::ExecuteSettingsItem(int item) {
 const char* LanMicApp::GetNetworkLabel() const {
     switch (network_state_) {
         case NetworkState::Server:
-            return "SRV";
+            return "Online";
         case NetworkState::Wifi:
-            return "LAN";
+            return "No Srv";
         case NetworkState::Config:
-            return "CFG";
+            return "AP";
         case NetworkState::Offline:
         default:
-            return "OFF";
+            return "Offline";
     }
 }
 
@@ -1002,18 +1004,18 @@ const char* LanMicApp::GetToolLabel() const {
 std::string LanMicApp::GetPhaseLabel() const {
     switch (phase_) {
         case Phase::Recording:
-            return "REC";
+            return "● REC";
         case Phase::Transcribing:
-            return "STT";
+            return "... STT";
         case Phase::AwaitingAction:
-            return "SEND";
+            return "? Send?";
         case Phase::Running:
-            return "RUN";
+            return "▶ AI";
         case Phase::Error:
-            return "ERR";
+            return "! ERR";
         case Phase::Idle:
         default:
-            return "IDLE";
+            return "";
     }
 }
 
@@ -1044,7 +1046,18 @@ std::string LanMicApp::BuildPromptBody() const {
     if (!hint_text_.empty()) {
         return hint_text_;
     }
-    return "Hold BOOT to talk";
+    // Default hint based on connection state
+    switch (network_state_) {
+        case NetworkState::Server:
+            return "Hold BOOT to talk";
+        case NetworkState::Wifi:
+            return "Finding server...";
+        case NetworkState::Config:
+            return "Open 192.168.4.1";
+        case NetworkState::Offline:
+        default:
+            return "Connecting WiFi...";
+    }
 }
 
 std::string LanMicApp::BuildReplyBody() const {
@@ -1155,8 +1168,18 @@ void LanMicApp::UpdateDisplay() {
     texts.push_back({page_label, 316, kContentHeaderY, 16});
 
     if (active_page_ == Page::Summary) {
+        // Derive a readable status: phase takes priority, else connection state
+        std::string status_display;
+        if (phase_ == Phase::Recording || phase_ == Phase::Transcribing ||
+            phase_ == Phase::AwaitingAction || phase_ == Phase::Running || phase_ == Phase::Error) {
+            status_display = status_text_;
+        } else if (network_state_ != NetworkState::Server) {
+            status_display = GetNetworkLabel();
+        } else {
+            status_display = status_text_.empty() ? "Ready" : status_text_;
+        }
         texts.push_back({"Prompt", 12, kPromptTitleY, 16});
-        texts.push_back({single_line(status_text_.empty() ? "Idle" : status_text_, 16), 228, kPromptTitleY, 16});
+        texts.push_back({single_line(status_display, 16), 228, kPromptTitleY, 16});
 
         const auto prompt_lines = SliceLines(WrapText(BuildPromptBody(), kBodyCharsPerLine), 0, kPromptVisibleLines);
         int y = kPromptBodyY;
@@ -1338,6 +1361,12 @@ void LanMicApp::Run() {
                 SendPttStart();
                 phase_ = Phase::Recording;
                 status_text_ = "Recording";
+                hint_text_ = "Release BOOT to send";
+                UpdateDisplay();
+            } else {
+                // No server — give visible feedback
+                hint_text_ = "No server — check host";
+                status_text_ = "Offline";
                 UpdateDisplay();
             }
             last_pressed = true;
