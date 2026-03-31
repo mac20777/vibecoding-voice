@@ -1259,21 +1259,7 @@ void LanMicApp::Run() {
             RefreshBatteryStatus();
         }
 
-        if (!IsWifiConnected()) {
-            vTaskDelay(pdMS_TO_TICKS(200));
-            continue;
-        }
-
-        if ((ws_ == nullptr || !ws_->IsConnected()) && (now_ms - last_reconnect_ms) >= kReconnectIntervalMs) {
-            last_reconnect_ms = now_ms;
-            EnsureWebSocketConnected();
-        }
-
-        if (ws_ != nullptr && ws_->IsConnected() && (now_ms - last_ping_ms) >= kPingIntervalMs) {
-            last_ping_ms = now_ms;
-            ws_->Ping();
-        }
-
+        // Navigation buttons always work regardless of WiFi state
         if (up_long_pressed_.exchange(false)) {
             if (IsNavButtonPressed(TODO_DOWN_BUTTON_GPIO)) {
                 EnterWifiSetupMode();
@@ -1286,6 +1272,8 @@ void LanMicApp::Run() {
                 EnterWifiSetupMode();
             } else if (active_page_ == Page::Log) {
                 EnterSettings();
+            } else if (active_page_ == Page::Settings) {
+                SwitchPage(Page::Summary);
             } else {
                 SwitchPage(Page::Log);
             }
@@ -1302,6 +1290,21 @@ void LanMicApp::Run() {
             HandleSettingsInput(up_click, down_click, boot_press);
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
+        }
+
+        if (!IsWifiConnected()) {
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+
+        if ((ws_ == nullptr || !ws_->IsConnected()) && (now_ms - last_reconnect_ms) >= kReconnectIntervalMs) {
+            last_reconnect_ms = now_ms;
+            EnsureWebSocketConnected();
+        }
+
+        if (ws_ != nullptr && ws_->IsConnected() && (now_ms - last_ping_ms) >= kPingIntervalMs) {
+            last_ping_ms = now_ms;
+            ws_->Ping();
         }
 
         if (up_click) {
