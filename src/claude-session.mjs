@@ -38,8 +38,6 @@ function buildClaudeArgs(config, hasSession, prompt) {
   }
 
   // Direct invocation (non-Windows or plain "claude" on PATH)
-  // On Windows, plain commands like "claude" resolve to .cmd shims which require shell:true
-  const shell = process.platform === "win32";
   const args = ["--output-format", "stream-json", "--verbose"];
   if (config.claudeAllowedTools) {
     args.push("--allowedTools", config.claudeAllowedTools);
@@ -51,7 +49,13 @@ function buildClaudeArgs(config, hasSession, prompt) {
     args.push("--continue");
   }
   args.push("-p", prompt);
-  return { command: claudeCommand, args, shell };
+
+  // On Windows, plain "claude" resolves to a .cmd shim; wrap via cmd.exe to
+  // avoid shell:true which triggers a Node.js security warning about arg escaping.
+  if (process.platform === "win32") {
+    return { command: "cmd.exe", args: ["/c", claudeCommand, ...args] };
+  }
+  return { command: claudeCommand, args };
 }
 
 export class ClaudeSessionManager {
@@ -104,6 +108,7 @@ export class ClaudeSessionManager {
     let lastAssistantText = "";
     let lastResultMessage = "";
     let sawErrorResult = false;
+    let resultHandled = false;
 
     stdout.on("line", (line) => {
       const raw = String(line || "").trim();
@@ -114,7 +119,26 @@ export class ClaudeSessionManager {
       try {
         const event = JSON.parse(raw);
 
-        // Accumulate streaming text
+        // Assistant message — extract text from content blocks
+        // (stream-json format: {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}})
+        if (event.type === "assistant" && Array.isArray(event.message?.content)) {
+          for (const block of event.message.content) {
+            if (block.type === "text" && block.text) {
+              lastAssistantText += block.text;
+            }
+          }
+          if (lastAssistantText) {
+            handlers.onSummary?.({
+              latestAssistantText: lastAssistantText,
+              statusLine: "Claude replying...",
+              phase: "running",
+              threadId: this.sessionId
+            });
+          }
+          return;
+        }
+
+        // Streaming text delta (verbose mode may emit these)
         if (
           event.type === "stream_event" &&
           event.event?.type === "content_block_delta" &&
@@ -138,6 +162,13 @@ export class ClaudeSessionManager {
           sawErrorResult = Boolean(event.is_error);
           lastResultMessage = String(event.result || "").trim();
 
+          // Fallback: result.result field contains the final text when streaming wasn't used
+          if (!lastAssistantText && lastResultMessage) {
+            lastAssistantText = lastResultMessage;
+          }
+
+          resultHandled = true;
+
           if (sawErrorResult) {
             const message = lastResultMessage || lastAssistantText || "Claude returned an error";
             handlers.onState?.({
@@ -157,11 +188,6 @@ export class ClaudeSessionManager {
             return;
           }
 
-          handlers.onState?.({
-            phase: "idle",
-            statusLine: "Claude idle",
-            threadId: this.sessionId
-          });
           if (lastAssistantText) {
             handlers.onSummary?.({
               latestAssistantText: lastAssistantText,
@@ -170,6 +196,11 @@ export class ClaudeSessionManager {
               threadId: this.sessionId
             });
           }
+          handlers.onState?.({
+            phase: "idle",
+            statusLine: "Claude idle",
+            threadId: this.sessionId
+          });
           handlers.onEvent?.(event);
           return;
         }
@@ -217,11 +248,14 @@ export class ClaudeSessionManager {
         clearTimeout(timeoutTimer);
         this.running = false;
         if (code === 0 || code === null) {
-          handlers.onState?.({
-            phase: "idle",
-            statusLine: "Claude idle",
-            threadId: this.sessionId
-          });
+          // result event already emitted the final state; avoid double-firing
+          if (!resultHandled) {
+            handlers.onState?.({
+              phase: "idle",
+              statusLine: "Claude idle",
+              threadId: this.sessionId
+            });
+          }
           resolve({
             sessionId: this.sessionId,
             lastAssistantText
