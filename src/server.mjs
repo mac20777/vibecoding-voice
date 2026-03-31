@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { createServer } from "node:http";
 
 import { WebSocketServer, WebSocket } from "ws";
@@ -5,17 +6,64 @@ import { WebSocketServer, WebSocket } from "ws";
 import { createCliView, formatCodexEvent, pushLogLine, summarizeAssistantText } from "./cli-projector.mjs";
 import { readLatestRateLimits } from "./codex-rate-limits.mjs";
 import { loadConfig } from "./config.mjs";
+import { runDoctor } from "./doctor.mjs";
+import { startDiscoveryServer } from "./discovery-server.mjs";
+import { isFreshTimestamp, signHelloPayload, signaturesMatch } from "./lan-auth.mjs";
+import { ClaudeSessionManager } from "./claude-session.mjs";
 import { CodexSessionManager } from "./codex-session.mjs";
 import { transcribePcm16Mono } from "./stt.mjs";
 import { injectText } from "./text-injector.mjs";
 
 const config = loadConfig();
+
+if (process.argv.includes("--doctor")) {
+  await runDoctor(config);
+}
+
 const codexSession = new CodexSessionManager(config);
+const claudeSession = new ClaudeSessionManager(config);
 const cliView = createCliView(config);
+const recentHelloNonces = new Map();
 applyRateLimitSnapshot(readLatestRateLimits());
+
+const MIN_PLAUSIBLE_EPOCH_MS = Date.UTC(2020, 0, 1);
 
 function log(...args) {
   console.log(new Date().toISOString(), ...args);
+}
+
+function printBanner() {
+  let version = "?";
+  try {
+    const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    version = pkg.version || version;
+  } catch {
+    // ignore
+  }
+
+  const sttLabel = config.mockTranscript
+    ? "mock"
+    : config.sttProvider ||
+      (config.openaiApiKey ? `openai · ${config.openaiModel}` : "") ||
+      (config.volcengineAppKey ? `volcengine · ${config.volcengineLanguage}` : "") ||
+      "\x1b[33mnone — set OPENAI_API_KEY or VOLCENGINE_APP_KEY\x1b[0m";
+
+  const targetLabel =
+    config.sendTarget + (config.sendTargetAuto ? " \x1b[2m[auto]\x1b[0m" : "");
+
+  const authLabel = config.lanSharedSecret
+    ? "\x1b[32mon\x1b[0m"
+    : "\x1b[33moff\x1b[0m (set LAN_SHARED_SECRET to enable)";
+
+  console.log(`\nvibecoding-voice v${version}`);
+  console.log(`  target     ${targetLabel}`);
+  console.log(`  stt        ${sttLabel}`);
+  console.log(`  auth       ${authLabel}`);
+  console.log(`  ws         ws://${config.bindHost}:${config.port}`);
+  if (config.discoveryEnabled) {
+    console.log(`  discovery  udp://${config.bindHost}:${config.discoveryPort}`);
+  }
+  console.log(`\nRun with --doctor to check your environment.\n`);
 }
 
 function sendJson(ws, payload) {
@@ -24,7 +72,7 @@ function sendJson(ws, payload) {
 
 function broadcastJson(payload) {
   for (const client of wss.clients) {
-    if (client.readyState === WebSocket.OPEN) {
+    if (client.readyState === WebSocket.OPEN && client.clientState?.authenticated) {
       sendJson(client, payload);
     }
   }
@@ -33,6 +81,7 @@ function broadcastJson(payload) {
 function createClientState() {
   return {
     deviceId: "unknown",
+    authenticated: !config.lanSharedSecret,
     segmentActive: false,
     chunks: [],
     pendingTranscript: ""
@@ -132,6 +181,75 @@ function refreshRateLimits(threadId = "") {
   broadcastCliState();
 }
 
+function pruneRecentHelloNonces(nowMs = Date.now()) {
+  const ttlMs = Math.max(1, config.lanAuthWindowSec) * 1000;
+  for (const [key, seenAtMs] of recentHelloNonces.entries()) {
+    if (nowMs - seenAtMs > ttlMs) {
+      recentHelloNonces.delete(key);
+    }
+  }
+}
+
+function markHelloNonce(deviceId, nonce, nowMs = Date.now()) {
+  pruneRecentHelloNonces(nowMs);
+  const cacheKey = `${deviceId}:${nonce}`;
+  if (recentHelloNonces.has(cacheKey)) {
+    return false;
+  }
+
+  recentHelloNonces.set(cacheKey, nowMs);
+  return true;
+}
+
+function shouldCheckTimestampFreshness(ts) {
+  const numericTs = Number(ts);
+  return Number.isFinite(numericTs) && numericTs >= MIN_PLAUSIBLE_EPOCH_MS;
+}
+
+function closeWithAuthError(ws, state, error) {
+  const message = String(error || "auth_failed");
+  state.authenticated = false;
+  sendJson(ws, { type: "error", error: message });
+  ws.close(4001, message);
+}
+
+function validateHello(message) {
+  if (!config.lanSharedSecret) {
+    return { ok: true };
+  }
+
+  const ts = message.authTs;
+  const deviceId = message.deviceId || "unknown";
+  const nonce = String(message.authNonce || "").trim();
+  const actualSig = String(message.authSig || "").trim();
+  if (!nonce || !actualSig) {
+    return { ok: false, error: "auth_missing" };
+  }
+  if (shouldCheckTimestampFreshness(ts) && !isFreshTimestamp(ts, config.lanAuthWindowSec)) {
+    return { ok: false, error: "auth_stale" };
+  }
+
+  const expectedSig = signHelloPayload(
+    {
+      deviceId,
+      boardType: message.boardType || "unknown",
+      ts,
+      nonce
+    },
+    config.lanSharedSecret
+  );
+
+  if (!signaturesMatch(expectedSig, actualSig)) {
+    return { ok: false, error: "auth_invalid" };
+  }
+
+  if (!markHelloNonce(deviceId, nonce)) {
+    return { ok: false, error: "auth_replayed" };
+  }
+
+  return { ok: true };
+}
+
 async function runCodexPrompt(prompt) {
   cliView.latestUserText = prompt;
   cliView.latestAssistantText = "";
@@ -178,6 +296,49 @@ function launchCodexPrompt(prompt) {
       phase: "error",
       statusLine: message,
       threadId: codexSession.getThreadId()
+    });
+  });
+}
+
+async function runClaudePrompt(prompt) {
+  cliView.latestUserText = prompt;
+  cliView.latestAssistantText = "";
+  setCliState({
+    phase: "running",
+    statusLine: "Running Claude...",
+    threadId: claudeSession.getThreadId()
+  });
+  broadcastCliSummary();
+  appendCliLog(`user: ${summarizeAssistantText(prompt)}`);
+
+  await claudeSession.sendPrompt(prompt, {
+    onState(patch) {
+      setCliState(patch);
+    },
+    onSummary(patch) {
+      setCliSummary({
+        ...patch,
+        latestAssistantText: summarizeAssistantText(patch.latestAssistantText)
+      });
+    },
+    onEvent(event) {
+      appendCliLog(formatCodexEvent(event));
+    },
+    onLogLine(line) {
+      appendCliLog(line);
+    }
+  });
+}
+
+function launchClaudePrompt(prompt) {
+  void runClaudePrompt(prompt).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    log("claude error", message);
+    appendCliLog(`error: ${message}`);
+    setCliState({
+      phase: "error",
+      statusLine: message,
+      threadId: claudeSession.getThreadId()
     });
   });
 }
@@ -230,6 +391,16 @@ async function finalizeSegment(ws, state) {
     return;
   }
 
+  if (config.sendTarget === "claude_code") {
+    if (claudeSession.isRunning()) {
+      throw new Error("Claude session is busy");
+    }
+    state.pendingTranscript = "";
+    sendJson(ws, { type: "status", status: "typed", text: transcript });
+    launchClaudePrompt(transcript);
+    return;
+  }
+
   await dispatchPrompt(transcript);
   state.pendingTranscript = "";
   sendJson(ws, { type: "status", status: "typed", text: transcript });
@@ -241,6 +412,14 @@ async function dispatchPrompt(prompt) {
       throw new Error("Codex session is busy");
     }
     await runCodexPrompt(prompt);
+    return;
+  }
+
+  if (config.sendTarget === "claude_code") {
+    if (claudeSession.isRunning()) {
+      throw new Error("Claude session is busy");
+    }
+    await runClaudePrompt(prompt);
     return;
   }
 
@@ -261,10 +440,20 @@ async function sendPendingTranscript(ws, state) {
     return;
   }
 
+  if (config.sendTarget === "claude_code" && claudeSession.isRunning()) {
+    sendJson(ws, { type: "status", status: "cli_busy" });
+    return;
+  }
+
   state.pendingTranscript = "";
   sendJson(ws, { type: "status", status: "typed", text: transcript });
   if (config.sendTarget === "codex_exec") {
     launchCodexPrompt(transcript);
+    return;
+  }
+
+  if (config.sendTarget === "claude_code") {
+    launchClaudePrompt(transcript);
     return;
   }
 
@@ -284,23 +473,44 @@ function undoPendingTranscript(ws, state) {
   sendJson(ws, { type: "status", status: "undo_ok" });
 }
 
+const KEEPALIVE_INTERVAL_MS = 30_000;
+const KEEPALIVE_MISS_LIMIT = 2;
+
 const server = createServer();
 const wss = new WebSocketServer({ server });
+const discoveryServer = startDiscoveryServer(config, { log });
+
+const keepaliveInterval = setInterval(() => {
+  for (const client of wss.clients) {
+    if (client.readyState !== WebSocket.OPEN) {
+      continue;
+    }
+    if ((client.missedPings || 0) >= KEEPALIVE_MISS_LIMIT) {
+      log("keepalive timeout", client.clientState?.deviceId || "unknown");
+      client.terminate();
+      continue;
+    }
+    client.missedPings = (client.missedPings || 0) + 1;
+    client.ping();
+  }
+}, KEEPALIVE_INTERVAL_MS);
 
 wss.on("connection", (ws, req) => {
   const state = createClientState();
-  log("client connected", req.socket.remoteAddress);
-
-  sendJson(ws, {
-    type: "server_ready",
-    textInjectionMode: config.textInjectionMode,
-    transcriptDeliveryMode: config.transcriptDeliveryMode,
-    sendTarget: config.sendTarget
+  ws.clientState = state;
+  ws.missedPings = 0;
+  ws.on("pong", () => {
+    ws.missedPings = 0;
   });
-  emitCliSnapshot(ws);
+  log("client connected", req.socket.remoteAddress);
 
   ws.on("message", async (data, isBinary) => {
     try {
+      if (!state.authenticated && isBinary) {
+        closeWithAuthError(ws, state, "auth_required");
+        return;
+      }
+
       if (isBinary) {
         if (state.segmentActive) {
           state.chunks.push(Buffer.from(data));
@@ -312,10 +522,31 @@ wss.on("connection", (ws, req) => {
       switch (message.type) {
         case "hello":
           state.deviceId = message.deviceId || "unknown";
+          {
+            const authResult = validateHello(message);
+            if (!authResult.ok) {
+              log("auth rejected", { deviceId: state.deviceId, error: authResult.error });
+              closeWithAuthError(ws, state, authResult.error);
+              break;
+            }
+          }
+          state.authenticated = true;
           log("hello", { deviceId: state.deviceId, boardType: message.boardType || "unknown" });
           sendJson(ws, { type: "hello_ack", deviceId: state.deviceId });
+          sendJson(ws, {
+            type: "server_ready",
+            textInjectionMode: config.textInjectionMode,
+            transcriptDeliveryMode: config.transcriptDeliveryMode,
+            sendTarget: config.sendTarget,
+            authRequired: Boolean(config.lanSharedSecret)
+          });
+          emitCliSnapshot(ws);
           break;
         case "ptt_start":
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
           log("ptt_start", state.deviceId);
           state.segmentActive = true;
           state.chunks = [];
@@ -323,14 +554,26 @@ wss.on("connection", (ws, req) => {
           sendJson(ws, { type: "status", status: "recording" });
           break;
         case "ptt_stop":
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
           log("ptt_stop", state.deviceId, state.chunks.length);
           await finalizeSegment(ws, state);
           break;
         case "action_send":
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
           log("action_send", state.deviceId);
           await sendPendingTranscript(ws, state);
           break;
         case "action_undo":
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
           log("action_undo", state.deviceId);
           undoPendingTranscript(ws, state);
           break;
@@ -345,14 +588,14 @@ wss.on("connection", (ws, req) => {
       const message = error instanceof Error ? error.message : String(error);
       log("message error", message);
       sendJson(ws, { type: "error", error: message });
-      if (config.sendTarget !== "codex_exec") {
-        appendCliLog(`error: ${message}`);
-        setCliState({
-          phase: "error",
-          statusLine: message,
-          threadId: codexSession.getThreadId()
-        });
-      }
+      const activeSession =
+        config.sendTarget === "claude_code" ? claudeSession : codexSession;
+      appendCliLog(`error: ${message}`);
+      setCliState({
+        phase: "error",
+        statusLine: message,
+        threadId: activeSession.getThreadId()
+      });
     }
   });
 
@@ -366,5 +609,22 @@ wss.on("connection", (ws, req) => {
 });
 
 server.listen(config.port, config.bindHost, () => {
-  log(`server listening on ws://${config.bindHost}:${config.port}`);
+  printBanner();
+  log(`server ready`);
 });
+
+function shutdown() {
+  log("shutting down");
+  clearInterval(keepaliveInterval);
+  discoveryServer?.close();
+  for (const client of wss.clients) {
+    client.terminate();
+  }
+  wss.close();
+  server.close(() => {
+    process.exit(0);
+  });
+}
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

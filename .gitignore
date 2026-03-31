@@ -2,4 +2,8 @@ node_modules/
 tmp/
 *.log
 .env
-
+.env.local
+.env.*.local
+!.env.example
+.DS_Store
+npm-debug.log*

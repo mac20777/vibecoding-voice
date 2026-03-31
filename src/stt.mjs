@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
+import { projectRoot } from "./paths.mjs";
 import { pcm16MonoToWav } from "./wav.mjs";
 
 async function saveDebugWavIfNeeded(wavBuffer, enabled) {
@@ -9,7 +10,7 @@ async function saveDebugWavIfNeeded(wavBuffer, enabled) {
     return null;
   }
 
-  const dir = path.join(process.cwd(), "tmp");
+  const dir = path.join(projectRoot, "tmp");
   await fs.mkdir(dir, { recursive: true });
   const filePath = path.join(dir, `segment-${Date.now()}.wav`);
   await fs.writeFile(filePath, wavBuffer);

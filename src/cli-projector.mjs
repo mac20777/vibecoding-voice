@@ -17,16 +17,24 @@ function trimSummary(value, maxChars = MAX_SUMMARY_CHARS) {
   return `${text.slice(0, maxChars - 1)}…`;
 }
 
+function toolLabel(sendTarget) {
+  if (sendTarget === "claude_code") return "Claude";
+  if (sendTarget === "codex_exec") return "Codex";
+  return "";
+}
+
 export function createCliView(config) {
+  const label = toolLabel(config.sendTarget);
+  const cwd = config.sendTarget === "claude_code" ? config.claudeCwd : config.codexCwd;
   return {
     phase: "idle",
-    statusLine: "Codex idle",
+    statusLine: label ? `${label} idle` : "Idle",
     latestUserText: "",
     latestAssistantText: "",
     logLines: [],
     threadId: "",
-    cwd: config.codexCwd,
-    repoName: path.basename(config.codexCwd),
+    cwd,
+    repoName: path.basename(cwd),
     quota5hRemainingPct: null,
     quotaWeekRemainingPct: null,
     quotaPlanType: ""

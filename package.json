@@ -2,13 +2,24 @@
   "name": "vibecoding-voice",
   "version": "0.1.0",
   "private": true,
+  "description": "Host bridge for LAN voice coding with an ESP32 device and Codex CLI.",
   "type": "module",
   "scripts": {
     "start": "node src/server.mjs",
+    "doctor": "node src/server.mjs --doctor",
     "test": "node --test"
   },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "esp32",
+    "voice",
+    "codex",
+    "websocket",
+    "stt"
+  ],
   "dependencies": {
     "ws": "^8.18.3"
   }
 }
-

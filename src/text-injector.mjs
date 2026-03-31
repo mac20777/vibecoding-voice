@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 
+import { projectRoot } from "./paths.mjs";
+
 function runPowerShellFile(filePath, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -42,7 +44,7 @@ export async function injectText(text, mode, options = {}) {
     throw new Error(`text injection is only implemented for Windows in this MVP, got ${process.platform}`);
   }
 
-  const scriptPath = path.join(process.cwd(), "scripts", "inject-text.ps1");
+  const scriptPath = path.join(projectRoot, "scripts", "inject-text.ps1");
   const textBase64 = Buffer.from(trimmed, "utf8").toString("base64");
 
   await runPowerShellFile(scriptPath, ["-TextBase64", textBase64, "-Mode", mode]);

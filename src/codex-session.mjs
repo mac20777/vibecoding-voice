@@ -57,6 +57,11 @@ export class CodexSessionManager {
       windowsHide: true
     });
 
+    const timeoutMs = (Number(this.config.cliTimeoutSec) || 300) * 1000;
+    const timeoutTimer = setTimeout(() => {
+      child.kill("SIGTERM");
+    }, timeoutMs);
+
     const stdout = readline.createInterface({ input: child.stdout });
     let stderrText = "";
     let lastAssistantText = "";
@@ -115,6 +120,7 @@ export class CodexSessionManager {
 
     return await new Promise((resolve, reject) => {
       child.on("error", (error) => {
+        clearTimeout(timeoutTimer);
         this.running = false;
         handlers.onState?.({
           phase: "error",
@@ -125,6 +131,7 @@ export class CodexSessionManager {
       });
 
       child.on("exit", (code) => {
+        clearTimeout(timeoutTimer);
         this.running = false;
         if (code === 0) {
           handlers.onState?.({
