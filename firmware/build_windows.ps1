@@ -25,6 +25,10 @@ function Get-LatestChildDirectory {
 
 $projectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+# Clear MSYSTEM so idf.py doesn't mistake this for a MinGW/MSys environment
+# (Git Bash sets MSYSTEM=MINGW64 which gets inherited by child processes)
+Remove-Item Env:MSYSTEM -ErrorAction SilentlyContinue
+
 if (-not (Test-Path -LiteralPath $EspressifRoot)) {
     throw "ESP-IDF 根目录不存在: $EspressifRoot"
 }
