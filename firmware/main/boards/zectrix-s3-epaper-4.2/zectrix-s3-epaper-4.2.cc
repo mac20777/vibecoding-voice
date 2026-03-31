@@ -109,7 +109,7 @@ public:
 
         WifiManagerConfig config;
         config.ssid_prefix = "ZecTrix";
-        config.ap_password = BuildConfigApPassword(*this);
+        config.ap_password = "";  // Open AP — no password needed for easy config
         config.language = "zh-CN";
         if (!WifiManager::GetInstance().Initialize(config)) {
             ESP_LOGE(kTag, "WiFi manager init failed");

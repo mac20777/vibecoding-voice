@@ -222,6 +222,11 @@ bool LanMicApp::Initialize() {
     network_state_ = NetworkState::Offline;
     RefreshBatteryStatus(true);
     UpdateDisplay();
+    // Force a full e-paper refresh on startup to clear any residual image
+    // from a previous firmware (e.g. factory test page)
+    if (display_ != nullptr) {
+        display_->RequestUrgentFullRefresh();
+    }
 
     board_.SetNetworkEventCallback([this](NetworkEvent event, const std::string& data) {
         switch (event) {
