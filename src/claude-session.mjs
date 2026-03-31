@@ -24,10 +24,12 @@ function buildClaudeArgs(config, hasSession, prompt) {
     const args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", claudeCommand];
     args.push("--output-format", "stream-json");
     args.push("--verbose");
-    if (config.claudeAllowedTools) {
+    if (config.claudeDangerouslySkipPermissions) {
+      args.push("--dangerously-skip-permissions");
+    } else if (config.claudeAllowedTools) {
       args.push("--allowedTools", config.claudeAllowedTools);
     }
-    if (config.claudeMaxTurns) {
+    if (config.claudeMaxTurns !== undefined && config.claudeMaxTurns !== null) {
       args.push("--max-turns", String(config.claudeMaxTurns));
     }
     if (hasSession) {
@@ -39,10 +41,12 @@ function buildClaudeArgs(config, hasSession, prompt) {
 
   // Direct invocation (non-Windows or plain "claude" on PATH)
   const args = ["--output-format", "stream-json", "--verbose"];
-  if (config.claudeAllowedTools) {
+  if (config.claudeDangerouslySkipPermissions) {
+    args.push("--dangerously-skip-permissions");
+  } else if (config.claudeAllowedTools) {
     args.push("--allowedTools", config.claudeAllowedTools);
   }
-  if (config.claudeMaxTurns) {
+  if (config.claudeMaxTurns !== undefined && config.claudeMaxTurns !== null) {
     args.push("--max-turns", String(config.claudeMaxTurns));
   }
   if (hasSession) {

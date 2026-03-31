@@ -1151,15 +1151,19 @@ void LanMicApp::UpdateDisplay() {
             battery_text += "+";
         }
     }
-    std::string quota_text = "5H -- W --";
+
+    std::string quota_status_text;
     if (quota_5h_remaining_pct_ >= 0 || quota_week_remaining_pct_ >= 0) {
-        const std::string quota_5h = quota_5h_remaining_pct_ >= 0 ? std::to_string(std::clamp(quota_5h_remaining_pct_, 0, 100)) : "--";
-        const std::string quota_week = quota_week_remaining_pct_ >= 0 ? std::to_string(std::clamp(quota_week_remaining_pct_, 0, 100)) : "--";
-        quota_text = "5H " + quota_5h + " W " + quota_week;
+        const std::string q5 = quota_5h_remaining_pct_ >= 0 ? std::to_string(std::clamp(quota_5h_remaining_pct_, 0, 100)) : "--";
+        const std::string qw = quota_week_remaining_pct_ >= 0 ? std::to_string(std::clamp(quota_week_remaining_pct_, 0, 100)) : "--";
+        quota_status_text = "5H:" + q5 + " 7d:" + qw;
     }
 
     texts.push_back({GetNetworkLabel(), 28, 9, 16});
     texts.push_back({GetPhaseLabel(), 166, 9, 16});
+    if (!quota_status_text.empty()) {
+        texts.push_back({quota_status_text, 210, 9, 16});
+    }
     texts.push_back({battery_text, 330, 9, 16});
     const char* page_label = active_page_ == Page::Summary ? "Summary"
                            : active_page_ == Page::Log     ? "Log"
@@ -1253,7 +1257,6 @@ void LanMicApp::UpdateDisplay() {
     }
 
     texts.push_back({GetFooterText(), 12, kFooterTextY, 16});
-    texts.push_back({quota_text, 250, kFooterTextY, 16});
 
     display_->DrawTexts(texts, true);
     DrawHorizontalLine(kStatusBarBottomY);

@@ -135,7 +135,8 @@ export function loadConfig() {
       ? path.resolve(projectRoot, String(process.env.CLAUDE_CWD || "").trim())
       : resolveCodexCwd(),
     claudeAllowedTools: process.env.CLAUDE_ALLOWED_TOOLS || "Read,Edit,Write,Bash,Glob,Grep",
-    claudeMaxTurns: Number(process.env.CLAUDE_MAX_TURNS || "10"),
+    claudeMaxTurns: process.env.CLAUDE_MAX_TURNS !== undefined ? Number(process.env.CLAUDE_MAX_TURNS) : 30,
+    claudeDangerouslySkipPermissions: process.env.CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS === "1",
     cliTimeoutSec: Number(process.env.CLI_TIMEOUT_SEC || "300"),
     sttProvider: process.env.STT_PROVIDER || "",
     openaiApiKey: process.env.OPENAI_API_KEY || "",

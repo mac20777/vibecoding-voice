@@ -5,6 +5,7 @@ import { WebSocketServer, WebSocket } from "ws";
 
 import { createCliView, formatCodexEvent, pushLogLine, summarizeAssistantText } from "./cli-projector.mjs";
 import { readLatestRateLimits } from "./codex-rate-limits.mjs";
+import { readLatestClaudeRateLimits } from "./claude-rate-limits.mjs";
 import { loadConfig } from "./config.mjs";
 import { runDoctor } from "./doctor.mjs";
 import { startDiscoveryServer } from "./discovery-server.mjs";
@@ -172,7 +173,10 @@ function applyRateLimitSnapshot(snapshot) {
 }
 
 function refreshRateLimits(threadId = "") {
-  const snapshot = readLatestRateLimits(threadId || cliView.threadId);
+  const snapshot =
+    config.sendTarget === "claude_code"
+      ? readLatestClaudeRateLimits()
+      : readLatestRateLimits(threadId || cliView.threadId);
   if (!snapshot) {
     return;
   }
@@ -328,6 +332,8 @@ async function runClaudePrompt(prompt) {
       appendCliLog(line);
     }
   });
+
+  refreshRateLimits();
 }
 
 function launchClaudePrompt(prompt) {
