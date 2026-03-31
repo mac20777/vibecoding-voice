@@ -1,6 +1,7 @@
 node_modules/
 tmp/
 *.log
+.claude/
 .env
 .env.local
 .env.*.local
