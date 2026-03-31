@@ -1,0 +1,1214 @@
+#include "lan_mic_app.h"
+
+#include <cJSON.h>
+#include <driver/gpio.h>
+#include <esp_log.h>
+#include <esp_random.h>
+#include <esp_timer.h>
+#include <lwip/inet.h>
+#include <lwip/sockets.h>
+#include <mbedtls/md.h>
+
+#include <algorithm>
+#include <cerrno>
+#include <cstring>
+#include <cstdio>
+#include <string>
+#include <vector>
+
+#include "board.h"
+#include "boards/zectrix-s3-epaper-4.2/config.h"
+#include "display.h"
+#include "network_interface.h"
+#include "ssid_manager.h"
+#include "wifi_manager.h"
+#include "web_socket.h"
+
+namespace {
+
+#ifndef CONFIG_LAN_MIC_SERVER_URI
+#define CONFIG_LAN_MIC_SERVER_URI "ws://192.168.1.100:8765"
+#endif
+#ifndef CONFIG_LAN_DISCOVERY_ENABLED
+#define CONFIG_LAN_DISCOVERY_ENABLED 1
+#endif
+#ifndef CONFIG_LAN_DISCOVERY_PORT
+#define CONFIG_LAN_DISCOVERY_PORT 8766
+#endif
+#ifndef CONFIG_LAN_DISCOVERY_HOST_ID
+#define CONFIG_LAN_DISCOVERY_HOST_ID ""
+#endif
+#ifndef CONFIG_LAN_SHARED_SECRET
+#define CONFIG_LAN_SHARED_SECRET ""
+#endif
+
+constexpr char kTag[] = "LanMicApp";
+constexpr char kDiscoveryService[] = "vibecoding-voice";
+constexpr EventBits_t kWifiConnectedBit = BIT0;
+constexpr int kFrameDurationMs = 20;
+constexpr int kSampleRate = 16000;
+constexpr int kFrameSamples = kSampleRate * kFrameDurationMs / 1000;
+constexpr int64_t kReconnectIntervalMs = 2000;
+constexpr int64_t kPingIntervalMs = 10000;
+constexpr size_t kBodyCharsPerLine = 22;
+constexpr size_t kPromptVisibleLines = 3;
+constexpr size_t kReplyVisibleLines = 4;
+constexpr size_t kLogVisibleLines = 8;
+constexpr int kStatusBarBottomY = 31;
+constexpr int kHeaderLineY = 62;
+constexpr int kPromptDividerY = 156;
+constexpr int kFooterTopY = 264;
+constexpr int kContentHeaderY = 44;
+constexpr int kPromptTitleY = 74;
+constexpr int kPromptBodyY = 96;
+constexpr int kReplyTitleY = 168;
+constexpr int kReplyBodyY = 190;
+constexpr int kLogTitleY = 74;
+constexpr int kLogBodyY = 96;
+constexpr int kFooterTextY = 276;
+constexpr int kLineHeight = 18;
+constexpr int kBatteryPollIntervalMs = 15000;
+constexpr int kDiscoveryTimeoutMs = 1200;
+
+constexpr uint8_t kWifiIcon12x12[] = {
+    0x00, 0x00,
+    0x03, 0xC0,
+    0x0C, 0x30,
+    0x10, 0x08,
+    0x03, 0xC0,
+    0x04, 0x20,
+    0x08, 0x10,
+    0x01, 0x80,
+    0x02, 0x40,
+    0x00, 0x00,
+    0x00, 0x00,
+    0x00, 0x00,
+};
+
+constexpr uint8_t kBatteryIcon14x8[] = {
+    0xFF, 0xFC,
+    0x80, 0x04,
+    0x80, 0x04,
+    0x80, 0x04,
+    0x80, 0x04,
+    0x80, 0x04,
+    0x80, 0x04,
+    0xFF, 0xFC,
+};
+
+std::vector<std::string> WrapUtf8Lines(const std::string& text, size_t max_chars, size_t max_lines = 0) {
+    std::vector<std::string> lines;
+    std::string current;
+    size_t current_chars = 0;
+    const bool unlimited = max_lines == 0;
+
+    auto push_line = [&]() {
+        lines.push_back(current);
+        current.clear();
+        current_chars = 0;
+    };
+
+    for (size_t i = 0; i < text.size();) {
+        const unsigned char ch = static_cast<unsigned char>(text[i]);
+        size_t char_len = 1;
+        if ((ch & 0x80) == 0x00) {
+            char_len = 1;
+        } else if ((ch & 0xE0) == 0xC0) {
+            char_len = 2;
+        } else if ((ch & 0xF0) == 0xE0) {
+            char_len = 3;
+        } else if ((ch & 0xF8) == 0xF0) {
+            char_len = 4;
+        }
+
+        if (i + char_len > text.size()) {
+            char_len = 1;
+        }
+
+        // Newline: flush current line without a string copy per codepoint
+        if (char_len == 1 && text[i] == '\n') {
+            push_line();
+            i += 1;
+            if (!unlimited && lines.size() >= max_lines) {
+                return lines;
+            }
+            continue;
+        }
+
+        // Append codepoint bytes directly — avoids substr() allocation per character
+        current.append(text, i, char_len);
+        i += char_len;
+        current_chars++;
+        if (current_chars >= max_chars) {
+            push_line();
+            if (!unlimited && lines.size() >= max_lines) {
+                return lines;
+            }
+        }
+    }
+
+    if (!current.empty() && (unlimited || lines.size() < max_lines)) {
+        lines.push_back(current);
+    }
+    return lines;
+}
+
+const char* GetJsonString(cJSON* root, const char* key) {
+    cJSON* item = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsString(item) || item->valuestring == nullptr) {
+        return nullptr;
+    }
+    return item->valuestring;
+}
+
+bool GetJsonBool(cJSON* root, const char* key, bool fallback) {
+    cJSON* item = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (cJSON_IsBool(item)) {
+        return cJSON_IsTrue(item);
+    }
+    return fallback;
+}
+
+} // namespace
+
+LanMicApp::LanMicApp()
+    : board_(Board::GetInstance()),
+      up_button_(TODO_UP_BUTTON_GPIO, false, 800),
+      down_button_(TODO_DOWN_BUTTON_GPIO, false, 800) {
+    wifi_event_group_ = xEventGroupCreate();
+}
+
+LanMicApp::~LanMicApp() {
+    DisconnectWebSocket();
+    if (wifi_event_group_ != nullptr) {
+        vEventGroupDelete(wifi_event_group_);
+    }
+}
+
+bool LanMicApp::Initialize() {
+    codec_ = board_.GetAudioCodec();
+    display_ = board_.GetDisplay();
+    if (codec_ == nullptr) {
+        ESP_LOGE(kTag, "Audio codec is null");
+        return false;
+    }
+
+    ConfigureButtons();
+
+    codec_->Start();
+    codec_->EnableOutput(false);
+
+    status_text_ = "Starting Wi-Fi";
+    cli_status_text_ = "CLI idle";
+    cli_phase_text_ = "idle";
+    transcript_text_.clear();
+    latest_assistant_text_.clear();
+    repo_name_ = "AI";
+    send_target_.clear();
+    server_uri_ = CONFIG_LAN_MIC_SERVER_URI;
+    audio_frame_buffer_.resize(kFrameSamples);
+    cli_log_lines_.clear();
+    hint_text_ = "Hold BOOT to talk\nHold UP+DOWN for Wi-Fi";
+    phase_ = Phase::Idle;
+    network_state_ = NetworkState::Offline;
+    RefreshBatteryStatus(true);
+    UpdateDisplay();
+
+    board_.SetNetworkEventCallback([this](NetworkEvent event, const std::string& data) {
+        switch (event) {
+            case NetworkEvent::Connecting:
+                ESP_LOGI(kTag, "WiFi connecting: %s", data.c_str());
+                network_state_ = NetworkState::Offline;
+                status_text_ = "Wi-Fi connecting";
+                hint_text_ = data.empty() ? "" : data;
+                UpdateDisplay();
+                break;
+            case NetworkEvent::Connected:
+                ESP_LOGI(kTag, "WiFi connected: %s", data.c_str());
+                xEventGroupSetBits(wifi_event_group_, kWifiConnectedBit);
+                network_state_ = NetworkState::Wifi;
+                status_text_ = "Wi-Fi connected";
+                hint_text_ = "Connecting server...";
+                UpdateDisplay();
+                break;
+            case NetworkEvent::Disconnected:
+                ESP_LOGW(kTag, "WiFi disconnected");
+                xEventGroupClearBits(wifi_event_group_, kWifiConnectedBit);
+                network_state_ = NetworkState::Offline;
+                status_text_ = "Wi-Fi disconnected";
+                hint_text_ = "Check Wi-Fi\nHold UP+DOWN for setup";
+                DisconnectWebSocket();
+                UpdateDisplay();
+                break;
+            case NetworkEvent::WifiConfigModeEnter:
+                ESP_LOGW(kTag, "WiFi config mode: %s", data.c_str());
+                network_state_ = NetworkState::Config;
+                status_text_ = "Wi-Fi setup mode";
+                hint_text_ = data;
+                active_page_ = Page::Summary;
+                summary_scroll_offset_ = 0;
+                UpdateDisplay();
+                break;
+            case NetworkEvent::WifiConfigModeExit:
+                network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
+                status_text_ = "Leaving setup mode";
+                hint_text_ = "Hold BOOT to talk\nHold UP+DOWN for Wi-Fi";
+                UpdateDisplay();
+                break;
+            default:
+                break;
+        }
+    });
+
+    board_.StartNetwork();
+    return true;
+}
+
+void LanMicApp::ConfigureButtons() {
+    gpio_config_t cfg = {};
+    cfg.pin_bit_mask = 1ULL << BOOT_BUTTON_GPIO;
+    cfg.mode = GPIO_MODE_INPUT;
+    cfg.pull_up_en = GPIO_PULLUP_ENABLE;
+    cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    cfg.intr_type = GPIO_INTR_DISABLE;
+    ESP_ERROR_CHECK(gpio_config(&cfg));
+
+    up_button_.OnClick([this]() {
+        up_clicked_.store(true);
+    });
+    down_button_.OnClick([this]() {
+        down_clicked_.store(true);
+    });
+    up_button_.OnLongPress([this]() {
+        up_long_pressed_.store(true);
+    });
+    down_button_.OnLongPress([this]() {
+        down_long_pressed_.store(true);
+    });
+}
+
+bool LanMicApp::IsWifiConnected() const {
+    return (xEventGroupGetBits(wifi_event_group_) & kWifiConnectedBit) != 0;
+}
+
+bool LanMicApp::EnsureWebSocketConnected() {
+    if (ws_ != nullptr && ws_->IsConnected()) {
+        return true;
+    }
+
+    DiscoverServerUri();
+
+    NetworkInterface* network = board_.GetNetwork();
+    if (network == nullptr) {
+        ESP_LOGE(kTag, "Network interface is null");
+        return false;
+    }
+
+    ws_ = network->CreateWebSocket(0);
+    ws_->OnConnected([this]() {
+        ESP_LOGI(kTag, "WebSocket connected");
+        network_state_ = NetworkState::Server;
+        status_text_ = "Server connected";
+        hint_text_ = "Hold BOOT to talk";
+        UpdateDisplay();
+    });
+    ws_->OnDisconnected([this]() {
+        ESP_LOGW(kTag, "WebSocket disconnected");
+        hello_sent_ = false;
+        network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
+        status_text_ = "Server disconnected";
+        hint_text_ = "Retrying...";
+        UpdateDisplay();
+    });
+    ws_->OnError([this](int error) {
+        ESP_LOGW(kTag, "WebSocket error=%d", error);
+        network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
+        status_text_ = "Server error";
+        hint_text_ = "Retrying...";
+        phase_ = Phase::Error;
+        UpdateDisplay();
+    });
+    ws_->OnData([this](const char* data, size_t len, bool binary) {
+        if (!binary && data != nullptr && len > 0) {
+            HandleServerMessage(data, len);
+        }
+    });
+
+    const char* target_uri = server_uri_.empty() ? CONFIG_LAN_MIC_SERVER_URI : server_uri_.c_str();
+    if (!ws_->Connect(target_uri)) {
+        ESP_LOGW(kTag, "WebSocket connect failed: %s", target_uri);
+        ws_.reset();
+        hello_sent_ = false;
+        status_text_ = "Connect failed";
+        hint_text_ = target_uri;
+        UpdateDisplay();
+        return false;
+    }
+
+    hello_sent_ = false;
+    return SendHello();
+}
+
+bool LanMicApp::DiscoverServerUri() {
+#if !CONFIG_LAN_DISCOVERY_ENABLED
+    return false;
+#else
+    if (!IsWifiConnected()) {
+        return false;
+    }
+
+    // Skip re-discovery if we already have a URI from a previous successful discovery
+    if (!server_uri_.empty() && server_uri_ != CONFIG_LAN_MIC_SERVER_URI) {
+        return true;
+    }
+
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (sock < 0) {
+        ESP_LOGW(kTag, "Discovery socket create failed: errno=%d", errno);
+        return false;
+    }
+
+    int broadcast = 1;
+    setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast));
+    struct timeval timeout = {};
+    timeout.tv_sec = kDiscoveryTimeoutMs / 1000;
+    timeout.tv_usec = (kDiscoveryTimeoutMs % 1000) * 1000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+    cJSON* request = cJSON_CreateObject();
+    const std::string nonce = MakeAuthNonce();
+    cJSON_AddStringToObject(request, "type", "discover_host");
+    cJSON_AddStringToObject(request, "service", kDiscoveryService);
+    cJSON_AddStringToObject(request, "deviceId", board_.GetUuid().c_str());
+    cJSON_AddStringToObject(request, "boardType", board_.GetBoardType().c_str());
+    cJSON_AddStringToObject(request, "nonce", nonce.c_str());
+    if (std::strlen(CONFIG_LAN_DISCOVERY_HOST_ID) > 0) {
+        cJSON_AddStringToObject(request, "expectedHostId", CONFIG_LAN_DISCOVERY_HOST_ID);
+    }
+
+    char* request_text = cJSON_PrintUnformatted(request);
+    cJSON_Delete(request);
+    if (request_text == nullptr) {
+        close(sock);
+        return false;
+    }
+
+    struct sockaddr_in broadcast_addr = {};
+    broadcast_addr.sin_family = AF_INET;
+    broadcast_addr.sin_port = htons(CONFIG_LAN_DISCOVERY_PORT);
+    broadcast_addr.sin_addr.s_addr = inet_addr("255.255.255.255");
+
+    const int sent = sendto(sock,
+                            request_text,
+                            std::strlen(request_text),
+                            0,
+                            reinterpret_cast<struct sockaddr*>(&broadcast_addr),
+                            sizeof(broadcast_addr));
+    cJSON_free(request_text);
+    if (sent < 0) {
+        ESP_LOGW(kTag, "Discovery broadcast failed: errno=%d", errno);
+        close(sock);
+        return false;
+    }
+
+    char response_buffer[512];
+    struct sockaddr_in source_addr = {};
+    socklen_t source_addr_len = sizeof(source_addr);
+    const int received = recvfrom(sock,
+                                  response_buffer,
+                                  sizeof(response_buffer) - 1,
+                                  0,
+                                  reinterpret_cast<struct sockaddr*>(&source_addr),
+                                  &source_addr_len);
+    close(sock);
+    if (received <= 0) {
+        return false;
+    }
+
+    response_buffer[received] = '\0';
+    cJSON* response = cJSON_Parse(response_buffer);
+    if (response == nullptr) {
+        return false;
+    }
+
+    const char* type = GetJsonString(response, "type");
+    const char* service = GetJsonString(response, "service");
+    const char* ws_url = GetJsonString(response, "wsUrl");
+    const char* host_id = GetJsonString(response, "hostId");
+    const char* host_name = GetJsonString(response, "hostName");
+    const char* reply_nonce = GetJsonString(response, "nonce");
+    const char* auth_sig = GetJsonString(response, "authSig");
+
+    const bool type_ok = type != nullptr && strcmp(type, "discover_reply") == 0;
+    const bool service_ok = service == nullptr || strcmp(service, kDiscoveryService) == 0;
+    const bool host_ok =
+        std::strlen(CONFIG_LAN_DISCOVERY_HOST_ID) == 0 ||
+        (host_id != nullptr && strcmp(host_id, CONFIG_LAN_DISCOVERY_HOST_ID) == 0);
+    bool auth_ok = true;
+    if (std::strlen(CONFIG_LAN_SHARED_SECRET) > 0) {
+        if (reply_nonce == nullptr || auth_sig == nullptr || nonce != reply_nonce) {
+            auth_ok = false;
+        } else {
+            const auto expected = HmacSha256Hex({
+                "discover_reply",
+                host_id != nullptr ? host_id : "",
+                host_name != nullptr ? host_name : "",
+                ws_url != nullptr ? ws_url : "",
+                reply_nonce
+            });
+            auth_ok = !expected.empty() && expected == std::string(auth_sig);
+        }
+    }
+
+    if (type_ok && service_ok && host_ok && auth_ok && ws_url != nullptr && ws_url[0] != '\0') {
+        server_uri_ = ws_url;
+        status_text_ = "Host discovered";
+        hint_text_ = (host_name != nullptr && host_name[0] != '\0') ? host_name : server_uri_;
+        ESP_LOGI(kTag, "Discovered host: %s (%s)", server_uri_.c_str(), hint_text_.c_str());
+        cJSON_Delete(response);
+        return true;
+    }
+
+    cJSON_Delete(response);
+    return false;
+#endif
+}
+
+std::string LanMicApp::MakeAuthNonce() const {
+    uint8_t bytes[8] = {0};
+    esp_fill_random(bytes, sizeof(bytes));
+    char buffer[sizeof(bytes) * 2 + 1];
+    for (size_t index = 0; index < sizeof(bytes); ++index) {
+        snprintf(buffer + (index * 2), sizeof(buffer) - (index * 2), "%02x", bytes[index]);
+    }
+    buffer[sizeof(buffer) - 1] = '\0';
+    return std::string(buffer);
+}
+
+std::string LanMicApp::HmacSha256Hex(const std::vector<std::string>& parts) const {
+    if (std::strlen(CONFIG_LAN_SHARED_SECRET) == 0) {
+        return "";
+    }
+
+    std::string payload;
+    for (size_t index = 0; index < parts.size(); ++index) {
+        if (index > 0) {
+            payload.push_back('|');
+        }
+        payload += parts[index];
+    }
+
+    const mbedtls_md_info_t* md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    if (md_info == nullptr) {
+        return "";
+    }
+
+    unsigned char digest[32] = {0};
+    const int ret = mbedtls_md_hmac(
+        md_info,
+        reinterpret_cast<const unsigned char*>(CONFIG_LAN_SHARED_SECRET),
+        std::strlen(CONFIG_LAN_SHARED_SECRET),
+        reinterpret_cast<const unsigned char*>(payload.data()),
+        payload.size(),
+        digest);
+    if (ret != 0) {
+        ESP_LOGW(kTag, "HMAC failed: %d", ret);
+        return "";
+    }
+
+    char hex[65];
+    for (size_t index = 0; index < sizeof(digest); ++index) {
+        snprintf(hex + (index * 2), sizeof(hex) - (index * 2), "%02x", digest[index]);
+    }
+    hex[64] = '\0';
+    return std::string(hex);
+}
+
+void LanMicApp::EnterWifiSetupMode() {
+    ESP_LOGW(kTag, "Clearing saved Wi-Fi and entering config mode");
+    DisconnectWebSocket();
+    xEventGroupClearBits(wifi_event_group_, kWifiConnectedBit);
+    up_long_pressed_.store(false);
+    down_long_pressed_.store(false);
+    has_pending_transcript_ = false;
+    phase_ = Phase::Idle;
+    network_state_ = NetworkState::Config;
+    active_page_ = Page::Summary;
+    summary_scroll_offset_ = 0;
+    status_text_ = "Wi-Fi setup";
+    hint_text_ = "Starting config AP...";
+    UpdateDisplay();
+
+    SsidManager::GetInstance().Clear();
+    WifiManager::GetInstance().StartConfigAp();
+}
+
+void LanMicApp::DisconnectWebSocket() {
+    if (ws_ != nullptr) {
+        ws_->Close();
+        ws_.reset();
+    }
+    hello_sent_ = false;
+}
+
+bool LanMicApp::IsPttPressed() const {
+    return gpio_get_level(BOOT_BUTTON_GPIO) == 0;
+}
+
+bool LanMicApp::IsNavButtonPressed(gpio_num_t gpio_num) const {
+    return gpio_get_level(gpio_num) == 0;
+}
+
+bool LanMicApp::SendJson(const char* json) {
+    if (ws_ == nullptr || !ws_->IsConnected()) {
+        return false;
+    }
+    if (!ws_->Send(json)) {
+        ESP_LOGW(kTag, "Failed to send json: %s", json);
+        DisconnectWebSocket();
+        return false;
+    }
+    return true;
+}
+
+bool LanMicApp::SendHello() {
+    if (hello_sent_) {
+        return true;
+    }
+
+    const int64_t auth_ts = esp_timer_get_time() / 1000;
+    const std::string auth_nonce = MakeAuthNonce();
+    const std::string auth_sig = HmacSha256Hex({
+        "hello",
+        board_.GetUuid(),
+        board_.GetBoardType(),
+        std::to_string(auth_ts),
+        auth_nonce
+    });
+
+    char message[512];
+    if (!auth_sig.empty()) {
+        snprintf(message,
+                 sizeof(message),
+                 "{\"type\":\"hello\",\"deviceId\":\"%s\",\"boardType\":\"%s\",\"authTs\":%lld,\"authNonce\":\"%s\",\"authSig\":\"%s\"}",
+                 board_.GetUuid().c_str(),
+                 board_.GetBoardType().c_str(),
+                 static_cast<long long>(auth_ts),
+                 auth_nonce.c_str(),
+                 auth_sig.c_str());
+    } else {
+        snprintf(message,
+                 sizeof(message),
+                 "{\"type\":\"hello\",\"deviceId\":\"%s\",\"boardType\":\"%s\"}",
+                 board_.GetUuid().c_str(),
+                 board_.GetBoardType().c_str());
+    }
+    hello_sent_ = SendJson(message);
+    return hello_sent_;
+}
+
+bool LanMicApp::SendPttStart() {
+    char message[128];
+    snprintf(message,
+             sizeof(message),
+             "{\"type\":\"ptt_start\",\"ts\":%lld}",
+             static_cast<long long>(esp_timer_get_time() / 1000));
+    return SendJson(message);
+}
+
+bool LanMicApp::SendPttStop() {
+    char message[128];
+    snprintf(message,
+             sizeof(message),
+             "{\"type\":\"ptt_stop\",\"ts\":%lld}",
+             static_cast<long long>(esp_timer_get_time() / 1000));
+    return SendJson(message);
+}
+
+bool LanMicApp::SendAction(const char* action_type) {
+    char message[128];
+    snprintf(message,
+             sizeof(message),
+             "{\"type\":\"%s\",\"ts\":%lld}",
+             action_type,
+             static_cast<long long>(esp_timer_get_time() / 1000));
+    return SendJson(message);
+}
+
+bool LanMicApp::StreamAudioFrame() {
+    if (ws_ == nullptr || !ws_->IsConnected()) {
+        return false;
+    }
+
+    if (!codec_->InputData(audio_frame_buffer_)) {
+        return false;
+    }
+
+    if (!ws_->Send(audio_frame_buffer_.data(), audio_frame_buffer_.size() * sizeof(int16_t), true)) {
+        ESP_LOGW(kTag, "Failed to send audio frame");
+        DisconnectWebSocket();
+        return false;
+    }
+
+    return true;
+}
+
+void LanMicApp::HandleServerMessage(const char* data, size_t len) {
+    std::string text(data, len);
+    ESP_LOGI(kTag, "Server: %s", text.c_str());
+
+    cJSON* root = cJSON_ParseWithLength(data, len);
+    if (root == nullptr) {
+        ESP_LOGW(kTag, "Failed to parse server json");
+        return;
+    }
+
+    const char* type = GetJsonString(root, "type");
+    if (type == nullptr) {
+        cJSON_Delete(root);
+        return;
+    }
+
+    if (strcmp(type, "hello_ack") == 0) {
+        status_text_ = "Ready";
+        if (!has_pending_transcript_) {
+            phase_ = Phase::Idle;
+        }
+    } else if (strcmp(type, "server_ready") == 0) {
+        status_text_ = "Ready";
+        if (!has_pending_transcript_) {
+            phase_ = Phase::Idle;
+        }
+        const char* send_target = GetJsonString(root, "sendTarget");
+        if (send_target != nullptr) {
+            send_target_ = send_target;
+            cli_status_text_ = std::string(GetToolLabel()) + " idle";
+            if (repo_name_ == "AI") {
+                repo_name_ = GetToolLabel();
+            }
+        }
+    } else if (strcmp(type, "status") == 0) {
+        const char* status = GetJsonString(root, "status");
+        const char* text_value = GetJsonString(root, "text");
+        if (status != nullptr) {
+            if (strcmp(status, "recording") == 0) {
+                phase_ = Phase::Recording;
+                status_text_ = "Recording";
+            } else if (strcmp(status, "transcribing") == 0) {
+                phase_ = Phase::Transcribing;
+                status_text_ = "Transcribing";
+            } else if (strcmp(status, "awaiting_action") == 0) {
+                phase_ = Phase::AwaitingAction;
+                status_text_ = "Ready to send";
+                has_pending_transcript_ = true;
+                active_page_ = Page::Summary;
+                summary_scroll_offset_ = 0;
+            } else if (strcmp(status, "typed") == 0) {
+                phase_ = Phase::Running;
+                status_text_ = "Sent";
+                has_pending_transcript_ = false;
+                active_page_ = Page::Summary;
+            } else if (strcmp(status, "undo_ok") == 0) {
+                phase_ = Phase::Idle;
+                status_text_ = "Canceled";
+                has_pending_transcript_ = false;
+            } else if (strcmp(status, "transcript_empty") == 0 || strcmp(status, "empty_segment") == 0) {
+                phase_ = Phase::Idle;
+                status_text_ = "No speech detected";
+                hint_text_ = "Try again";
+                has_pending_transcript_ = false;
+                transcript_text_.clear();
+            } else if (strcmp(status, "no_pending") == 0) {
+                phase_ = Phase::Idle;
+                status_text_ = "Nothing pending";
+            } else if (strcmp(status, "cli_busy") == 0) {
+                phase_ = Phase::Running;
+                status_text_ = std::string(GetToolLabel()) + " busy";
+            } else {
+                status_text_ = status;
+            }
+        }
+        if (text_value != nullptr) {
+            transcript_text_ = text_value;
+        }
+    } else if (strcmp(type, "transcript_final") == 0) {
+        const char* text_value = GetJsonString(root, "text");
+        if (text_value != nullptr) {
+            transcript_text_ = text_value;
+        }
+        has_pending_transcript_ = GetJsonBool(root, "requiresAction", false);
+        phase_ = has_pending_transcript_ ? Phase::AwaitingAction : Phase::Idle;
+        status_text_ = has_pending_transcript_ ? "Ready to send" : "Transcript ready";
+        active_page_ = Page::Summary;
+        summary_scroll_offset_ = 0;
+    } else if (strcmp(type, "transcript_cleared") == 0) {
+        transcript_text_.clear();
+        has_pending_transcript_ = false;
+        phase_ = Phase::Idle;
+        status_text_ = "Cleared";
+    } else if (strcmp(type, "cli_session_state") == 0) {
+        const char* phase = GetJsonString(root, "phase");
+        const char* status_line = GetJsonString(root, "statusLine");
+        const char* repo_name = GetJsonString(root, "repoName");
+        cJSON* quota_5h = cJSON_GetObjectItemCaseSensitive(root, "quota5hRemainingPct");
+        cJSON* quota_week = cJSON_GetObjectItemCaseSensitive(root, "quotaWeekRemainingPct");
+        if (phase != nullptr) {
+            cli_phase_text_ = phase;
+            if (strcmp(phase, "running") == 0) {
+                phase_ = Phase::Running;
+            } else if (strcmp(phase, "error") == 0) {
+                phase_ = Phase::Error;
+            } else if (!has_pending_transcript_) {
+                phase_ = Phase::Idle;
+            }
+        }
+        if (status_line != nullptr) {
+            cli_status_text_ = status_line;
+        } else if (phase != nullptr) {
+            cli_status_text_ = phase;
+        }
+        if (repo_name != nullptr) {
+            repo_name_ = repo_name;
+        }
+        if (cJSON_IsNumber(quota_5h)) {
+            quota_5h_remaining_pct_ = quota_5h->valueint;
+        }
+        if (cJSON_IsNumber(quota_week)) {
+            quota_week_remaining_pct_ = quota_week->valueint;
+        }
+    } else if (strcmp(type, "cli_summary") == 0) {
+        const char* latest_user = GetJsonString(root, "latestUserText");
+        const char* latest_assistant = GetJsonString(root, "latestAssistantText");
+        const char* status_line = GetJsonString(root, "statusLine");
+        const char* repo_name = GetJsonString(root, "repoName");
+        if (latest_user != nullptr) {
+            transcript_text_ = latest_user;
+        }
+        if (latest_assistant != nullptr) {
+            latest_assistant_text_ = latest_assistant;
+            summary_scroll_offset_ = 0;
+        }
+        if (status_line != nullptr) {
+            cli_status_text_ = status_line;
+        }
+        if (repo_name != nullptr) {
+            repo_name_ = repo_name;
+        }
+        active_page_ = Page::Summary;
+    } else if (strcmp(type, "cli_log_tail") == 0) {
+        cJSON* lines = cJSON_GetObjectItemCaseSensitive(root, "lines");
+        if (cJSON_IsArray(lines)) {
+            cli_log_lines_.clear();
+            cJSON* line = nullptr;
+            cJSON_ArrayForEach(line, lines) {
+                if (cJSON_IsString(line) && line->valuestring != nullptr) {
+                    cli_log_lines_.push_back(line->valuestring);
+                }
+            }
+            std::vector<std::string> wrapped;
+            for (const auto& item : cli_log_lines_) {
+                const auto item_lines = WrapText(item, kBodyCharsPerLine);
+                wrapped.insert(wrapped.end(), item_lines.begin(), item_lines.end());
+            }
+            log_scroll_offset_ = std::max(0, static_cast<int>(wrapped.size()) - static_cast<int>(kLogVisibleLines));
+        }
+    } else if (strcmp(type, "error") == 0) {
+        const char* error = GetJsonString(root, "error");
+        phase_ = Phase::Error;
+        status_text_ = "Error";
+        hint_text_ = (error != nullptr) ? error : "Unknown error";
+    } else if (strcmp(type, "warning") == 0) {
+        const char* warning = GetJsonString(root, "warning");
+        status_text_ = "Warning";
+        hint_text_ = (warning != nullptr) ? warning : "";
+    }
+
+    cJSON_Delete(root);
+    UpdateDisplay();
+}
+
+void LanMicApp::RefreshBatteryStatus(bool force_update) {
+    int level = 0;
+    bool charging = false;
+    bool discharging = false;
+    const bool ok = board_.GetBatteryLevel(level, charging, discharging);
+    const bool changed = (!battery_known_ && ok) ||
+                         battery_level_ != level ||
+                         battery_charging_ != charging ||
+                         battery_discharging_ != discharging;
+
+    battery_known_ = ok;
+    battery_level_ = level;
+    battery_charging_ = charging;
+    battery_discharging_ = discharging;
+    if (!force_update && changed) {
+        UpdateDisplay();
+    }
+}
+
+void LanMicApp::HandleScroll(int direction) {
+    if (direction == 0) {
+        return;
+    }
+
+    // Clamp and update offset, then let UpdateDisplay() do the single wrap computation.
+    if (active_page_ == Page::Summary) {
+        const int next_offset = summary_scroll_offset_ + direction;
+        if (next_offset != summary_scroll_offset_ && next_offset >= 0) {
+            summary_scroll_offset_ = next_offset;
+            UpdateDisplay();
+        }
+        return;
+    }
+
+    const int next_offset = log_scroll_offset_ + direction;
+    if (next_offset != log_scroll_offset_ && next_offset >= 0) {
+        log_scroll_offset_ = next_offset;
+        UpdateDisplay();
+    }
+}
+
+void LanMicApp::SwitchPage(Page page) {
+    if (has_pending_transcript_ || active_page_ == page) {
+        return;
+    }
+    active_page_ = page;
+    UpdateDisplay();
+}
+
+const char* LanMicApp::GetNetworkLabel() const {
+    switch (network_state_) {
+        case NetworkState::Server:
+            return "SRV";
+        case NetworkState::Wifi:
+            return "LAN";
+        case NetworkState::Config:
+            return "CFG";
+        case NetworkState::Offline:
+        default:
+            return "OFF";
+    }
+}
+
+const char* LanMicApp::GetToolLabel() const {
+    if (send_target_ == "claude_code") {
+        return "Claude";
+    }
+    if (send_target_ == "text_injector") {
+        return "Inject";
+    }
+    return "Codex";
+}
+
+std::string LanMicApp::GetPhaseLabel() const {
+    switch (phase_) {
+        case Phase::Recording:
+            return "REC";
+        case Phase::Transcribing:
+            return "STT";
+        case Phase::AwaitingAction:
+            return "SEND";
+        case Phase::Running:
+            return "RUN";
+        case Phase::Error:
+            return "ERR";
+        case Phase::Idle:
+        default:
+            return "IDLE";
+    }
+}
+
+std::string LanMicApp::GetFooterText() const {
+    if (has_pending_transcript_) {
+        return "UP Send | DN Undo";
+    }
+    if (phase_ == Phase::Recording) {
+        return "Release BOOT to stop";
+    }
+    if (network_state_ == NetworkState::Config) {
+        return "Join AP then open 192.168.4.1";
+    }
+    if (active_page_ == Page::Summary) {
+        return "BOOT Talk | Hold DN | U+D WiFi";
+    }
+    return "UP/DN Scroll | Hold UP | U+D";
+}
+
+std::string LanMicApp::BuildPromptBody() const {
+    if (!transcript_text_.empty()) {
+        return transcript_text_;
+    }
+    if (!hint_text_.empty()) {
+        return hint_text_;
+    }
+    return "Hold BOOT to talk";
+}
+
+std::string LanMicApp::BuildReplyBody() const {
+    if (!latest_assistant_text_.empty()) {
+        return latest_assistant_text_;
+    }
+    if (!cli_status_text_.empty()) {
+        return cli_status_text_;
+    }
+    return "No CLI response yet";
+}
+
+std::vector<std::string> LanMicApp::WrapText(const std::string& text, size_t max_chars) const {
+    return WrapUtf8Lines(text, max_chars, 0);
+}
+
+std::vector<std::string> LanMicApp::SliceLines(const std::vector<std::string>& lines, int offset, size_t max_lines) const {
+    std::vector<std::string> visible;
+    if (lines.empty()) {
+        return visible;
+    }
+
+    const int clamped_offset = std::max(0, offset);
+    const size_t start = static_cast<size_t>(clamped_offset);
+    const size_t end = std::min(lines.size(), start + max_lines);
+    for (size_t i = start; i < end; ++i) {
+        visible.push_back(lines[i]);
+    }
+    return visible;
+}
+
+void LanMicApp::DrawHorizontalLine(int y, int thickness) {
+    if (display_ == nullptr || thickness <= 0) {
+        return;
+    }
+
+    const int width = display_->width();
+    const int bytes_per_row = (width + 7) >> 3;
+    std::vector<uint8_t> buffer(bytes_per_row * thickness, 0xFF);
+    display_->WriteRaw1bpp(0, y, width, thickness, buffer.data(), buffer.size());
+}
+
+void LanMicApp::DrawWifiIcon(int x, int y) {
+    if (display_ == nullptr) {
+        return;
+    }
+    display_->WriteRaw1bpp(x, y, 12, 12, kWifiIcon12x12, sizeof(kWifiIcon12x12));
+}
+
+void LanMicApp::DrawBatteryIcon(int x, int y, int level, bool charging) {
+    if (display_ == nullptr) {
+        return;
+    }
+
+    std::vector<uint8_t> buffer(kBatteryIcon14x8, kBatteryIcon14x8 + sizeof(kBatteryIcon14x8));
+    const int fill_columns = std::clamp((level * 10) / 100, 0, 10);
+    for (int row = 1; row <= 6; ++row) {
+        for (int col = 1; col <= fill_columns; ++col) {
+            const int bit_index = row * 16 + col;
+            buffer[bit_index >> 3] |= static_cast<uint8_t>(1U << (7 - (bit_index & 7)));
+        }
+    }
+    if (charging) {
+        for (int row = 2; row <= 5; ++row) {
+            const int bit_index = row * 16 + 5;
+            buffer[bit_index >> 3] |= static_cast<uint8_t>(1U << (7 - (bit_index & 7)));
+        }
+        for (int col = 4; col <= 6; ++col) {
+            const int bit_index = 4 * 16 + col;
+            buffer[bit_index >> 3] |= static_cast<uint8_t>(1U << (7 - (bit_index & 7)));
+        }
+    }
+    display_->WriteRaw1bpp(x, y, 14, 8, buffer.data(), buffer.size());
+}
+
+void LanMicApp::UpdateDisplay() {
+    if (display_ == nullptr) {
+        return;
+    }
+
+    std::vector<Display::TextItem> texts;
+    auto single_line = [](const std::string& value, size_t max_chars) -> std::string {
+        const auto lines = WrapUtf8Lines(value, max_chars, 1);
+        return lines.empty() ? std::string() : lines.front();
+    };
+
+    std::string battery_text = "--";
+    if (battery_known_) {
+        battery_text = std::to_string(std::clamp(battery_level_, 0, 100));
+        if (battery_charging_) {
+            battery_text += "+";
+        }
+    }
+    std::string quota_text = "5H -- W --";
+    if (quota_5h_remaining_pct_ >= 0 || quota_week_remaining_pct_ >= 0) {
+        const std::string quota_5h = quota_5h_remaining_pct_ >= 0 ? std::to_string(std::clamp(quota_5h_remaining_pct_, 0, 100)) : "--";
+        const std::string quota_week = quota_week_remaining_pct_ >= 0 ? std::to_string(std::clamp(quota_week_remaining_pct_, 0, 100)) : "--";
+        quota_text = "5H " + quota_5h + " W " + quota_week;
+    }
+
+    texts.push_back({GetNetworkLabel(), 28, 9, 16});
+    texts.push_back({GetPhaseLabel(), 166, 9, 16});
+    texts.push_back({battery_text, 330, 9, 16});
+    texts.push_back({single_line(repo_name_.empty() ? "Codex" : repo_name_, 18), 12, kContentHeaderY, 16});
+    texts.push_back({active_page_ == Page::Summary ? "Summary" : "Log", 316, kContentHeaderY, 16});
+
+    if (active_page_ == Page::Summary) {
+        texts.push_back({"Prompt", 12, kPromptTitleY, 16});
+        texts.push_back({single_line(status_text_.empty() ? "Idle" : status_text_, 16), 228, kPromptTitleY, 16});
+
+        const auto prompt_lines = SliceLines(WrapText(BuildPromptBody(), kBodyCharsPerLine), 0, kPromptVisibleLines);
+        int y = kPromptBodyY;
+        for (const auto& line : prompt_lines) {
+            texts.push_back({line, 12, y, 16});
+            y += kLineHeight;
+        }
+
+        texts.push_back({"Reply", 12, kReplyTitleY, 16});
+        texts.push_back({single_line(cli_status_text_.empty() ? std::string(GetToolLabel()) + " idle" : cli_status_text_, 16), 228, kReplyTitleY, 16});
+
+        const auto reply_lines = WrapText(BuildReplyBody(), kBodyCharsPerLine);
+        const int summary_offset = std::clamp(
+            summary_scroll_offset_,
+            0,
+            std::max(0, static_cast<int>(reply_lines.size()) - static_cast<int>(kReplyVisibleLines)));
+        const auto assistant_lines = SliceLines(reply_lines, summary_offset, kReplyVisibleLines);
+        y = kReplyBodyY;
+        for (const auto& line : assistant_lines) {
+            texts.push_back({line, 12, y, 16});
+            y += kLineHeight;
+        }
+    } else {
+        texts.push_back({"Log", 12, kLogTitleY, 16});
+        texts.push_back({single_line(cli_status_text_.empty() ? std::string(GetToolLabel()) + " idle" : cli_status_text_, 16), 228, kLogTitleY, 16});
+
+        std::vector<std::string> wrapped;
+        for (const auto& item : cli_log_lines_) {
+            const auto lines = WrapText(item, kBodyCharsPerLine);
+            wrapped.insert(wrapped.end(), lines.begin(), lines.end());
+        }
+        if (wrapped.empty()) {
+            wrapped.push_back("No log yet");
+        }
+
+        const int log_offset = std::clamp(
+            log_scroll_offset_,
+            0,
+            std::max(0, static_cast<int>(wrapped.size()) - static_cast<int>(kLogVisibleLines)));
+        int y = kLogBodyY;
+        for (const auto& line : SliceLines(wrapped, log_offset, kLogVisibleLines)) {
+            texts.push_back({line, 12, y, 16});
+            y += kLineHeight;
+        }
+    }
+
+    texts.push_back({GetFooterText(), 12, kFooterTextY, 16});
+    texts.push_back({quota_text, 250, kFooterTextY, 16});
+
+    display_->DrawTexts(texts, true);
+    DrawHorizontalLine(kStatusBarBottomY);
+    DrawHorizontalLine(kHeaderLineY);
+    if (active_page_ == Page::Summary) {
+        DrawHorizontalLine(kPromptDividerY);
+    }
+    DrawHorizontalLine(kFooterTopY);
+    DrawWifiIcon(10, 8);
+    DrawBatteryIcon(306, 12, battery_known_ ? battery_level_ : 0, battery_charging_);
+    display_->RequestUrgentRefresh();
+}
+
+void LanMicApp::Run() {
+    if (!Initialize()) {
+        ESP_LOGE(kTag, "Initialization failed");
+        while (true) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
+
+    bool last_pressed = false;
+    int64_t last_reconnect_ms = 0;
+    int64_t last_ping_ms = 0;
+    int64_t last_battery_poll_ms = 0;
+
+    while (true) {
+        const int64_t now_ms = esp_timer_get_time() / 1000;
+        if ((now_ms - last_battery_poll_ms) >= kBatteryPollIntervalMs) {
+            last_battery_poll_ms = now_ms;
+            RefreshBatteryStatus();
+        }
+
+        if (!IsWifiConnected()) {
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+
+        if ((ws_ == nullptr || !ws_->IsConnected()) && (now_ms - last_reconnect_ms) >= kReconnectIntervalMs) {
+            last_reconnect_ms = now_ms;
+            EnsureWebSocketConnected();
+        }
+
+        if (ws_ != nullptr && ws_->IsConnected() && (now_ms - last_ping_ms) >= kPingIntervalMs) {
+            last_ping_ms = now_ms;
+            ws_->Ping();
+        }
+
+        if (up_long_pressed_.exchange(false)) {
+            if (IsNavButtonPressed(TODO_DOWN_BUTTON_GPIO)) {
+                EnterWifiSetupMode();
+            } else {
+                SwitchPage(Page::Summary);
+            }
+        }
+        if (down_long_pressed_.exchange(false)) {
+            if (IsNavButtonPressed(TODO_UP_BUTTON_GPIO)) {
+                EnterWifiSetupMode();
+            } else {
+                SwitchPage(Page::Log);
+            }
+        }
+
+        if (up_clicked_.exchange(false)) {
+            if (has_pending_transcript_) {
+                if (EnsureWebSocketConnected()) {
+                    SendAction("action_send");
+                }
+            } else {
+                HandleScroll(-1);
+            }
+        }
+        if (down_clicked_.exchange(false)) {
+            if (has_pending_transcript_) {
+                if (EnsureWebSocketConnected()) {
+                    SendAction("action_undo");
+                }
+            } else {
+                HandleScroll(1);
+            }
+        }
+
+        const bool pressed = IsPttPressed();
+        if (pressed && !last_pressed) {
+            if (EnsureWebSocketConnected()) {
+                ESP_LOGI(kTag, "PTT start");
+                SendPttStart();
+                phase_ = Phase::Recording;
+                status_text_ = "Recording";
+                UpdateDisplay();
+            }
+            last_pressed = true;
+        }
+
+        if (!pressed && last_pressed) {
+            ESP_LOGI(kTag, "PTT stop");
+            SendPttStop();
+            phase_ = Phase::Transcribing;
+            status_text_ = "Transcribing";
+            UpdateDisplay();
+            last_pressed = false;
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+
+        if (pressed) {
+            StreamAudioFrame();
+            continue;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
