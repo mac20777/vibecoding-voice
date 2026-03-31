@@ -16,10 +16,13 @@
 #include <string>
 #include <vector>
 
+#include <esp_sleep.h>
+
 #include "board.h"
 #include "boards/zectrix-s3-epaper-4.2/config.h"
 #include "display.h"
 #include "network_interface.h"
+#include "settings.h"
 #include "ssid_manager.h"
 #include "wifi_manager.h"
 #include "web_socket.h"
@@ -195,8 +198,14 @@ bool LanMicApp::Initialize() {
 
     ConfigureButtons();
 
+    // Load persisted settings (volume, etc.)
+    {
+        Settings nvs("lan_mic");
+        volume_ = nvs.GetInt("volume", 70);
+    }
     codec_->Start();
     codec_->EnableOutput(false);
+    codec_->SetOutputVolume(volume_);
 
     status_text_ = "Starting Wi-Fi";
     cli_status_text_ = "CLI idle";
@@ -873,7 +882,92 @@ void LanMicApp::SwitchPage(Page page) {
         return;
     }
     active_page_ = page;
+    settings_editing_volume_ = false;
     UpdateDisplay();
+}
+
+void LanMicApp::EnterSettings() {
+    if (has_pending_transcript_) {
+        return;
+    }
+    if (active_page_ != Page::Settings) {
+        active_page_ = Page::Settings;
+        settings_selected_item_ = 0;
+        settings_editing_volume_ = false;
+        UpdateDisplay();
+    }
+}
+
+void LanMicApp::SaveVolume() {
+    Settings nvs("lan_mic", true);
+    nvs.SetInt("volume", volume_);
+}
+
+void LanMicApp::Shutdown() {
+    DisconnectWebSocket();
+    status_text_ = "Power off...";
+    hint_text_ = "Press BOOT to wake";
+    active_page_ = Page::Summary;
+    UpdateDisplay();
+    vTaskDelay(pdMS_TO_TICKS(800));
+    esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(BOOT_BUTTON_GPIO), 0);
+    esp_deep_sleep_start();
+}
+
+void LanMicApp::HandleSettingsInput(bool up_click, bool down_click, bool boot_press) {
+    if (settings_editing_volume_) {
+        if (up_click) {
+            volume_ = std::min(100, volume_ + 10);
+            codec_->SetOutputVolume(volume_);
+            UpdateDisplay();
+        } else if (down_click) {
+            volume_ = std::max(0, volume_ - 10);
+            codec_->SetOutputVolume(volume_);
+            UpdateDisplay();
+        } else if (boot_press) {
+            SaveVolume();
+            settings_editing_volume_ = false;
+            UpdateDisplay();
+        }
+        return;
+    }
+
+    if (up_click) {
+        if (settings_selected_item_ > 0) {
+            settings_selected_item_--;
+            UpdateDisplay();
+        }
+    } else if (down_click) {
+        if (settings_selected_item_ < kSettingsItemCount - 1) {
+            settings_selected_item_++;
+            UpdateDisplay();
+        }
+    } else if (boot_press) {
+        ExecuteSettingsItem(settings_selected_item_);
+    }
+}
+
+void LanMicApp::ExecuteSettingsItem(int item) {
+    switch (item) {
+        case kSettingsItemVolume:
+            settings_editing_volume_ = true;
+            UpdateDisplay();
+            break;
+        case kSettingsItemWifi:
+            EnterWifiSetupMode();
+            break;
+        case kSettingsItemRestart:
+            status_text_ = "Restarting...";
+            UpdateDisplay();
+            vTaskDelay(pdMS_TO_TICKS(500));
+            esp_restart();
+            break;
+        case kSettingsItemPowerOff:
+            Shutdown();
+            break;
+        default:
+            break;
+    }
 }
 
 const char* LanMicApp::GetNetworkLabel() const {
@@ -928,10 +1022,14 @@ std::string LanMicApp::GetFooterText() const {
     if (network_state_ == NetworkState::Config) {
         return "Join AP then open 192.168.4.1";
     }
-    if (active_page_ == Page::Summary) {
-        return "BOOT Talk | Hold DN | U+D WiFi";
+    if (active_page_ == Page::Settings) {
+        return settings_editing_volume_ ? "UP/DN ±10 | BOOT Save"
+                                        : "UP/DN Nav | BOOT OK | HoldUP Back";
     }
-    return "UP/DN Scroll | Hold UP | U+D";
+    if (active_page_ == Page::Summary) {
+        return "BOOT Talk | Hold DN Log | U+D WiFi";
+    }
+    return "UP/DN Scroll | Hold UP | HoldDN Set";
 }
 
 std::string LanMicApp::BuildPromptBody() const {
@@ -1045,8 +1143,11 @@ void LanMicApp::UpdateDisplay() {
     texts.push_back({GetNetworkLabel(), 28, 9, 16});
     texts.push_back({GetPhaseLabel(), 166, 9, 16});
     texts.push_back({battery_text, 330, 9, 16});
+    const char* page_label = active_page_ == Page::Summary ? "Summary"
+                           : active_page_ == Page::Log     ? "Log"
+                           :                                 "Settings";
     texts.push_back({single_line(repo_name_.empty() ? "Codex" : repo_name_, 18), 12, kContentHeaderY, 16});
-    texts.push_back({active_page_ == Page::Summary ? "Summary" : "Log", 316, kContentHeaderY, 16});
+    texts.push_back({page_label, 316, kContentHeaderY, 16});
 
     if (active_page_ == Page::Summary) {
         texts.push_back({"Prompt", 12, kPromptTitleY, 16});
@@ -1073,7 +1174,7 @@ void LanMicApp::UpdateDisplay() {
             texts.push_back({line, 12, y, 16});
             y += kLineHeight;
         }
-    } else {
+    } else if (active_page_ == Page::Log) {
         texts.push_back({"Log", 12, kLogTitleY, 16});
         texts.push_back({single_line(cli_status_text_.empty() ? std::string(GetToolLabel()) + " idle" : cli_status_text_, 16), 228, kLogTitleY, 16});
 
@@ -1094,6 +1195,32 @@ void LanMicApp::UpdateDisplay() {
         for (const auto& line : SliceLines(wrapped, log_offset, kLogVisibleLines)) {
             texts.push_back({line, 12, y, 16});
             y += kLineHeight;
+        }
+    } else {
+        // Settings page
+        texts.push_back({"Settings", 12, kLogTitleY, 16});
+        if (settings_editing_volume_) {
+            texts.push_back({"UP/DN ±10 BOOT OK", 180, kLogTitleY, 14});
+        }
+
+        // Menu items
+        const std::string vol_label = "Volume: " + std::to_string(volume_) + "%";
+        const char* items[kSettingsItemCount] = {
+            vol_label.c_str(),
+            "WiFi Reset",
+            "Restart",
+            "Power Off"
+        };
+
+        int y = kLogBodyY;
+        for (int i = 0; i < kSettingsItemCount; ++i) {
+            std::string row = (i == settings_selected_item_) ? "> " : "  ";
+            row += items[i];
+            if (i == kSettingsItemVolume && settings_editing_volume_) {
+                row += " *";
+            }
+            texts.push_back({row, 12, y, 16});
+            y += kLineHeight * 2;  // extra spacing for readability
         }
     }
 
@@ -1151,18 +1278,33 @@ void LanMicApp::Run() {
             if (IsNavButtonPressed(TODO_DOWN_BUTTON_GPIO)) {
                 EnterWifiSetupMode();
             } else {
-                SwitchPage(Page::Summary);
+                SwitchPage(Page::Summary);  // exits Settings too
             }
         }
         if (down_long_pressed_.exchange(false)) {
             if (IsNavButtonPressed(TODO_UP_BUTTON_GPIO)) {
                 EnterWifiSetupMode();
+            } else if (active_page_ == Page::Log) {
+                EnterSettings();
             } else {
                 SwitchPage(Page::Log);
             }
         }
 
-        if (up_clicked_.exchange(false)) {
+        const bool up_click   = up_clicked_.exchange(false);
+        const bool down_click = down_clicked_.exchange(false);
+
+        if (active_page_ == Page::Settings) {
+            const bool pressed_now = IsPttPressed();
+            const bool boot_press  = pressed_now && !last_pressed;
+            if (boot_press) last_pressed = true;
+            if (!pressed_now) last_pressed = false;
+            HandleSettingsInput(up_click, down_click, boot_press);
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+
+        if (up_click) {
             if (has_pending_transcript_) {
                 if (EnsureWebSocketConnected()) {
                     SendAction("action_send");
@@ -1171,7 +1313,7 @@ void LanMicApp::Run() {
                 HandleScroll(-1);
             }
         }
-        if (down_clicked_.exchange(false)) {
+        if (down_click) {
             if (has_pending_transcript_) {
                 if (EnsureWebSocketConnected()) {
                     SendAction("action_undo");

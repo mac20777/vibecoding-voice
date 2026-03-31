@@ -50,8 +50,19 @@ private:
     };
     enum class Page {
         Summary,
-        Log
+        Log,
+        Settings
     };
+
+    // Settings page state
+    static constexpr int kSettingsItemCount = 4;
+    static constexpr int kSettingsItemVolume   = 0;
+    static constexpr int kSettingsItemWifi     = 1;
+    static constexpr int kSettingsItemRestart  = 2;
+    static constexpr int kSettingsItemPowerOff = 3;
+    int settings_selected_item_ = 0;
+    bool settings_editing_volume_ = false;
+    int volume_ = 70;
     enum class NetworkState {
         Offline,
         Wifi,
@@ -101,6 +112,11 @@ private:
     void RefreshBatteryStatus(bool force_update = false);
     void HandleScroll(int direction);
     void SwitchPage(Page page);
+    void EnterSettings();
+    void HandleSettingsInput(bool up_click, bool down_click, bool boot_press);
+    void ExecuteSettingsItem(int item);
+    void Shutdown();
+    void SaveVolume();
     const char* GetNetworkLabel() const;
     std::string GetPhaseLabel() const;
     const char* GetToolLabel() const;  // "Claude" | "Codex" | "Inject"
