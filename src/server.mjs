@@ -64,6 +64,7 @@ function printBanner() {
   if (config.discoveryEnabled) {
     console.log(`  discovery  udp://${config.bindHost}:${config.discoveryPort}`);
   }
+  process.stderr.write(`  cwd        ${config.claudeCwd || process.cwd()} (VIBE_INVOKE_CWD=${process.env.VIBE_INVOKE_CWD || "(not set)"})\n`);
   console.log(`\nRun with --doctor to check your environment.\n`);
 }
 
@@ -217,8 +218,14 @@ function closeWithAuthError(ws, state, error) {
   ws.close(4001, message);
 }
 
-function validateHello(message) {
+function validateHello(message, remoteAddress) {
   if (!config.lanSharedSecret) {
+    return { ok: true };
+  }
+
+  // Localhost connections bypass HMAC — allows terminal/browser console on same machine
+  const addr = String(remoteAddress || "");
+  if (addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1") {
     return { ok: true };
   }
 
@@ -529,7 +536,7 @@ wss.on("connection", (ws, req) => {
         case "hello":
           state.deviceId = message.deviceId || "unknown";
           {
-            const authResult = validateHello(message);
+            const authResult = validateHello(message, req.socket.remoteAddress);
             if (!authResult.ok) {
               log("auth rejected", { deviceId: state.deviceId, error: authResult.error });
               closeWithAuthError(ws, state, authResult.error);
@@ -583,6 +590,26 @@ wss.on("connection", (ws, req) => {
           log("action_undo", state.deviceId);
           undoPendingTranscript(ws, state);
           break;
+        case "prompt": {
+          if (!state.authenticated) { closeWithAuthError(ws, state, "auth_required"); break; }
+          const promptText = String(message.text || "").trim();
+          if (!promptText) { sendJson(ws, { type: "warning", warning: "prompt_empty" }); break; }
+          log("prompt (console)", state.deviceId, promptText.slice(0, 80));
+          if (config.sendTarget === "claude_code") {
+            if (claudeSession.isRunning()) { sendJson(ws, { type: "status", status: "cli_busy" }); break; }
+            launchClaudePrompt(promptText);
+          } else if (config.sendTarget === "codex_exec") {
+            if (codexSession.isRunning()) { sendJson(ws, { type: "status", status: "cli_busy" }); break; }
+            launchCodexPrompt(promptText);
+          } else {
+            void dispatchPrompt(promptText).catch((e) => {
+              const msg = e instanceof Error ? e.message : String(e);
+              appendCliLog(`error: ${msg}`); setCliState({ phase: "error", statusLine: msg });
+            });
+          }
+          sendJson(ws, { type: "status", status: "typed", text: promptText });
+          break;
+        }
         case "ping":
           sendJson(ws, { type: "pong", nowMs: Date.now() });
           break;

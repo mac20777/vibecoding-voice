@@ -66,6 +66,7 @@ export class ClaudeSessionManager {
   constructor(config) {
     this.config = config;
     this.sessionId = "";
+    this.sessionCwd = "";
     this.running = false;
   }
 
@@ -94,6 +95,11 @@ export class ClaudeSessionManager {
       threadId: this.sessionId
     });
 
+    const currentCwd = this.config.claudeCwd || process.cwd();
+    if (this.sessionCwd && this.sessionCwd !== currentCwd) {
+      this.sessionId = "";
+      this.sessionCwd = "";
+    }
     const { command, args, shell = false } = buildClaudeArgs(this.config, Boolean(this.sessionId), trimmedPrompt);
     const child = spawn(command, args, {
       cwd: this.config.claudeCwd || process.cwd(),
@@ -162,6 +168,7 @@ export class ClaudeSessionManager {
         if (event.type === "result") {
           if (event.session_id) {
             this.sessionId = String(event.session_id);
+            this.sessionCwd = currentCwd;
           }
           sawErrorResult = Boolean(event.is_error);
           lastResultMessage = String(event.result || "").trim();

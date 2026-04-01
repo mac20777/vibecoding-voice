@@ -60,13 +60,17 @@ function resolveClaudeCommand() {
   return fs.existsSync(npmShimPath) ? npmShimPath : "claude";
 }
 
+function invokeCwd() {
+  return String(process.env.VIBE_INVOKE_CWD || "").trim() || process.cwd();
+}
+
 function resolveCodexCwd() {
   const configured = String(process.env.CODEX_CWD || "").trim();
   if (!configured) {
-    return projectRoot;
+    return invokeCwd();
   }
 
-  return path.isAbsolute(configured) ? configured : path.resolve(projectRoot, configured);
+  return path.isAbsolute(configured) ? configured : path.resolve(invokeCwd(), configured);
 }
 
 export function isCliAvailable(command) {
@@ -132,8 +136,8 @@ export function loadConfig() {
     codexSkipGitRepoCheck: process.env.CODEX_SKIP_GIT_REPO_CHECK === "1",
     claudeCommand,
     claudeCwd: String(process.env.CLAUDE_CWD || "").trim()
-      ? path.resolve(projectRoot, String(process.env.CLAUDE_CWD || "").trim())
-      : resolveCodexCwd(),
+      ? path.resolve(invokeCwd(), String(process.env.CLAUDE_CWD || "").trim())
+      : invokeCwd(),
     claudeAllowedTools: process.env.CLAUDE_ALLOWED_TOOLS || "Read,Edit,Write,Bash,Glob,Grep",
     claudeMaxTurns: process.env.CLAUDE_MAX_TURNS !== undefined ? Number(process.env.CLAUDE_MAX_TURNS) : 30,
     claudeDangerouslySkipPermissions: process.env.CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS === "1",
