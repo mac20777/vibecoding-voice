@@ -4,10 +4,15 @@
   "private": true,
   "description": "Host bridge for LAN voice coding with an ESP32 device and Codex CLI.",
   "type": "module",
+  "bin": {
+    "vibe": "scripts/vibe.mjs"
+  },
   "scripts": {
     "start": "node src/server.mjs",
     "doctor": "node src/server.mjs --doctor",
-    "test": "node --test"
+    "test": "node --test",
+    "console": "node scripts/console.mjs",
+    "vibe": "node scripts/vibe.mjs"
   },
   "engines": {
     "node": ">=20"

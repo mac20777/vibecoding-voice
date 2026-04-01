@@ -10,6 +10,7 @@
 #include <mbedtls/md.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cerrno>
 #include <cstring>
 #include <cstdio>
@@ -20,6 +21,8 @@
 
 #include "board.h"
 #include "boards/zectrix-s3-epaper-4.2/config.h"
+
+extern "C" void ZectrixSetFactoryLedOverride(bool enabled, bool blink);
 #include "display.h"
 #include "network_interface.h"
 #include "settings.h"
@@ -690,6 +693,9 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         if (!has_pending_transcript_) {
             phase_ = Phase::Idle;
         }
+        // 连上服务器：上升双音
+        PlayBeep(600, 80);
+        PlayBeep(900, 100);
     } else if (strcmp(type, "server_ready") == 0) {
         status_text_ = "Ready";
         if (!has_pending_transcript_) {
@@ -713,6 +719,7 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
             } else if (strcmp(status, "transcribing") == 0) {
                 phase_ = Phase::Transcribing;
                 status_text_ = "Transcribing";
+                PlayBeep(660, 80);   // 停止录音/转录中：短低音
             } else if (strcmp(status, "awaiting_action") == 0) {
                 phase_ = Phase::AwaitingAction;
                 status_text_ = "Ready to send";
@@ -769,13 +776,20 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         cJSON* quota_5h = cJSON_GetObjectItemCaseSensitive(root, "quota5hRemainingPct");
         cJSON* quota_week = cJSON_GetObjectItemCaseSensitive(root, "quotaWeekRemainingPct");
         if (phase != nullptr) {
+            const bool was_running = (phase_ == Phase::Running);
             cli_phase_text_ = phase;
             if (strcmp(phase, "running") == 0) {
                 phase_ = Phase::Running;
             } else if (strcmp(phase, "error") == 0) {
                 phase_ = Phase::Error;
+                PlayBeep(300, 300);  // 出错：低沉长音
             } else if (!has_pending_transcript_) {
                 phase_ = Phase::Idle;
+                if (was_running) {
+                    // AI 回复完成：上升双音
+                    PlayBeep(800, 80);
+                    PlayBeep(1000, 100);
+                }
             }
         }
         if (status_line != nullptr) {
@@ -1089,6 +1103,51 @@ std::vector<std::string> LanMicApp::SliceLines(const std::vector<std::string>& l
     return visible;
 }
 
+void LanMicApp::UpdateLed() {
+    switch (phase_) {
+        case Phase::Recording:
+        case Phase::Error:
+            ZectrixSetFactoryLedOverride(true, true);   // fast blink: active / error
+            break;
+        case Phase::Transcribing:
+        case Phase::Running:
+        case Phase::AwaitingAction:
+            ZectrixSetFactoryLedOverride(true, false);  // solid on: processing
+            break;
+        case Phase::Idle:
+        default:
+            ZectrixSetFactoryLedOverride(false, false); // release override: charging handles LED naturally
+            break;
+    }
+}
+
+void LanMicApp::PlayBeep(int freq_hz, int duration_ms) {
+    if (codec_ == nullptr || freq_hz <= 0 || duration_ms <= 0) {
+        return;
+    }
+    const int sample_rate = codec_->output_sample_rate() > 0 ? codec_->output_sample_rate() : 16000;
+    const int num_samples = sample_rate * duration_ms / 1000;
+    if (num_samples <= 0) {
+        return;
+    }
+    const int fade = std::min(num_samples / 4, sample_rate * 8 / 1000);
+    const double step = 2.0 * M_PI * freq_hz / sample_rate;
+    constexpr double kAmplitude = 10000.0;
+
+    std::vector<int16_t> pcm(num_samples);
+    for (int i = 0; i < num_samples; i++) {
+        double s = std::sin(step * i) * kAmplitude;
+        if (i < fade) {
+            s *= static_cast<double>(i) / fade;
+        } else if (i > num_samples - fade) {
+            s *= static_cast<double>(num_samples - i) / fade;
+        }
+        pcm[i] = static_cast<int16_t>(s);
+    }
+    codec_->EnableOutput(true);
+    codec_->OutputData(pcm);
+}
+
 void LanMicApp::DrawHorizontalLine(int y, int thickness) {
     if (display_ == nullptr || thickness <= 0) {
         return;
@@ -1162,9 +1221,9 @@ void LanMicApp::UpdateDisplay() {
     texts.push_back({GetNetworkLabel(), 28, 9, 16});
     texts.push_back({GetPhaseLabel(), 166, 9, 16});
     if (!quota_status_text.empty()) {
-        texts.push_back({quota_status_text, 210, 9, 16});
+        texts.push_back({quota_status_text, 250, 9, 16});
     }
-    texts.push_back({battery_text, 330, 9, 16});
+    texts.push_back({battery_text, 346, 9, 16});
     const char* page_label = active_page_ == Page::Summary ? "Summary"
                            : active_page_ == Page::Log     ? "Log"
                            :                                 "Settings";
@@ -1266,7 +1325,7 @@ void LanMicApp::UpdateDisplay() {
     }
     DrawHorizontalLine(kFooterTopY);
     DrawWifiIcon(10, 8);
-    DrawBatteryIcon(306, 12, battery_known_ ? battery_level_ : 0, battery_charging_);
+    DrawBatteryIcon(382, 12, battery_known_ ? battery_level_ : 0, battery_charging_);
     display_->RequestUrgentRefresh();
 }
 
@@ -1361,11 +1420,13 @@ void LanMicApp::Run() {
         if (pressed && !last_pressed) {
             if (EnsureWebSocketConnected()) {
                 ESP_LOGI(kTag, "PTT start");
+                PlayBeep(880, 60);                      // local immediate feedback
+                vTaskDelay(pdMS_TO_TICKS(100));         // wait for beep to play + echo to decay
                 SendPttStart();
                 phase_ = Phase::Recording;
                 status_text_ = "Recording";
                 hint_text_ = "Release BOOT to send";
-                UpdateDisplay();
+                StreamAudioFrame();
             } else {
                 // No server — give visible feedback
                 hint_text_ = "No server — check host";

@@ -125,6 +125,8 @@ private:
     std::string BuildReplyBody() const;
     std::vector<std::string> WrapText(const std::string& text, size_t max_chars) const;
     std::vector<std::string> SliceLines(const std::vector<std::string>& lines, int offset, size_t max_lines) const;
+    void UpdateLed();
+    void PlayBeep(int freq_hz, int duration_ms);
     void DrawHorizontalLine(int y, int thickness = 1);
     void DrawWifiIcon(int x, int y);
     void DrawBatteryIcon(int x, int y, int level, bool charging);
