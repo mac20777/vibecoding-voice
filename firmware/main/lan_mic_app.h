@@ -2,6 +2,7 @@
 #define LAN_MIC_APP_H
 
 #include <atomic>
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -40,6 +41,7 @@ private:
     bool has_pending_transcript_ = false;
     std::string send_target_;         // received from server_ready: "claude_code" | "codex_exec" | "text_injector"
     std::vector<int16_t> audio_frame_buffer_; // reused across StreamAudioFrame() calls
+    std::deque<std::vector<int16_t>> preroll_frames_;
     enum class Phase {
         Idle,
         Recording,
@@ -108,6 +110,8 @@ private:
     bool SendPttStop();
     bool SendAction(const char* action_type);
     bool StreamAudioFrame();
+    void CapturePrerollFrame();
+    bool FlushPrerollFrames();
     void HandleServerMessage(const char* data, size_t len);
     void RefreshBatteryStatus(bool force_update = false);
     void HandleScroll(int direction);

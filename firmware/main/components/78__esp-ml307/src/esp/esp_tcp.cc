@@ -4,11 +4,14 @@
 #include <unistd.h>
 #include <cstring>
 #include <arpa/inet.h>
-#include <sys/socket.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <errno.h>
+#include <sys/select.h>
+#include <sys/socket.h>
 
 static const char *TAG = "EspTcp";
+static constexpr int kConnectTimeoutMs = 1500;
 
 EspTcp::EspTcp() {
     event_group_ = xEventGroupCreate();
@@ -29,34 +32,88 @@ bool EspTcp::Connect(const std::string& host, int port) {
         Disconnect();
     }
 
-    struct sockaddr_in server_addr;
-    bzero(&server_addr, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-    // host is domain
-    struct hostent *server = gethostbyname(host.c_str());
-    if (server == NULL) {
-        last_error_ = h_errno;
-        ESP_LOGE(TAG, "Failed to get host by name");
+    char port_text[8];
+    snprintf(port_text, sizeof(port_text), "%d", port);
+
+    addrinfo hints = {};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+
+    addrinfo* server = nullptr;
+    int resolve_ret = getaddrinfo(host.c_str(), port_text, &hints, &server);
+    if (resolve_ret != 0 || server == nullptr) {
+        last_error_ = resolve_ret != 0 ? resolve_ret : EHOSTUNREACH;
+        ESP_LOGE(TAG, "Failed to resolve %s:%d, code=%d", host.c_str(), port, last_error_);
         return false;
     }
-    memcpy(&server_addr.sin_addr, server->h_addr, server->h_length);
 
-    tcp_fd_ = socket(AF_INET, SOCK_STREAM, 0);
+    tcp_fd_ = socket(server->ai_family, server->ai_socktype, server->ai_protocol);
     if (tcp_fd_ < 0) {
         last_error_ = errno;
         ESP_LOGE(TAG, "Failed to create socket");
+        freeaddrinfo(server);
         return false;
     }
 
-    int ret = connect(tcp_fd_, (struct sockaddr*)&server_addr, sizeof(server_addr));
-    if (ret < 0) {
+    const int original_flags = fcntl(tcp_fd_, F_GETFL, 0);
+    if (original_flags >= 0) {
+        fcntl(tcp_fd_, F_SETFL, original_flags | O_NONBLOCK);
+    }
+
+    int ret = connect(tcp_fd_, server->ai_addr, server->ai_addrlen);
+    if (ret < 0 && errno != EINPROGRESS && errno != EWOULDBLOCK) {
         last_error_ = errno;
         ESP_LOGE(TAG, "Failed to connect to %s:%d, code=0x%x", host.c_str(), port, last_error_);
+        freeaddrinfo(server);
         close(tcp_fd_);
         tcp_fd_ = -1;
         return false;
     }
+
+    if (ret < 0) {
+        fd_set write_fds;
+        FD_ZERO(&write_fds);
+        FD_SET(tcp_fd_, &write_fds);
+
+        timeval timeout = {};
+        timeout.tv_sec = kConnectTimeoutMs / 1000;
+        timeout.tv_usec = (kConnectTimeoutMs % 1000) * 1000;
+
+        ret = select(tcp_fd_ + 1, nullptr, &write_fds, nullptr, &timeout);
+        if (ret <= 0) {
+            last_error_ = (ret == 0) ? ETIMEDOUT : errno;
+            ESP_LOGE(TAG, "Connect timeout to %s:%d, code=0x%x", host.c_str(), port, last_error_);
+            freeaddrinfo(server);
+            close(tcp_fd_);
+            tcp_fd_ = -1;
+            return false;
+        }
+
+        int socket_error = 0;
+        socklen_t socket_error_len = sizeof(socket_error);
+        if (getsockopt(tcp_fd_, SOL_SOCKET, SO_ERROR, &socket_error, &socket_error_len) < 0) {
+            last_error_ = errno;
+            ESP_LOGE(TAG, "Failed to read socket error for %s:%d, code=0x%x", host.c_str(), port, last_error_);
+            freeaddrinfo(server);
+            close(tcp_fd_);
+            tcp_fd_ = -1;
+            return false;
+        }
+
+        if (socket_error != 0) {
+            last_error_ = socket_error;
+            ESP_LOGE(TAG, "Failed to connect to %s:%d, code=0x%x", host.c_str(), port, last_error_);
+            freeaddrinfo(server);
+            close(tcp_fd_);
+            tcp_fd_ = -1;
+            return false;
+        }
+    }
+
+    if (original_flags >= 0) {
+        fcntl(tcp_fd_, F_SETFL, original_flags);
+    }
+    freeaddrinfo(server);
 
     connected_ = true;
 

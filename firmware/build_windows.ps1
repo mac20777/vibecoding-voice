@@ -23,6 +23,67 @@ function Get-LatestChildDirectory {
         Select-Object -First 1
 }
 
+function Invoke-EsptoolFlash {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$BuildDir,
+        [Parameter(Mandatory = $true)]
+        [string]$EsptoolExe,
+        [string]$PortName
+    )
+
+    $flashArgsPath = Join-Path $BuildDir "flash_args"
+    if (-not (Test-Path -LiteralPath $flashArgsPath)) {
+        throw "未找到 flash_args: $flashArgsPath"
+    }
+
+    $flashArgs = @(
+        "--chip", "esp32s3",
+        "-b", "460800",
+        "--before", "default_reset",
+        "--after", "watchdog_reset",
+        "write_flash"
+    )
+    if ($PortName) {
+        $flashArgs = @("--chip", "esp32s3", "-p", $PortName) + $flashArgs[2..($flashArgs.Length - 1)]
+    }
+
+    foreach ($line in Get-Content -LiteralPath $flashArgsPath) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed) {
+            continue
+        }
+        $flashArgs += ($trimmed -split "\s+")
+    }
+
+    Write-Host "[INFO] Running esptool watchdog-reset flash"
+    Push-Location $BuildDir
+    try {
+        $esptoolOutput = & $EsptoolExe @flashArgs 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+    $esptoolOutput | Out-Host
+
+    if ($exitCode -eq 0) {
+        return
+    }
+
+    $outputText = ($esptoolOutput | Out-String)
+    $verifiedCount = ([regex]::Matches($outputText, "Hash of data verified\.")).Count
+    $watchdogResetIssued = $outputText -match "Hard resetting with a watchdog"
+    $expectedPortDrop = $outputText -match "Cannot configure port"
+
+    if ($watchdogResetIssued -and $expectedPortDrop -and $verifiedCount -ge 4) {
+        Write-Warning "esptool watchdog reset caused COM port re-enumeration after verified flash; treating as success"
+        return
+    }
+
+    throw "esptool flash 失败"
+}
+
 $projectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # Clear MSYSTEM so idf.py doesn't mistake this for a MinGW/MSys environment
@@ -35,6 +96,7 @@ if (-not (Test-Path -LiteralPath $EspressifRoot)) {
 
 $idfPath = Join-Path $EspressifRoot "frameworks\esp-idf-v5.5.2"
 $idfPython = Join-Path $EspressifRoot "python_env\idf5.5_py3.13_env\Scripts\python.exe"
+$esptoolExe = Join-Path $EspressifRoot "python_env\idf5.5_py3.13_env\Scripts\esptool.exe"
 $cmakeBin = Join-Path $EspressifRoot "tools\cmake\3.30.2\bin"
 $ninjaBin = Join-Path $EspressifRoot "tools\ninja\1.12.1"
 $toolchainRoot = Get-LatestChildDirectory (Join-Path $EspressifRoot "tools\xtensa-esp-elf")
@@ -45,6 +107,9 @@ if (-not (Test-Path -LiteralPath $idfPath)) {
 }
 if (-not (Test-Path -LiteralPath $idfPython)) {
     throw "未找到 ESP-IDF Python: $idfPython"
+}
+if (-not (Test-Path -LiteralPath $esptoolExe)) {
+    throw "未找到 esptool: $esptoolExe"
 }
 if (-not (Test-Path -LiteralPath $cmakeBin)) {
     throw "未找到 CMake: $cmakeBin"
@@ -110,16 +175,7 @@ try {
     }
 
     if ($Flash) {
-        $flashArgs = @()
-        if ($Port) {
-            $flashArgs += "-p", $Port
-        }
-
-        Write-Host "[INFO] Running idf.py flash"
-        & $idfPython $idfPy @flashArgs flash
-        if ($LASTEXITCODE -ne 0) {
-            throw "idf.py flash 失败"
-        }
+        Invoke-EsptoolFlash -BuildDir (Join-Path $MirrorDir "build") -EsptoolExe $esptoolExe -PortName $Port
     }
 }
 finally {
