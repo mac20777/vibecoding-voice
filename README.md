@@ -13,7 +13,7 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 `vibecoding-voice` is a two-part open-source project:
 
 1. **Host bridge** (this repo) — a Node.js server that runs on your PC. It receives push-to-talk audio from an ESP32 device over WebSocket, transcribes it, and either injects the text into the active Windows input field or drives a Codex / Claude Code CLI session.
-2. **ESP32 firmware** (`firmware/`) — runs on a Zectrix S3 or Waveshare S3 e-paper board. It handles Wi-Fi, push-to-talk recording, device-side confirmation UI, and renders live CLI output on the e-ink screen.
+2. **ESP32 firmware** (`firmware/`) — runs on supported e-paper boards such as Zectrix S3 and Waveshare S3, and is intended to grow into a fully DIY ESP32-S3 hardware path as well. It handles Wi-Fi, push-to-talk recording, device-side confirmation UI, and renders live CLI output on the e-ink screen.
 
 ### What it looks like in practice
 
@@ -342,7 +342,7 @@ Debug workflow (source mode): `MOCK_TRANSCRIPT=hello world DRY_RUN_TEXT_INJECTIO
 `vibecoding-voice` 是一个由两部分组成的开源项目：
 
 1. **主机桥接服务**（本仓库）— 运行在你电脑上的 Node.js 服务器。它通过 WebSocket 从 ESP32 设备接收按键说话（PTT）音频，调用语音识别将其转写，然后注入 Windows 当前输入框，或者驱动 Codex / Claude Code CLI 会话。
-2. **ESP32 固件**（`firmware/` 目录）— 运行在 Zectrix S3 或 Waveshare S3 电子墨水屏开发板上。负责 Wi-Fi 连接、按键录音、设备端确认界面，并将 CLI 实时输出渲染到电子墨水屏上。
+2. **ESP32 固件**（`firmware/` 目录）— 可运行在 Zectrix S3、Waveshare S3 这类已支持的电子墨水屏开发板上，后续也会补一个完全 DIY 的 ESP32-S3 硬件方案。负责 Wi-Fi 连接、按键录音、设备端确认界面，并将 CLI 实时输出渲染到电子墨水屏上。
 
 ### 实际效果
 
