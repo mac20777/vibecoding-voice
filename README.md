@@ -6,120 +6,221 @@
 
 ## English
 
-`vibecoding-voice` is the host-side bridge for a LAN voice-coding setup built around an ESP32 device. It receives push-to-talk PCM audio over WebSocket, transcribes it with an STT provider, and then either:
+**Voice-driven AI coding via a wireless ESP32 e-paper device — no microphone, no keyboard interruption, just push-to-talk.**
 
-- injects the transcript into the active Windows input field, or
-- submits it to a managed Codex / Claude Code CLI session and streams the status back to the device UI.
+`vibecoding-voice` is a two-part open-source project:
 
-The ESP32 firmware lives in a separate board project and speaks a small JSON + binary WebSocket protocol to this server.
+1. **Host bridge** (this repo) — a Node.js server that runs on your PC. It receives push-to-talk audio from an ESP32 device over WebSocket, transcribes it, and either injects the text into the active Windows input field or drives a Codex / Claude Code CLI session.
+2. **ESP32 firmware** (`firmware/`) — runs on a Zectrix S3 or Waveshare S3 e-paper board. It handles Wi-Fi, push-to-talk recording, device-side confirmation UI, and renders live CLI output on the e-ink screen.
+
+### What it looks like in practice
+
+You hold a button on the device, speak a coding instruction, release the button, and within a second the transcribed text is sent to Claude Code or Codex. The AI agent's progress — which tools it's calling, what it wrote — streams back to the e-paper screen in real time. Your hands stay on the keyboard; the device is a voice remote for your AI coding assistant.
+
+```
+┌─────────────────────────────────────────────────┐
+│  ESP32 e-paper device (LAN Wi-Fi)               │
+│  ┌──────┐   PTT audio (PCM16 16kHz)             │
+│  │ MIC  │──────────────────────────────────┐    │
+│  └──────┘                                  ▼    │
+│  ┌──────────┐   WebSocket        ┌──────────────┤
+│  │ e-paper  │◄───── CLI state ───│  Host bridge │
+│  │ display  │                    │  (Node.js)   │
+│  └──────────┘                    └──────┬───────┘
+└─────────────────────────────────────────┼───────┘
+                                          │ transcript
+                                          ▼
+                              ┌───────────────────┐
+                              │  Codex CLI  or    │
+                              │  Claude Code CLI  │
+                              └───────────────────┘
+```
+
+### Supported Hardware
+
+| Board | Screen | Status |
+|-------|--------|--------|
+| [Zectrix S3 e-paper 4.2"](https://www.zectrix.ai/) | 400×300 grayscale e-ink | ✅ Primary dev board |
+| Waveshare ESP32-S3 e-paper 1.54" | 200×200 B/W e-ink | ✅ Supported |
+
+Both boards use ESP32-S3 with onboard MEMS mic and push-button.
 
 ### Features
 
-- 16 kHz mono PCM ingest over WebSocket
-- STT via Volcengine flash ASR or OpenAI Whisper
-- optional Windows text injection via clipboard
-- managed `codex exec --json` session bridge
-- managed `claude -p --output-format stream-json` session bridge
-- projected CLI status, summary, log tail, and quota snapshot for e-paper UI
-- **multi-segment accumulation** — press BOOT to keep adding speech, UP to send, DN to undo the last segment
-- device-side confirm flow: transcript shown first, explicit action required to send
+- 16 kHz mono PCM audio ingest over WebSocket
+- STT via Volcengine Flash ASR or OpenAI Whisper
+- Windows text injection via clipboard (Ctrl+V)
+- Managed `codex exec --json` session bridge
+- Managed `claude -p --output-format stream-json` session bridge
+- Live CLI status, prompt/reply summary, log tail, and quota snapshot projected to e-paper
+- **Multi-segment accumulation** — hold BOOT to keep appending speech, UP to send, DN to undo the last segment
+- Device-side confirm flow: transcript shown first, explicit action required to send
+- UDP LAN host discovery — device finds the bridge automatically, no hardcoded IPs
+- HMAC-SHA256 authentication for both discovery and WebSocket handshake
+- NVS-persisted host pairing — reconnects to the last known server on reboot
 
-### Requirements
+---
+
+### Part 1 — Host Bridge
+
+#### Requirements
 
 - Node.js 20 or newer
-- Windows (for text injection; the server itself runs anywhere)
-- Codex CLI or Claude Code CLI on your `PATH` if you use the CLI session modes
-- an STT provider key:
-  - Volcengine `VOLCENGINE_APP_KEY` + `VOLCENGINE_ACCESS_KEY`, or
-  - `OPENAI_API_KEY`
+- Windows (for text injection; the server itself runs on any OS)
+- Codex CLI or Claude Code CLI on your `PATH` (only for CLI session modes)
+- An STT provider key:
+  - Volcengine: `VOLCENGINE_APP_KEY` + `VOLCENGINE_ACCESS_KEY`
+  - OpenAI: `OPENAI_API_KEY`
 
-### Quick Start
+#### Quick Start
 
-**1. Install dependencies**
+**1. Install**
 
 ```powershell
 npm install
 ```
 
-**2. Create a local config file**
+**2. Configure**
 
 ```powershell
 Copy-Item .env.example .env
+# then edit .env
 ```
 
-**3. Edit `.env`** — common defaults for Codex + Volcengine:
+Minimum config for Codex + Volcengine:
 
 ```env
 STT_PROVIDER=volcengine
 VOLCENGINE_APP_KEY=your-app-key
 VOLCENGINE_ACCESS_KEY=your-access-key
-VOLCENGINE_RESOURCE_ID=volc.bigasr.auc_turbo
-VOLCENGINE_LANGUAGE=zh-CN
-LAN_VOICE_PORT=8765
-LAN_DISCOVERY_ENABLED=1
-LAN_DISCOVERY_PORT=8766
-LAN_SHARED_SECRET=replace-with-a-random-secret
 SEND_TARGET=codex_exec
 TRANSCRIPT_DELIVERY_MODE=confirm_on_device
-CODEX_COMMAND=codex
-CODEX_CWD=.
+LAN_SHARED_SECRET=replace-with-a-long-random-secret
 ```
 
-**4. Start the bridge**
+**3. Run**
 
 ```powershell
 npm start
 ```
 
-**5. Connect the device** — point firmware at:
+The server prints the WebSocket URL and UDP discovery address on startup. The bridge is ready as soon as you see `server ready`.
+
+**4. Diagnose (optional)**
+
+```powershell
+npm run doctor
+```
+
+Checks CLI tools, API keys, port availability, and STT provider connectivity.
+
+---
+
+### Part 2 — ESP32 Firmware
+
+#### Option A: Flash a pre-built release
+
+Download the latest zip from [`firmware/releases/`](firmware/releases/), unzip, and run:
+
+```powershell
+# Replace COMx with your board's serial port
+python -m esptool --chip esp32s3 -p COMx -b 460800 write_flash "@flash_args"
+```
+
+#### Option B: Build from source
+
+Requires ESP-IDF v5.5.
+
+```powershell
+cd firmware
+# Windows (auto-detects Espressif toolchain at D:\Espressif)
+.\build_windows.ps1 -Flash -Port COMx
+```
+
+#### Firmware Configuration
+
+The firmware is pre-configured for LAN discovery mode. The only value you **must** set before building is the shared secret:
+
+In `firmware/sdkconfig` (or via `idf.py menuconfig → LAN Mic`):
 
 ```
-ws://<your-lan-ip>:8765
+CONFIG_LAN_SHARED_SECRET="your-secret-here"
 ```
 
-**6. Set the same `LAN_SHARED_SECRET`** in the device firmware local config before flashing. Never commit the secret.
+Set the same value in the host bridge `.env`:
 
-### Device Usage
+```env
+LAN_SHARED_SECRET=your-secret-here
+```
 
-| Button | State | Action |
-|--------|-------|--------|
-| Hold BOOT | Any | Record a speech segment |
-| BOOT (release) | Awaiting | Append another speech segment to the pending transcript |
-| UP | Awaiting | Send the accumulated transcript |
-| DN | Awaiting | Undo the last speech segment (or cancel all if only one) |
+> **Security**: Never commit the secret to git. Generate a long random hex string (`openssl rand -hex 32`).
 
-The footer on the device screen shows `BOOT Add | UP Send | DN Undo` when a transcript is waiting.
+#### First Boot
 
-### Device Wi-Fi Setup
+1. Power on the device. It enters **Wi-Fi config AP mode** automatically on first boot.
+2. The e-paper screen shows the AP SSID, password, and `http://192.168.4.1`.
+3. Connect to that AP from a phone or laptop and open the config page.
+4. Enter your Wi-Fi credentials and save.
+5. The device reboots, connects to your Wi-Fi, discovers the bridge via UDP, and shows **Ready** on screen.
 
-- First boot: the device enters config AP mode automatically.
-- The screen shows the AP SSID, password, and `http://192.168.4.1`.
-- Connect to that AP and open `http://192.168.4.1` to save Wi-Fi credentials.
-- To re-enter config mode later: hold `UP + DOWN` until the device clears saved Wi-Fi.
-- The config AP uses WPA/WPA2; the password is derived from the device identity and shown on screen.
+To re-enter config mode later: hold **UP + DOWN** until the screen clears.
+
+---
+
+### Device Button Reference
+
+| Button | Connection state | Action |
+|--------|-----------------|--------|
+| Hold BOOT | Connected | Record a speech segment |
+| BOOT (release) | Awaiting confirm | Append another segment to pending transcript |
+| BOOT (press) | Disconnected | Force immediate reconnect attempt |
+| UP click | Awaiting confirm | Send accumulated transcript to CLI |
+| DN click | Awaiting confirm | Undo last segment (cancel all if only one left) |
+| Hold UP + DN | Any | Re-enter Wi-Fi setup mode |
+
+Screen footer shows `BOOT Add · UP Send · DN Undo` when a transcript is pending.
+
+---
 
 ### Configuration Reference
+
+#### STT
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `STT_PROVIDER` | auto-detect | `volcengine` or `openai` |
 | `VOLCENGINE_APP_KEY` | — | Volcengine app key |
 | `VOLCENGINE_ACCESS_KEY` | — | Volcengine access key |
-| `VOLCENGINE_RESOURCE_ID` | `volc.bigasr.auc_turbo` | ASR resource |
+| `VOLCENGINE_RESOURCE_ID` | `volc.bigasr.auc_turbo` | ASR resource ID |
 | `VOLCENGINE_LANGUAGE` | `zh-CN` | Recognition language |
 | `OPENAI_API_KEY` | — | OpenAI API key |
 | `OPENAI_TRANSCRIBE_MODEL` | `whisper-1` | Transcription model |
 | `OPENAI_TRANSCRIBE_LANGUAGE` | — | e.g. `zh` |
+
+#### Network
+
+| Variable | Default | Description |
+|----------|---------|-------------|
 | `LAN_VOICE_PORT` | `8765` | WebSocket port |
-| `LAN_DISCOVERY_ENABLED` | `1` | Enable UDP discovery |
+| `LAN_DISCOVERY_ENABLED` | `1` | Enable UDP host discovery |
 | `LAN_DISCOVERY_PORT` | `8766` | UDP discovery port |
-| `LAN_DISCOVERY_HOST_ID` | — | Stable host ID (multi-bridge LAN) |
-| `LAN_SHARED_SECRET` | — | HMAC auth secret (strongly recommended) |
-| `LAN_AUTH_WINDOW_SEC` | `300` | Timestamp freshness window (seconds) |
+| `LAN_DISCOVERY_HOST_ID` | — | Stable host ID (for multi-bridge LAN) |
+| `LAN_SHARED_SECRET` | — | HMAC auth secret (**strongly recommended**) |
+| `LAN_AUTH_WINDOW_SEC` | `300` | Timestamp freshness window in seconds |
+
+#### Send Target
+
+| Variable | Default | Description |
+|----------|---------|-------------|
 | `SEND_TARGET` | `text_injector` | `text_injector`, `codex_exec`, or `claude_code` |
 | `TRANSCRIPT_DELIVERY_MODE` | `immediate` | `immediate` or `confirm_on_device` |
 | `TEXT_INJECTION_MODE` | `type_only` | `type_only` or `type_and_enter` |
-| `CODEX_COMMAND` | `codex` | Codex CLI path |
+
+#### CLI Session
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CODEX_COMMAND` | `codex` | Codex CLI binary path |
 | `CODEX_CWD` | `.` | Working directory for Codex |
 | `CODEX_SKIP_GIT_REPO_CHECK` | — | Set `1` to pass `--skip-git-repo-check` |
 | `CLAUDE_COMMAND` | auto-detect | Claude Code CLI path |
@@ -127,71 +228,107 @@ The footer on the device screen shows `BOOT Add | UP Send | DN Undo` when a tran
 | `CLAUDE_ALLOWED_TOOLS` | `Read,Edit,Write,Bash,Glob,Grep` | Pre-approved tools |
 | `CLAUDE_MAX_TURNS` | `10` | Max agentic turns per prompt |
 | `CLI_TIMEOUT_SEC` | `300` | Kill CLI subprocess after N seconds |
-| `DRY_RUN_TEXT_INJECTION` | — | Set `1` to log without keystrokes |
+
+#### Debug
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DRY_RUN_TEXT_INJECTION` | — | Set `1` to log injections without keystrokes |
 | `MOCK_TRANSCRIPT` | — | Fixed transcript text, bypasses STT |
-| `SAVE_DEBUG_WAV` | — | Set `1` to save segments to `tmp/` |
+| `SAVE_DEBUG_WAV` | — | Set `1` to save each audio segment to `tmp/` |
 
-### LAN Host Discovery
-
-The bridge advertises itself over UDP so the device does not need a hardcoded host IP.
-
-- Host listens on `LAN_DISCOVERY_PORT` for `discover_host` broadcasts.
-- Device sends a broadcast and receives a reply with the current WebSocket URL.
-- Set `LAN_DISCOVERY_HOST_ID` on both sides if you run more than one bridge on the same LAN.
-- If `LAN_SHARED_SECRET` is configured, discovery replies and `hello` messages are HMAC-SHA256 signed.
+---
 
 ### Development
 
 ```powershell
-npm test                  # run all tests
-node --test test/lan-auth.test.mjs  # run a single test
-node scripts/mock-client.mjs        # simulate a device connection
+npm test                             # run all tests
+node --test test/lan-auth.test.mjs   # run a single test file
+node scripts/mock-client.mjs         # simulate a device connection
 ```
 
-Debug flags: `MOCK_TRANSCRIPT=hello world` · `DRY_RUN_TEXT_INJECTION=1` · `SAVE_DEBUG_WAV=1`
+Debug workflow: `MOCK_TRANSCRIPT=hello world DRY_RUN_TEXT_INJECTION=1 npm start`
 
-Diagnostics: `npm run doctor`
+---
 
 ### Security and Privacy
 
 - Keep `.env` local — it is git-ignored and must never be committed.
 - Always set `LAN_SHARED_SECRET` on a shared or untrusted LAN.
-- Audio is sent to the configured STT provider; review provider retention and privacy settings before public use.
+- Audio is sent to the configured STT provider; review provider data retention and privacy terms before use in sensitive environments.
 - Codex may store session history under `~/.codex/`.
-- Text injection temporarily uses the clipboard and restores its previous contents when possible.
+- Text injection temporarily uses the clipboard and restores the previous content when possible.
 
 ---
 
 ## 中文
 
-`vibecoding-voice` 是一套基于 ESP32 设备的 LAN 语音编程桥接服务，运行在主机端。它通过 WebSocket 接收按键说话（Push-to-Talk）的 PCM 音频，调用语音识别服务转写，然后：
+**用无线 ESP32 电子墨水设备实现语音驱动的 AI 编程——无需抢占麦克风，无需中断键盘，按键说话即可。**
 
-- 将识别结果注入 Windows 当前输入框，或
-- 发送给托管的 Codex / Claude Code CLI 会话，并将状态实时投影回设备屏幕。
+`vibecoding-voice` 是一个由两部分组成的开源项目：
 
-ESP32 固件在另一个板级项目中维护，通过简单的 JSON + 二进制 WebSocket 协议与本服务通信。
+1. **主机桥接服务**（本仓库）— 运行在你电脑上的 Node.js 服务器。它通过 WebSocket 从 ESP32 设备接收按键说话（PTT）音频，调用语音识别将其转写，然后注入 Windows 当前输入框，或者驱动 Codex / Claude Code CLI 会话。
+2. **ESP32 固件**（`firmware/` 目录）— 运行在 Zectrix S3 或 Waveshare S3 电子墨水屏开发板上。负责 Wi-Fi 连接、按键录音、设备端确认界面，并将 CLI 实时输出渲染到电子墨水屏上。
+
+### 实际效果
+
+按住设备上的按键，说出一条编程指令，松开按键，不到一秒钟，转写后的文字就会发送给 Claude Code 或 Codex。AI 代理的执行进度——调用了哪些工具、写了什么代码——实时回传并显示在电子墨水屏上。你的手还在键盘上；这个设备就是你 AI 编程助手的语音遥控器。
+
+```
+┌─────────────────────────────────────────────────┐
+│  ESP32 电子墨水屏设备（局域网 Wi-Fi）              │
+│  ┌──────┐   PTT 音频（PCM16 16kHz）              │
+│  │ 麦克风 │──────────────────────────────────┐   │
+│  └──────┘                                  ▼   │
+│  ┌──────────┐   WebSocket        ┌──────────────┤
+│  │ 电子墨水屏 │◄─── CLI 状态回传 ──│  主机桥接服务 │
+│  └──────────┘                    └──────┬───────┘
+└─────────────────────────────────────────┼───────┘
+                                          │ 转写文本
+                                          ▼
+                              ┌───────────────────┐
+                              │  Codex CLI  或    │
+                              │  Claude Code CLI  │
+                              └───────────────────┘
+```
+
+### 支持的硬件
+
+| 开发板 | 屏幕 | 状态 |
+|--------|------|------|
+| [Zectrix S3 e-paper 4.2"](https://www.zectrix.ai/) | 400×300 灰度电子墨水 | ✅ 主要开发板 |
+| Waveshare ESP32-S3 e-paper 1.54" | 200×200 黑白电子墨水 | ✅ 已支持 |
+
+两款板子均采用 ESP32-S3，板载 MEMS 麦克风和按键。
 
 ### 功能特性
 
 - 通过 WebSocket 接收 16kHz 单声道 PCM 音频
 - 语音识别支持火山引擎闪速 ASR 或 OpenAI Whisper
-- 可选通过剪贴板注入 Windows 文本
+- 通过剪贴板（Ctrl+V）注入 Windows 文本
 - 托管 `codex exec --json` 会话
 - 托管 `claude -p --output-format stream-json` 会话
-- 将 CLI 状态、摘要、日志末行、配额快照投影到设备电子墨水屏
-- **多段语音累积** — 按 BOOT 持续追加语音片段，UP 发送，DN 撤销上一段
-- 设备端确认流程：先显示转写内容，需主动操作才发送
+- 将 CLI 状态、提示/回复摘要、日志末行、配额快照实时投影到电子墨水屏
+- **多段语音累积** — 按住 BOOT 持续追加语音片段，UP 发送，DN 撤销上一段
+- 设备端确认流程：先显示转写内容，主动操作后才发送
+- UDP 局域网主机自动发现 — 设备自动找到桥接服务，无需写死 IP
+- 发现回复和 WebSocket 握手均采用 HMAC-SHA256 签名认证
+- NVS 持久化主机配对信息 — 重启后自动重连上次配对的服务器
 
-### 环境要求
+---
+
+### 第一部分 — 主机桥接服务
+
+#### 环境要求
 
 - Node.js 20 或更高版本
 - Windows（文本注入功能需要；服务本身可在任何平台运行）
-- Codex CLI 或 Claude Code CLI 已在 `PATH` 中（使用 CLI 会话模式时）
+- Codex CLI 或 Claude Code CLI 已在 `PATH` 中（使用 CLI 会话模式时需要）
 - 语音识别密钥（二选一）：
   - 火山引擎：`VOLCENGINE_APP_KEY` + `VOLCENGINE_ACCESS_KEY`
   - OpenAI：`OPENAI_API_KEY`
 
-### 快速开始
+#### 快速开始
 
 **1. 安装依赖**
 
@@ -199,64 +336,111 @@ ESP32 固件在另一个板级项目中维护，通过简单的 JSON + 二进制
 npm install
 ```
 
-**2. 创建本地配置文件**
+**2. 配置**
 
 ```powershell
 Copy-Item .env.example .env
+# 然后编辑 .env
 ```
 
-**3. 编辑 `.env`** — 以 Codex + 火山引擎为例的常用配置：
+使用 Codex + 火山引擎的最简配置：
 
 ```env
 STT_PROVIDER=volcengine
 VOLCENGINE_APP_KEY=你的-app-key
 VOLCENGINE_ACCESS_KEY=你的-access-key
-VOLCENGINE_RESOURCE_ID=volc.bigasr.auc_turbo
-VOLCENGINE_LANGUAGE=zh-CN
-LAN_VOICE_PORT=8765
-LAN_DISCOVERY_ENABLED=1
-LAN_DISCOVERY_PORT=8766
-LAN_SHARED_SECRET=替换为随机密钥
 SEND_TARGET=codex_exec
 TRANSCRIPT_DELIVERY_MODE=confirm_on_device
-CODEX_COMMAND=codex
-CODEX_CWD=.
+LAN_SHARED_SECRET=替换为一个足够长的随机密钥
 ```
 
-**4. 启动桥接服务**
+**3. 启动**
 
 ```powershell
 npm start
 ```
 
-**5. 连接设备** — 将固件的 WebSocket 地址指向：
+服务启动时会打印 WebSocket 地址和 UDP 发现地址。看到 `server ready` 即表示桥接服务已就绪。
+
+**4. 诊断（可选）**
+
+```powershell
+npm run doctor
+```
+
+检查 CLI 工具、API 密钥、端口可用性和语音识别服务连通性。
+
+---
+
+### 第二部分 — ESP32 固件
+
+#### 方案 A：烧录预编译版本
+
+从 [`firmware/releases/`](firmware/releases/) 下载最新的 zip 文件，解压后执行：
+
+```powershell
+# 将 COMx 替换为你的开发板串口号
+python -m esptool --chip esp32s3 -p COMx -b 460800 write_flash "@flash_args"
+```
+
+#### 方案 B：从源码编译
+
+需要 ESP-IDF v5.5。
+
+```powershell
+cd firmware
+# Windows（自动检测 D:\Espressif 下的工具链）
+.\build_windows.ps1 -Flash -Port COMx
+```
+
+#### 固件配置
+
+固件默认已启用 UDP 自动发现。烧录前**必须**设置的只有共享密钥：
+
+在 `firmware/sdkconfig` 中（或通过 `idf.py menuconfig → LAN Mic` 设置）：
 
 ```
-ws://<主机局域网IP>:8765
+CONFIG_LAN_SHARED_SECRET="你的密钥"
 ```
 
-**6. 在设备固件本地配置中设置相同的 `LAN_SHARED_SECRET`**，然后再烧录。密钥不要提交到 git。
+在主机桥接服务的 `.env` 中设置相同的值：
 
-### 设备操作说明
+```env
+LAN_SHARED_SECRET=你的密钥
+```
 
-| 按键 | 状态 | 动作 |
-|------|------|------|
-| 按住 BOOT | 任意 | 录制一段语音 |
-| BOOT（松开后） | 等待确认 | 继续追加一段语音到当前转写 |
-| UP | 等待确认 | 发送已累积的全部转写内容 |
-| DN | 等待确认 | 撤销最后一段语音（只剩一段时则取消全部） |
+> **安全提示**：密钥不要提交到 git。建议用 `openssl rand -hex 32` 生成一个随机十六进制字符串。
 
-设备屏幕底部在有待发送内容时显示：`BOOT Add | UP Send | DN Undo`
+#### 首次开机
 
-### 设备 Wi-Fi 配网
+1. 开机。首次启动时设备自动进入 **Wi-Fi 配网 AP 模式**。
+2. 电子墨水屏显示 AP 名称、密码和 `http://192.168.4.1`。
+3. 用手机或电脑连接该热点，打开配网页面。
+4. 填入家庭/办公 Wi-Fi 凭据并保存。
+5. 设备重启，连上 Wi-Fi，通过 UDP 自动发现桥接服务，屏幕显示 **Ready**。
 
-- 首次开机：设备自动进入配网 AP 模式。
-- 屏幕显示 AP 名称、密码和 `http://192.168.4.1`。
-- 用手机或电脑连接该 AP，打开 `http://192.168.4.1` 保存 Wi-Fi 凭据。
-- 之后需要重新配网：同时按住 `UP + DOWN` 直到设备清除保存的 Wi-Fi 并重新进入 AP 模式。
-- 配网 AP 使用 WPA/WPA2，密码由设备标识派生并显示在屏幕上。
+之后需要重新配网：同时按住 **UP + DOWN** 直到屏幕清除并重新进入 AP 模式。
+
+---
+
+### 设备按键说明
+
+| 按键 | 连接状态 | 动作 |
+|------|----------|------|
+| 按住 BOOT | 已连接 | 录制一段语音 |
+| BOOT（松开） | 等待确认 | 继续追加一段语音到当前转写 |
+| BOOT（按下） | 已断连 | 强制立即重新连接 |
+| UP 单击 | 等待确认 | 发送已累积的全部转写内容给 CLI |
+| DN 单击 | 等待确认 | 撤销最后一段（只剩一段时取消全部） |
+| 按住 UP + DN | 任意 | 重新进入 Wi-Fi 配网模式 |
+
+有待发送内容时屏幕底部显示：`BOOT Add · UP Send · DN Undo`
+
+---
 
 ### 配置项说明
+
+#### 语音识别
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
@@ -268,15 +452,30 @@ ws://<主机局域网IP>:8765
 | `OPENAI_API_KEY` | — | OpenAI API 密钥 |
 | `OPENAI_TRANSCRIBE_MODEL` | `whisper-1` | 转写模型 |
 | `OPENAI_TRANSCRIBE_LANGUAGE` | — | 例如 `zh` |
+
+#### 网络
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
 | `LAN_VOICE_PORT` | `8765` | WebSocket 端口 |
 | `LAN_DISCOVERY_ENABLED` | `1` | 开启 UDP 自动发现 |
 | `LAN_DISCOVERY_PORT` | `8766` | UDP 发现端口 |
 | `LAN_DISCOVERY_HOST_ID` | — | 稳定主机标识（多桥接场景） |
-| `LAN_SHARED_SECRET` | — | HMAC 认证密钥（强烈建议设置） |
+| `LAN_SHARED_SECRET` | — | HMAC 认证密钥（**强烈建议设置**） |
 | `LAN_AUTH_WINDOW_SEC` | `300` | 时间戳有效窗口（秒） |
+
+#### 发送目标
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
 | `SEND_TARGET` | `text_injector` | `text_injector`、`codex_exec` 或 `claude_code` |
 | `TRANSCRIPT_DELIVERY_MODE` | `immediate` | `immediate` 或 `confirm_on_device` |
 | `TEXT_INJECTION_MODE` | `type_only` | `type_only` 或 `type_and_enter` |
+
+#### CLI 会话
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
 | `CODEX_COMMAND` | `codex` | Codex CLI 路径 |
 | `CODEX_CWD` | `.` | Codex 工作目录 |
 | `CODEX_SKIP_GIT_REPO_CHECK` | — | 设为 `1` 传入 `--skip-git-repo-check` |
@@ -285,35 +484,33 @@ ws://<主机局域网IP>:8765
 | `CLAUDE_ALLOWED_TOOLS` | `Read,Edit,Write,Bash,Glob,Grep` | 预授权工具列表 |
 | `CLAUDE_MAX_TURNS` | `10` | 每次提示的最大轮数 |
 | `CLI_TIMEOUT_SEC` | `300` | CLI 子进程超时秒数 |
+
+#### 调试
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
 | `DRY_RUN_TEXT_INJECTION` | — | 设为 `1` 仅记录日志不注入按键 |
 | `MOCK_TRANSCRIPT` | — | 固定转写文本，跳过语音识别 |
 | `SAVE_DEBUG_WAV` | — | 设为 `1` 将每段音频保存到 `tmp/` |
 
-### LAN 主机自动发现
-
-桥接服务通过 UDP 广播自我通告，设备无需写死主机 IP。
-
-- 主机在 `LAN_DISCOVERY_PORT` 监听 `discover_host` 广播。
-- 设备发出广播后收到含当前 WebSocket 地址的回复。
-- 同一局域网有多个桥接实例时，在两端设置相同的 `LAN_DISCOVERY_HOST_ID`。
-- 配置了 `LAN_SHARED_SECRET` 时，发现回复和 `hello` 消息均用 HMAC-SHA256 签名。
+---
 
 ### 开发调试
 
 ```powershell
-npm test                  # 运行全部测试
-node --test test/lan-auth.test.mjs  # 运行单个测试
-node scripts/mock-client.mjs        # 模拟设备连接
+npm test                             # 运行全部测试
+node --test test/lan-auth.test.mjs   # 运行单个测试文件
+node scripts/mock-client.mjs         # 模拟设备连接
 ```
 
-调试开关：`MOCK_TRANSCRIPT=你好世界` · `DRY_RUN_TEXT_INJECTION=1` · `SAVE_DEBUG_WAV=1`
+调试工作流：`MOCK_TRANSCRIPT=你好世界 DRY_RUN_TEXT_INJECTION=1 npm start`
 
-环境诊断：`npm run doctor`
+---
 
 ### 安全与隐私
 
-- `.env` 文件仅保留在本地，已加入 `.gitignore`，绝不要提交。
+- `.env` 文件仅保留在本地，已加入 `.gitignore`，**绝不要提交**。
 - 在共享或不受信任的局域网中必须设置 `LAN_SHARED_SECRET`。
-- 音频会发送给配置的语音识别服务商，公开演示或团队使用前请确认服务商的数据留存和隐私政策。
+- 音频会发送给配置的语音识别服务商，在敏感环境中使用前请确认服务商的数据留存和隐私政策。
 - Codex 可能在 `~/.codex/` 下存储会话历史。
-- 文本注入会临时使用剪贴板，操作完成后尽量恢复原有剪贴板内容。
+- 文本注入会临时使用剪贴板，操作完成后尽量恢复原有内容。
