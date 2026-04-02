@@ -6,6 +6,7 @@
 #include <map>
 #include <thread>
 #include <mutex>
+#include <atomic>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 
@@ -24,8 +25,9 @@ public:
     bool Connect(const char* uri);
     bool Send(const std::string& data);
     bool Send(const void* data, size_t len, bool binary = false, bool fin = true);
-    void Ping();
+    bool Ping();
     void Close();
+    int64_t GetLastPongMs() const;
 
     void OnConnected(std::function<void()> callback);
     void OnDisconnected(std::function<void()> callback);
@@ -43,7 +45,8 @@ private:
     size_t receive_buffer_size_ = 2048;
     std::string receive_buffer_;
     bool handshake_completed_ = false;
-    bool connected_ = false;
+    std::atomic<bool> connected_{false};
+    std::atomic<int64_t> last_pong_ms_{0};
 
     // Mutex for sending data and replying pong
     std::mutex send_mutex_;
@@ -60,6 +63,12 @@ private:
 
     void OnTcpData(const std::string& data);
     bool SendControlFrame(uint8_t opcode, const void* data, size_t len);
+
+    // Per-connection message reassembly state (must NOT be static — each
+    // WebSocket instance has independent state so reconnects start clean).
+    std::vector<char> current_message_;
+    bool is_fragmented_ = false;
+    bool is_binary_ = false;
 };
 
 #endif // WEBSOCKET_H

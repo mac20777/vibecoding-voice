@@ -18,7 +18,16 @@ EspTcp::EspTcp() {
 }
 
 EspTcp::~EspTcp() {
-    Disconnect();
+    if (connected_.load(std::memory_order_relaxed)) {
+        // Active connection: close socket and wait for ReceiveTask to exit.
+        DoDisconnect(true);
+    } else if (receive_task_handle_ != nullptr) {
+        // Already passively disconnected, but the ReceiveTask lambda may not
+        // have called xEventGroupSetBits yet.  Wait briefly so we do not
+        // delete event_group_ while the task is still running.
+        xEventGroupWaitBits(event_group_, ESP_TCP_EVENT_RECEIVE_TASK_EXIT,
+                            pdFALSE, pdFALSE, pdMS_TO_TICKS(1000));
+    }
 
     if (event_group_ != nullptr) {
         vEventGroupDelete(event_group_);
@@ -28,7 +37,7 @@ EspTcp::~EspTcp() {
 
 bool EspTcp::Connect(const std::string& host, int port) {
     // 确保先断开已有连接
-    if (connected_) {
+    if (connected_.load(std::memory_order_relaxed)) {
         Disconnect();
     }
 
@@ -113,9 +122,10 @@ bool EspTcp::Connect(const std::string& host, int port) {
     if (original_flags >= 0) {
         fcntl(tcp_fd_, F_SETFL, original_flags);
     }
+
     freeaddrinfo(server);
 
-    connected_ = true;
+    connected_.store(true, std::memory_order_relaxed);
 
     xEventGroupClearBits(event_group_, ESP_TCP_EVENT_RECEIVE_TASK_EXIT);
     xTaskCreate([](void* arg) {
@@ -129,7 +139,7 @@ bool EspTcp::Connect(const std::string& host, int port) {
 
 void EspTcp::Disconnect() {
     // 如果已经断开，直接返回
-    if (!connected_) {
+    if (!connected_.load(std::memory_order_relaxed)) {
         return;
     }
 
@@ -138,7 +148,7 @@ void EspTcp::Disconnect() {
 }
 
 void EspTcp::DoDisconnect(bool wait_for_task) {
-    connected_ = false;
+    connected_.store(false, std::memory_order_relaxed);
 
     if (tcp_fd_ != -1) {
         close(tcp_fd_);
@@ -161,7 +171,7 @@ void EspTcp::DoDisconnect(bool wait_for_task) {
 }
 
 int EspTcp::Send(const std::string& data) {
-    if (!connected_) {
+    if (!connected_.load(std::memory_order_relaxed)) {
         ESP_LOGE(TAG, "Not connected");
         return -1;
     }
@@ -186,7 +196,7 @@ int EspTcp::Send(const std::string& data) {
 
 void EspTcp::ReceiveTask() {
     std::string data;
-    while (connected_) {
+    while (connected_.load(std::memory_order_relaxed)) {
         data.resize(1500);
         int ret = recv(tcp_fd_, data.data(), data.size(), 0);
         if (ret <= 0) {

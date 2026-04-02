@@ -38,6 +38,7 @@ private:
     std::atomic<bool> down_clicked_{false};
     std::atomic<bool> up_long_pressed_{false};
     std::atomic<bool> down_long_pressed_{false};
+    std::atomic<bool> ws_disconnected_pending_{false};
     bool has_pending_transcript_ = false;
     std::string send_target_;         // received from server_ready: "claude_code" | "codex_exec" | "text_injector"
     std::vector<int16_t> audio_frame_buffer_; // reused across StreamAudioFrame() calls
@@ -92,12 +93,22 @@ private:
     bool battery_discharging_ = false;
     int summary_scroll_offset_ = 0;
     int log_scroll_offset_ = 0;
+    std::string cached_server_uri_;
+    std::string paired_host_id_;
+    std::string paired_host_name_;
 
     bool Initialize();
+    void LoadPersistedNetworkState();
+    void SaveCachedServerUri(const std::string& server_uri);
+    void SavePairedHost(const std::string& host_id, const std::string& host_name);
+    void ClearPersistedHost();
     void ConfigureButtons();
     bool IsWifiConnected() const;
     bool EnsureWebSocketConnected();
     bool DiscoverServerUri();
+    std::string GetExpectedDiscoveryHostId() const;
+    std::string GetFallbackServerUri() const;
+    std::string GetDiscoveryHintText() const;
     std::string MakeAuthNonce() const;
     std::string HmacSha256Hex(const std::vector<std::string>& parts) const;
     void EnterWifiSetupMode();

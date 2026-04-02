@@ -4,6 +4,7 @@
 #include <driver/gpio.h>
 #include <esp_log.h>
 #include <esp_random.h>
+#include <esp_system.h>
 #include <esp_timer.h>
 #include <lwip/inet.h>
 #include <lwip/sockets.h>
@@ -33,7 +34,7 @@ extern "C" void ZectrixSetFactoryLedOverride(bool enabled, bool blink);
 namespace {
 
 #ifndef CONFIG_LAN_MIC_SERVER_URI
-#define CONFIG_LAN_MIC_SERVER_URI "ws://192.168.1.100:8765"
+#define CONFIG_LAN_MIC_SERVER_URI ""
 #endif
 #ifndef CONFIG_LAN_DISCOVERY_ENABLED
 #define CONFIG_LAN_DISCOVERY_ENABLED 1
@@ -50,6 +51,11 @@ namespace {
 
 constexpr char kTag[] = "LanMicApp";
 constexpr char kDiscoveryService[] = "vibecoding-voice";
+constexpr char kLanMicNamespace[] = "lan_mic";
+constexpr char kVolumeKey[] = "volume";
+constexpr char kLastServerUriKey[] = "last_srv_uri";
+constexpr char kPairedHostIdKey[] = "pair_host_id";
+constexpr char kPairedHostNameKey[] = "pair_host_nm";
 constexpr EventBits_t kWifiConnectedBit = BIT0;
 constexpr int kFrameDurationMs = 20;
 constexpr int kSampleRate = 16000;
@@ -60,7 +66,11 @@ constexpr int kDiscoveryTimeoutMs = 600;
 constexpr int kDiscoveryRetryDelayMs = 150;
 constexpr int64_t kReconnectIntervalMinMs = 2000;
 constexpr int64_t kReconnectIntervalMaxMs = 60000;
-constexpr int64_t kPingIntervalMs = 10000;
+constexpr int64_t kPongTimeoutMs = 45000;
+// If no server connection is established within this window, enter deep sleep
+// to preserve battery.  BOOT button or a 5-minute timer wakes the board for
+// another retry cycle.  Pressing BOOT while disconnected resets this window.
+constexpr int64_t kNoConnectionSleepMs = 5LL * 60 * 1000;  // 5 minutes
 constexpr size_t kBodyCharsPerLine = 22;
 constexpr size_t kPromptVisibleLines = 3;
 constexpr size_t kReplyVisibleLines = 4;
@@ -204,11 +214,7 @@ bool LanMicApp::Initialize() {
 
     ConfigureButtons();
 
-    // Load persisted settings (volume, etc.)
-    {
-        Settings nvs("lan_mic");
-        volume_ = nvs.GetInt("volume", 70);
-    }
+    LoadPersistedNetworkState();
     codec_->Start();
     codec_->EnableOutput(false);
     codec_->SetOutputVolume(volume_);
@@ -222,7 +228,11 @@ bool LanMicApp::Initialize() {
     send_target_.clear();
     server_uri_.clear();
 #if !CONFIG_LAN_DISCOVERY_ENABLED
-    server_uri_ = CONFIG_LAN_MIC_SERVER_URI;
+    if (!cached_server_uri_.empty()) {
+        server_uri_ = cached_server_uri_;
+    } else if (std::strlen(CONFIG_LAN_MIC_SERVER_URI) > 0) {
+        server_uri_ = CONFIG_LAN_MIC_SERVER_URI;
+    }
 #endif
     audio_frame_buffer_.resize(kFrameSamples);
     cli_log_lines_.clear();
@@ -252,7 +262,7 @@ bool LanMicApp::Initialize() {
                 network_state_ = NetworkState::Wifi;
                 status_text_ = "Wi-Fi connected";
                 server_uri_.clear();
-                hint_text_ = CONFIG_LAN_DISCOVERY_ENABLED ? "Discovering host..." : "Connecting server...";
+                hint_text_ = CONFIG_LAN_DISCOVERY_ENABLED ? GetDiscoveryHintText() : "Connecting server...";
                 UpdateDisplay();
                 break;
             case NetworkEvent::Disconnected:
@@ -287,6 +297,71 @@ bool LanMicApp::Initialize() {
 
     board_.StartNetwork();
     return true;
+}
+
+void LanMicApp::LoadPersistedNetworkState() {
+    Settings nvs(kLanMicNamespace);
+    volume_ = nvs.GetInt(kVolumeKey, 70);
+    cached_server_uri_ = nvs.GetString(kLastServerUriKey, "");
+    paired_host_id_ = nvs.GetString(kPairedHostIdKey, "");
+    paired_host_name_ = nvs.GetString(kPairedHostNameKey, "");
+
+    if (!paired_host_id_.empty()) {
+        ESP_LOGI(kTag, "Loaded paired host: id=%s name=%s",
+                 paired_host_id_.c_str(),
+                 paired_host_name_.empty() ? "(unknown)" : paired_host_name_.c_str());
+    }
+    if (!cached_server_uri_.empty()) {
+        ESP_LOGI(kTag, "Loaded cached server URI: %s", cached_server_uri_.c_str());
+    }
+}
+
+void LanMicApp::SaveCachedServerUri(const std::string& server_uri) {
+    if (server_uri.empty() || server_uri == cached_server_uri_) {
+        return;
+    }
+
+    Settings nvs(kLanMicNamespace, true);
+    nvs.SetString(kLastServerUriKey, server_uri);
+    cached_server_uri_ = server_uri;
+    ESP_LOGI(kTag, "Cached server URI: %s", cached_server_uri_.c_str());
+}
+
+void LanMicApp::SavePairedHost(const std::string& host_id, const std::string& host_name) {
+    if (host_id.empty()) {
+        return;
+    }
+
+    const std::string next_host_name = host_name.empty() ? paired_host_name_ : host_name;
+    if (host_id == paired_host_id_ && next_host_name == paired_host_name_) {
+        return;
+    }
+
+    Settings nvs(kLanMicNamespace, true);
+    nvs.SetString(kPairedHostIdKey, host_id);
+    if (!next_host_name.empty()) {
+        nvs.SetString(kPairedHostNameKey, next_host_name);
+    }
+
+    paired_host_id_ = host_id;
+    paired_host_name_ = next_host_name;
+    ESP_LOGI(kTag, "Paired host saved: id=%s name=%s",
+             paired_host_id_.c_str(),
+             paired_host_name_.empty() ? "(unknown)" : paired_host_name_.c_str());
+}
+
+void LanMicApp::ClearPersistedHost() {
+    Settings nvs(kLanMicNamespace, true);
+    nvs.EraseKey(kLastServerUriKey);
+    nvs.EraseKey(kPairedHostIdKey);
+    nvs.EraseKey(kPairedHostNameKey);
+
+    cached_server_uri_.clear();
+    paired_host_id_.clear();
+    paired_host_name_.clear();
+    server_uri_.clear();
+
+    ESP_LOGI(kTag, "Cleared cached host pairing and server URI");
 }
 
 void LanMicApp::ConfigureButtons() {
@@ -324,19 +399,27 @@ bool LanMicApp::EnsureWebSocketConnected() {
     DiscoverServerUri();
 
     const char* target_uri = nullptr;
+    const char* target_source = "none";
+    std::string fallback_server_uri;
     if (!server_uri_.empty()) {
         target_uri = server_uri_.c_str();
+        target_source = "discovery";
+    } else if (!cached_server_uri_.empty()) {
+        target_uri = cached_server_uri_.c_str();
+        target_source = "cache";
     }
 
-#if !CONFIG_LAN_DISCOVERY_ENABLED
     if (target_uri == nullptr) {
-        target_uri = CONFIG_LAN_MIC_SERVER_URI;
+        fallback_server_uri = GetFallbackServerUri();
+        if (!fallback_server_uri.empty()) {
+            target_uri = fallback_server_uri.c_str();
+            target_source = "fallback";
+        }
     }
-#endif
 
     if (target_uri == nullptr) {
         status_text_ = "Finding host";
-        hint_text_ = "Waiting for LAN reply";
+        hint_text_ = GetDiscoveryHintText();
         UpdateDisplay();
         return false;
     }
@@ -347,9 +430,13 @@ bool LanMicApp::EnsureWebSocketConnected() {
         return false;
     }
 
+    const std::string target_uri_text = target_uri;
+    ESP_LOGI(kTag, "Connecting via %s: %s", target_source, target_uri_text.c_str());
+
     ws_ = network->CreateWebSocket(0);
-    ws_->OnConnected([this]() {
+    ws_->OnConnected([this, target_uri_text]() {
         ESP_LOGI(kTag, "WebSocket connected");
+        SaveCachedServerUri(target_uri_text);
         network_state_ = NetworkState::Server;
         status_text_ = "Connected";
         hint_text_ = "";  // BuildPromptBody() will show "Hold BOOT to talk"
@@ -358,12 +445,7 @@ bool LanMicApp::EnsureWebSocketConnected() {
     });
     ws_->OnDisconnected([this]() {
         ESP_LOGW(kTag, "WebSocket disconnected");
-        hello_sent_ = false;
-        network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
-        status_text_ = "Disconnected";
-        hint_text_ = "Will retry automatically";
-        phase_ = Phase::Idle;
-        UpdateDisplay();
+        ws_disconnected_pending_.store(true);
     });
     ws_->OnError([this](int error) {
         ESP_LOGW(kTag, "WebSocket error=%d", error);
@@ -381,9 +463,6 @@ bool LanMicApp::EnsureWebSocketConnected() {
 
     if (!ws_->Connect(target_uri)) {
         ESP_LOGW(kTag, "WebSocket connect failed: %s", target_uri);
-#if CONFIG_LAN_DISCOVERY_ENABLED
-        server_uri_.clear();
-#endif
         ws_.reset();
         hello_sent_ = false;
         status_text_ = "Connect failed";
@@ -409,6 +488,7 @@ bool LanMicApp::DiscoverServerUri() {
         return true;
     }
 
+    const std::string expected_host_id = GetExpectedDiscoveryHostId();
     cJSON* request = cJSON_CreateObject();
     const std::string nonce = MakeAuthNonce();
     cJSON_AddStringToObject(request, "type", "discover_host");
@@ -416,8 +496,8 @@ bool LanMicApp::DiscoverServerUri() {
     cJSON_AddStringToObject(request, "deviceId", board_.GetUuid().c_str());
     cJSON_AddStringToObject(request, "boardType", board_.GetBoardType().c_str());
     cJSON_AddStringToObject(request, "nonce", nonce.c_str());
-    if (std::strlen(CONFIG_LAN_DISCOVERY_HOST_ID) > 0) {
-        cJSON_AddStringToObject(request, "expectedHostId", CONFIG_LAN_DISCOVERY_HOST_ID);
+    if (!expected_host_id.empty()) {
+        cJSON_AddStringToObject(request, "expectedHostId", expected_host_id.c_str());
     }
 
     char* request_text = cJSON_PrintUnformatted(request);
@@ -427,7 +507,7 @@ bool LanMicApp::DiscoverServerUri() {
     }
 
     for (int attempt = 0; attempt < kDiscoveryAttempts; ++attempt) {
-        int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+        int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (sock < 0) {
             ESP_LOGW(kTag, "Discovery socket create failed: errno=%d", errno);
             break;
@@ -435,10 +515,17 @@ bool LanMicApp::DiscoverServerUri() {
 
         int broadcast = 1;
         setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast));
-        struct timeval timeout = {};
-        timeout.tv_sec = kDiscoveryTimeoutMs / 1000;
-        timeout.tv_usec = (kDiscoveryTimeoutMs % 1000) * 1000;
-        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        struct sockaddr_in local_addr = {};
+        local_addr.sin_family = AF_INET;
+        local_addr.sin_port = htons(0);
+        local_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        if (bind(sock,
+                 reinterpret_cast<struct sockaddr*>(&local_addr),
+                 sizeof(local_addr)) < 0) {
+            ESP_LOGW(kTag, "Discovery bind failed: errno=%d", errno);
+            close(sock);
+            continue;
+        }
 
         struct sockaddr_in broadcast_addr = {};
         broadcast_addr.sin_family = AF_INET;
@@ -458,73 +545,83 @@ bool LanMicApp::DiscoverServerUri() {
             continue;
         }
 
-        char response_buffer[512];
-        struct sockaddr_in source_addr = {};
-        socklen_t source_addr_len = sizeof(source_addr);
-        const int received = recvfrom(sock,
-                                      response_buffer,
-                                      sizeof(response_buffer) - 1,
-                                      0,
-                                      reinterpret_cast<struct sockaddr*>(&source_addr),
-                                      &source_addr_len);
-        close(sock);
-
-        if (received <= 0) {
-            if (attempt + 1 < kDiscoveryAttempts) {
-                vTaskDelay(pdMS_TO_TICKS(kDiscoveryRetryDelayMs));
+        const int64_t deadline_us = esp_timer_get_time() + (kDiscoveryTimeoutMs * 1000LL);
+        while (esp_timer_get_time() < deadline_us) {
+            const int64_t remaining_us = deadline_us - esp_timer_get_time();
+            if (remaining_us <= 0) {
+                break;
             }
-            continue;
-        }
 
-        response_buffer[received] = '\0';
-        cJSON* response = cJSON_Parse(response_buffer);
-        if (response == nullptr) {
-            if (attempt + 1 < kDiscoveryAttempts) {
-                vTaskDelay(pdMS_TO_TICKS(kDiscoveryRetryDelayMs));
+            struct timeval timeout = {};
+            timeout.tv_sec = remaining_us / 1000000;
+            timeout.tv_usec = remaining_us % 1000000;
+            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+            char response_buffer[512];
+            struct sockaddr_in source_addr = {};
+            socklen_t source_addr_len = sizeof(source_addr);
+            const int received = recvfrom(sock,
+                                          response_buffer,
+                                          sizeof(response_buffer) - 1,
+                                          0,
+                                          reinterpret_cast<struct sockaddr*>(&source_addr),
+                                          &source_addr_len);
+            if (received <= 0) {
+                continue;
             }
-            continue;
-        }
 
-        const char* type = GetJsonString(response, "type");
-        const char* service = GetJsonString(response, "service");
-        const char* ws_url = GetJsonString(response, "wsUrl");
-        const char* host_id = GetJsonString(response, "hostId");
-        const char* host_name = GetJsonString(response, "hostName");
-        const char* reply_nonce = GetJsonString(response, "nonce");
-        const char* auth_sig = GetJsonString(response, "authSig");
-
-        const bool type_ok = type != nullptr && strcmp(type, "discover_reply") == 0;
-        const bool service_ok = service == nullptr || strcmp(service, kDiscoveryService) == 0;
-        const bool host_ok =
-            std::strlen(CONFIG_LAN_DISCOVERY_HOST_ID) == 0 ||
-            (host_id != nullptr && strcmp(host_id, CONFIG_LAN_DISCOVERY_HOST_ID) == 0);
-        bool auth_ok = true;
-        if (std::strlen(CONFIG_LAN_SHARED_SECRET) > 0) {
-            if (reply_nonce == nullptr || auth_sig == nullptr || nonce != reply_nonce) {
-                auth_ok = false;
-            } else {
-                const auto expected = HmacSha256Hex({
-                    "discover_reply",
-                    host_id != nullptr ? host_id : "",
-                    host_name != nullptr ? host_name : "",
-                    ws_url != nullptr ? ws_url : "",
-                    reply_nonce
-                });
-                auth_ok = !expected.empty() && expected == std::string(auth_sig);
+            response_buffer[received] = '\0';
+            cJSON* response = cJSON_Parse(response_buffer);
+            if (response == nullptr) {
+                continue;
             }
-        }
 
-        if (type_ok && service_ok && host_ok && auth_ok && ws_url != nullptr && ws_url[0] != '\0') {
-            server_uri_ = ws_url;
-            status_text_ = "Host discovered";
-            hint_text_ = (host_name != nullptr && host_name[0] != '\0') ? host_name : server_uri_;
-            ESP_LOGI(kTag, "Discovered host: %s (%s)", server_uri_.c_str(), hint_text_.c_str());
+            const char* type = GetJsonString(response, "type");
+            const char* service = GetJsonString(response, "service");
+            const char* ws_url = GetJsonString(response, "wsUrl");
+            const char* host_id = GetJsonString(response, "hostId");
+            const char* host_name = GetJsonString(response, "hostName");
+            const char* reply_nonce = GetJsonString(response, "nonce");
+            const char* auth_sig = GetJsonString(response, "authSig");
+
+            const bool type_ok = type != nullptr && strcmp(type, "discover_reply") == 0;
+            const bool service_ok = service == nullptr || strcmp(service, kDiscoveryService) == 0;
+            const bool host_ok = expected_host_id.empty() ||
+                                 (host_id != nullptr && expected_host_id == host_id);
+            bool auth_ok = true;
+            if (std::strlen(CONFIG_LAN_SHARED_SECRET) > 0) {
+                if (reply_nonce == nullptr || auth_sig == nullptr || nonce != reply_nonce) {
+                    auth_ok = false;
+                } else {
+                    const auto expected = HmacSha256Hex({
+                        "discover_reply",
+                        host_id != nullptr ? host_id : "",
+                        host_name != nullptr ? host_name : "",
+                        ws_url != nullptr ? ws_url : "",
+                        reply_nonce
+                    });
+                    auth_ok = !expected.empty() && expected == std::string(auth_sig);
+                }
+            }
+
+            if (type_ok && service_ok && host_ok && auth_ok && ws_url != nullptr && ws_url[0] != '\0') {
+                server_uri_ = ws_url;
+                SaveCachedServerUri(server_uri_);
+                SavePairedHost(host_id != nullptr ? host_id : "",
+                               host_name != nullptr ? host_name : "");
+                status_text_ = "Host discovered";
+                hint_text_ = (host_name != nullptr && host_name[0] != '\0') ? host_name : server_uri_;
+                ESP_LOGI(kTag, "Discovered host: %s (%s)", server_uri_.c_str(), hint_text_.c_str());
+                cJSON_Delete(response);
+                close(sock);
+                cJSON_free(request_text);
+                return true;
+            }
+
             cJSON_Delete(response);
-            cJSON_free(request_text);
-            return true;
         }
 
-        cJSON_Delete(response);
+        close(sock);
         if (attempt + 1 < kDiscoveryAttempts) {
             vTaskDelay(pdMS_TO_TICKS(kDiscoveryRetryDelayMs));
         }
@@ -585,8 +682,33 @@ std::string LanMicApp::HmacSha256Hex(const std::vector<std::string>& parts) cons
     return std::string(hex);
 }
 
+std::string LanMicApp::GetExpectedDiscoveryHostId() const {
+    if (std::strlen(CONFIG_LAN_DISCOVERY_HOST_ID) > 0) {
+        return CONFIG_LAN_DISCOVERY_HOST_ID;
+    }
+    return paired_host_id_;
+}
+
+std::string LanMicApp::GetFallbackServerUri() const {
+    if (std::strlen(CONFIG_LAN_MIC_SERVER_URI) == 0) {
+        return "";
+    }
+    return CONFIG_LAN_MIC_SERVER_URI;
+}
+
+std::string LanMicApp::GetDiscoveryHintText() const {
+    if (!paired_host_name_.empty()) {
+        return "Finding " + paired_host_name_ + "...";
+    }
+    if (!paired_host_id_.empty()) {
+        return "Finding paired host...";
+    }
+    return "Discovering host...";
+}
+
 void LanMicApp::EnterWifiSetupMode() {
     ESP_LOGW(kTag, "Clearing saved Wi-Fi and entering config mode");
+    ClearPersistedHost();
     DisconnectWebSocket();
     xEventGroupClearBits(wifi_event_group_, kWifiConnectedBit);
     up_long_pressed_.store(false);
@@ -606,14 +728,10 @@ void LanMicApp::EnterWifiSetupMode() {
 
 void LanMicApp::DisconnectWebSocket() {
     if (ws_ != nullptr) {
-        ws_->Close();
         ws_.reset();
     }
     hello_sent_ = false;
     preroll_frames_.clear();
-#if CONFIG_LAN_DISCOVERY_ENABLED
-    server_uri_.clear();
-#endif
 }
 
 bool LanMicApp::IsPttPressed() const {
@@ -1002,8 +1120,8 @@ void LanMicApp::EnterSettings() {
 }
 
 void LanMicApp::SaveVolume() {
-    Settings nvs("lan_mic", true);
-    nvs.SetInt("volume", volume_);
+    Settings nvs(kLanMicNamespace, true);
+    nvs.SetInt(kVolumeKey, volume_);
 }
 
 void LanMicApp::Shutdown() {
@@ -1380,7 +1498,7 @@ void LanMicApp::UpdateDisplay() {
         const std::string vol_label = "Volume: " + std::to_string(volume_) + "%";
         const char* items[kSettingsItemCount] = {
             vol_label.c_str(),
-            "WiFi Reset",
+            "Network Reset",
             "Restart",
             "Power Off"
         };
@@ -1422,12 +1540,27 @@ void LanMicApp::Run() {
     bool last_pressed = false;
     int64_t last_reconnect_ms = 0;
     int64_t reconnect_interval_ms = kReconnectIntervalMinMs;
-    int reconnect_failures = 0;
-    int64_t last_ping_ms = 0;
     int64_t last_battery_poll_ms = 0;
+    // Tracks when the current "disconnected stretch" started.
+    // Initialised to now so a cold boot with no server still gets a full grace
+    // period before sleeping, but reset on every disconnect so a board that had
+    // been happily connected for hours does not immediately deep-sleep after
+    // the very first failed reconnect attempt.
+    int64_t disconnected_since_ms = esp_timer_get_time() / 1000;
 
     while (true) {
         const int64_t now_ms = esp_timer_get_time() / 1000;
+        if (ws_disconnected_pending_.exchange(false)) {
+            hello_sent_ = false;
+            network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
+            status_text_ = "Disconnected";
+            hint_text_ = "Will retry automatically";
+            phase_ = Phase::Idle;
+            disconnected_since_ms = now_ms;
+            reconnect_interval_ms = kReconnectIntervalMinMs;
+            last_reconnect_ms = 0;
+            UpdateDisplay();
+        }
         if ((now_ms - last_battery_poll_ms) >= kBatteryPollIntervalMs) {
             last_battery_poll_ms = now_ms;
             RefreshBatteryStatus();
@@ -1476,32 +1609,47 @@ void LanMicApp::Run() {
             const bool ok = EnsureWebSocketConnected();
             if (ok) {
                 reconnect_interval_ms = kReconnectIntervalMinMs;
-                reconnect_failures = 0;
+                disconnected_since_ms = now_ms;
             } else if (server_uri_.empty()) {
-                // Host discovery is still in progress; keep retry cadence tight and
-                // avoid sleeping the board just because the host did not answer yet.
+                // Discovery still searching — keep fast cadence so we pick up
+                // the server quickly once it appears.
                 reconnect_interval_ms = kReconnectIntervalMinMs;
-                reconnect_failures = 0;
             } else {
+                // Had a URI but TCP/WS connect failed — back off gradually.
                 reconnect_interval_ms = std::min(reconnect_interval_ms * 2, kReconnectIntervalMaxMs);
-                reconnect_failures++;
-                if (reconnect_failures >= 35) {
-                    DisconnectWebSocket();
-                    status_text_ = "No server";
-                    hint_text_ = "Press BOOT to retry";
-                    active_page_ = Page::Summary;
-                    UpdateDisplay();
-                    vTaskDelay(pdMS_TO_TICKS(800));
-                    esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(BOOT_BUTTON_GPIO), 0);
-                    esp_sleep_enable_timer_wakeup(5ULL * 60 * 1000 * 1000);  // 5 minutes
-                    esp_deep_sleep_start();
-                }
+            }
+
+            // Time-based sleep: if no connection has been established within
+            // kNoConnectionSleepMs, enter deep sleep to save battery.
+            // The board wakes on BOOT press or a 5-minute timer for the next
+            // retry cycle.  This path is taken regardless of discovery state,
+            // so it works correctly when CONFIG_LAN_DISCOVERY_ENABLED=y.
+            if (!ok && (now_ms - disconnected_since_ms) >= kNoConnectionSleepMs) {
+                DisconnectWebSocket();
+                status_text_ = "No server";
+                hint_text_ = "Press BOOT to retry";
+                active_page_ = Page::Summary;
+                UpdateDisplay();
+                vTaskDelay(pdMS_TO_TICKS(800));
+                esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(BOOT_BUTTON_GPIO), 0);
+                esp_sleep_enable_timer_wakeup(5ULL * 60 * 1000 * 1000);  // 5 minutes
+                esp_deep_sleep_start();
             }
         }
 
-        if (ws_ != nullptr && ws_->IsConnected() && (now_ms - last_ping_ms) >= kPingIntervalMs) {
-            last_ping_ms = now_ms;
-            ws_->Ping();
+        if (ws_ != nullptr && ws_->IsConnected()) {
+            const int64_t last_pong_ms = ws_->GetLastPongMs();
+            if (last_pong_ms > 0 && (now_ms - last_pong_ms) >= kPongTimeoutMs) {
+                ESP_LOGW(kTag,
+                         "WebSocket heartbeat timed out: last_pong_ms=%lld now_ms=%lld",
+                         static_cast<long long>(last_pong_ms),
+                         static_cast<long long>(now_ms));
+                status_text_ = "Server timeout";
+                hint_text_ = "Restarting...";
+                UpdateDisplay();
+                vTaskDelay(pdMS_TO_TICKS(50));
+                esp_restart();
+            }
         }
 
         if (up_click) {
@@ -1525,6 +1673,14 @@ void LanMicApp::Run() {
 
         const bool pressed = IsPttPressed();
         if (pressed && !last_pressed) {
+            // BOOT pressed while disconnected: reset the no-connection sleep
+            // timer so the user gets another full retry window, and force an
+            // immediate reconnect attempt on this iteration.
+            if (ws_ == nullptr || !ws_->IsConnected()) {
+                disconnected_since_ms = now_ms;
+                reconnect_interval_ms = kReconnectIntervalMinMs;
+                last_reconnect_ms = 0;
+            }
             if (EnsureWebSocketConnected()) {
                 ESP_LOGI(kTag, "PTT start");
                 SendPttStart();

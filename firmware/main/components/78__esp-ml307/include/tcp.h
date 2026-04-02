@@ -4,6 +4,7 @@
 
 #include <string>
 #include <functional>
+#include <atomic>
 
 class Tcp {
 public:
@@ -21,7 +22,7 @@ public:
     }
     
     // 连接状态查询
-    bool connected() const { return connected_; }
+    bool connected() const { return connected_.load(std::memory_order_relaxed); }
 
     // 获取最后一次错误码
     virtual int GetLastError() = 0;
@@ -31,7 +32,7 @@ protected:
     std::function<void()> disconnect_callback_;
     
     // 连接状态管理
-    bool connected_ = false;         // 是否可以正常读写数据
+    std::atomic<bool> connected_{false}; // 是否可以正常读写数据
 };
 
 #endif // TCP_H

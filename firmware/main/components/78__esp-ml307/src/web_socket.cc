@@ -104,7 +104,7 @@ WebSocket::WebSocket(NetworkInterface* network, int connect_id) : network_(netwo
 }
 
 WebSocket::~WebSocket() {
-    if (connected_) {
+    if (connected_.load(std::memory_order_relaxed)) {
         tcp_->Disconnect();
     }
     if (handshake_event_group_) {
@@ -121,7 +121,7 @@ void WebSocket::SetReceiveBufferSize(size_t size) {
 }
 
 bool WebSocket::IsConnected() const {
-    return connected_;
+    return connected_.load(std::memory_order_relaxed);
 }
 
 bool WebSocket::Connect(const char* uri) {
@@ -188,12 +188,28 @@ bool WebSocket::Connect(const char* uri) {
         tcp_ = network_->CreateTcp(connect_id_);
     }
 
-    connected_ = false;
+    connected_.store(false, std::memory_order_relaxed);
     // 使用 tcp 建立连接
     if (!tcp_->Connect(host, std::stoi(port))) {
         ESP_LOGE(TAG, "Failed to connect to server");
         return false;
     }
+
+    // Register stream/disconnect callbacks before sending the HTTP upgrade
+    // request. Otherwise a fast server response can be consumed by the TCP
+    // receive task before WebSocket handshake handling is attached.
+    xEventGroupClearBits(handshake_event_group_, HANDSHAKE_SUCCESS_BIT | HANDSHAKE_FAILED_BIT);
+    tcp_->OnStream([this](const std::string& data) {
+        this->OnTcpData(data);
+    });
+    tcp_->OnDisconnected([this]() {
+        if (connected_.load(std::memory_order_relaxed)) {
+            connected_.store(false, std::memory_order_relaxed);
+            if (on_disconnected_) {
+                on_disconnected_();
+            }
+        }
+    });
 
     // 发送 WebSocket 握手请求
     std::string request = "GET " + path + " HTTP/1.1\r\n";
@@ -210,24 +226,6 @@ bool WebSocket::Connect(const char* uri) {
         return false;
     }
 
-    // 清除事件位
-    xEventGroupClearBits(handshake_event_group_, HANDSHAKE_SUCCESS_BIT | HANDSHAKE_FAILED_BIT);
-    
-    // 设置数据接收回调来处理握手和后续的WebSocket帧
-    tcp_->OnStream([this](const std::string& data) {
-        this->OnTcpData(data);
-    });
-
-    // 设置断开连接回调
-    tcp_->OnDisconnected([this]() {
-        if (connected_) {
-            connected_ = false;
-            if (on_disconnected_) {
-                on_disconnected_();
-            }
-        }
-    });
-
     // 等待握手完成，超时时间10秒
     EventBits_t bits = xEventGroupWaitBits(
         handshake_event_group_,
@@ -238,7 +236,8 @@ bool WebSocket::Connect(const char* uri) {
     );
 
     if (bits & HANDSHAKE_SUCCESS_BIT) {
-        connected_ = true;
+        connected_.store(true, std::memory_order_relaxed);
+        last_pong_ms_.store(esp_timer_get_time() / 1000, std::memory_order_relaxed);
         if (on_connected_) {
             on_connected_();
         }
@@ -309,12 +308,12 @@ bool WebSocket::Send(const void* data, size_t len, bool binary, bool fin) {
     return tcp_->Send(frame) >= 0;
 }
 
-void WebSocket::Ping() {
-    SendControlFrame(0x9, nullptr, 0);
+bool WebSocket::Ping() {
+    return SendControlFrame(0x9, nullptr, 0);
 }
 
 void WebSocket::Close() {
-    if (connected_) {
+    if (connected_.load(std::memory_order_relaxed)) {
         SendControlFrame(0x8, nullptr, 0);
     }
 }
@@ -340,6 +339,10 @@ int WebSocket::GetLastError() {
         return tcp_->GetLastError();
     }
     return 0;  // No error if TCP connection doesn't exist
+}
+
+int64_t WebSocket::GetLastPongMs() const {
+    return last_pong_ms_.load(std::memory_order_relaxed);
 }
 
 void WebSocket::OnTcpData(const std::string& data) {
@@ -370,10 +373,6 @@ void WebSocket::OnTcpData(const std::string& data) {
     }
     
     // 处理WebSocket帧
-    static std::vector<char> current_message;
-    static bool is_fragmented = false;
-    static bool is_binary = false;
-    
     size_t buffer_offset = 0;
     const char* buffer = receive_buffer_.c_str();
     size_t buffer_size = receive_buffer_.size();
@@ -423,36 +422,38 @@ void WebSocket::OnTcpData(const std::string& data) {
             case 0x0: // 延续帧
             case 0x1: // 文本帧
             case 0x2: // 二进制帧
-                if (opcode != 0x0 && is_fragmented) {
+                if (opcode != 0x0 && is_fragmented_) {
                     ESP_LOGE(TAG, "Received new message frame while still fragmenting");
                     break;
                 }
                 if (opcode != 0x0) {
-                    is_fragmented = !fin;
-                    is_binary = (opcode == 0x2);
-                    current_message.clear();
+                    is_fragmented_ = !fin;
+                    is_binary_ = (opcode == 0x2);
+                    current_message_.clear();
                 }
-                current_message.insert(current_message.end(), payload.begin(), payload.end());
+                current_message_.insert(current_message_.end(), payload.begin(), payload.end());
                 if (fin) {
                     if (on_data_) {
-                        on_data_(current_message.data(), current_message.size(), is_binary);
+                        on_data_(current_message_.data(), current_message_.size(), is_binary_);
                     }
-                    current_message.clear();
-                    is_fragmented = false;
+                    current_message_.clear();
+                    is_fragmented_ = false;
                 }
                 break;
             case 0x8: // 关闭帧
-                connected_ = false;
+                connected_.store(false, std::memory_order_relaxed);
                 if (on_disconnected_) {
                     on_disconnected_();
                 }
                 break;
             case 0x9: // Ping
+                last_pong_ms_.store(esp_timer_get_time() / 1000, std::memory_order_relaxed);
                 std::thread([this, payload, payload_length]() {
                     SendControlFrame(0xA, payload.data(), payload_length);
                 }).detach();
                 break;
             case 0xA: // Pong
+                last_pong_ms_.store(esp_timer_get_time() / 1000, std::memory_order_relaxed);
                 break;
             default:
                 ESP_LOGE(TAG, "Unknown opcode: %d", opcode);

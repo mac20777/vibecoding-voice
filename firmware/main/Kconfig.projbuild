@@ -19,12 +19,14 @@ config ZECTRIX_LAN_MIC_MODE
 
 config LAN_MIC_SERVER_URI
     string "LAN microphone server URI"
-    default "ws://192.168.1.100:8765"
+    default ""
     depends on ZECTRIX_LAN_MIC_MODE
     help
-        Fallback WebSocket URI of the LAN voice server running on the host PC.
-        When LAN discovery is enabled, the firmware will try discovery first
-        and only fall back to this URI if discovery fails.
+        Optional fallback WebSocket URI of the LAN voice server running on the
+        host PC. Leave this empty for release builds so the device relies on
+        discovery plus the last paired host. When LAN discovery is enabled,
+        the firmware tries discovery first, then the cached last-good URI,
+        and only falls back to this URI if both are unavailable.
 
 config LAN_DISCOVERY_ENABLED
     bool "Enable LAN host discovery"
