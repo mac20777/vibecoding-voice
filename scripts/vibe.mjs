@@ -4,11 +4,11 @@
  *
  * Usage:
  *   vibe              # inject mode (default)
- *   vibe --claude     # Claude Code mode
- *   vibe --codex      # Codex mode
- *
- * If the server is not already running, starts it with the specified SEND_TARGET.
- * Then opens the interactive terminal console.
+ *   vibe inject
+ *   vibe codex
+ *   vibe claude
+ *   vibe config       # interactive first-run / repair wizard
+ *   vibe doctor       # inspect current config and environment
  */
 
 import { spawn } from "node:child_process";
@@ -21,59 +21,113 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 const INVOKE_CWD = process.cwd();
 
+if (!process.env.VIBE_INVOKE_CWD) {
+  process.env.VIBE_INVOKE_CWD = INVOKE_CWD;
+}
+
 const TARGET_MAP = {
   claude: "claude_code",
-  codex:  "codex_exec",
-  inject: "text_injector",
+  codex: "codex_exec",
+  inject: "text_injector"
 };
 
+function printUsage() {
+  process.stderr.write("Usage: vibe [claude|codex|inject|config|doctor]\n");
+}
+
 const arg = (process.argv[2] || "inject").toLowerCase().replace(/^--/, "");
+
+if (arg === "help" || arg === "h") {
+  printUsage();
+  process.exit(0);
+}
+
+if (arg === "config") {
+  try {
+    const { runConfigWizard } = await import("../src/config-wizard.mjs");
+    const result = await runConfigWizard();
+    process.exit(result.saved ? 0 : 1);
+  } catch (error) {
+    process.stderr.write(`${error.message || String(error)}\n`);
+    process.exit(1);
+  }
+}
+
+if (arg === "doctor") {
+  const { loadConfig } = await import("../src/config.mjs");
+  const { runDoctor } = await import("../src/doctor.mjs");
+  await runDoctor(loadConfig());
+}
+
 if (!TARGET_MAP[arg]) {
-  process.stderr.write(`Usage: vibe [claude|codex|inject]\n`);
+  printUsage();
   process.exit(1);
 }
+
 const sendTarget = TARGET_MAP[arg];
 const PORT = process.env.LAN_VOICE_PORT || 8765;
 
-// ── Check if server is already running ──────────────────────────────────────
 function probeServer() {
   return new Promise((resolve) => {
     const probe = new WebSocket(`ws://127.0.0.1:${PORT}`);
-    const timer = setTimeout(() => { probe.terminate(); resolve(false); }, 1000);
-    probe.on("open",  () => { clearTimeout(timer); probe.close(); resolve(true); });
-    probe.on("error", () => { clearTimeout(timer); resolve(false); });
+    const timer = setTimeout(() => {
+      probe.terminate();
+      resolve(false);
+    }, 1000);
+
+    probe.on("open", () => {
+      clearTimeout(timer);
+      probe.close();
+      resolve(true);
+    });
+    probe.on("error", () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
   });
 }
 
 async function waitForServer(maxMs = 6000) {
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
-    if (await probeServer()) return true;
+    if (await probeServer()) {
+      return true;
+    }
     await delay(400);
   }
   return false;
 }
 
-// ── Spawn server if not running ──────────────────────────────────────────────
 let serverProc = null;
+let stopping = false;
 
 const alreadyRunning = await probeServer();
 
 if (alreadyRunning) {
   process.stdout.write(`Server already running — connecting as [${arg}]\n`);
 } else {
+  try {
+    const { ensureConfigReadyInteractive } = await import("../src/config-wizard.mjs");
+    await ensureConfigReadyInteractive();
+  } catch (error) {
+    process.stderr.write(`${error.message || String(error)}\n`);
+    process.exit(1);
+  }
+
   process.stdout.write(`Starting server (${arg})…\n`);
 
   serverProc = spawn("node", [join(ROOT, "src/server.mjs")], {
     cwd: process.cwd(),
-    env: { ...process.env, SEND_TARGET: sendTarget, CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS: "1", VIBE_INVOKE_CWD: INVOKE_CWD },
-    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      SEND_TARGET: sendTarget,
+      CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS: "1",
+      VIBE_INVOKE_CWD: INVOKE_CWD
+    },
+    stdio: ["ignore", "pipe", "pipe"]
   });
 
-  // Forward server stderr (startup errors, fatal crashes)
   serverProc.stderr.on("data", (chunk) => process.stderr.write(chunk));
-
-  // Silently ignore stdout (all status is visible via WebSocket in console)
   serverProc.stdout.resume();
 
   serverProc.on("exit", (code) => {
@@ -91,13 +145,9 @@ if (alreadyRunning) {
   }
 }
 
-// ── Start console UI ─────────────────────────────────────────────────────────
-let stopping = false;
-
 process.on("SIGINT", () => {
   stopping = true;
   serverProc?.kill();
-  // console's readline "close" handler calls process.exit(0)
 });
 
 const { startConsole, startMonitor } = await import("./console.mjs");

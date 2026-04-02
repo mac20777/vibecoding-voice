@@ -76,6 +76,14 @@ Both boards use ESP32-S3 with onboard MEMS mic and push-button.
 
 **1. Install**
 
+Recommended global install:
+
+```powershell
+npm install -g @mac20777/vibecoding-voice
+```
+
+From source (development):
+
 ```powershell
 npm install
 ```
@@ -83,9 +91,18 @@ npm install
 **2. Configure**
 
 ```powershell
-Copy-Item .env.example .env
-# then edit .env
+vibe config
 ```
+
+On first run, `vibe`, `vibe codex`, and `vibe claude` will launch this setup wizard automatically if the STT keys are missing.
+
+The wizard saves user-level config to:
+
+- Windows: `%APPDATA%\vibecoding-voice\config.env`
+- macOS: `~/Library/Application Support/vibecoding-voice/config.env`
+- Linux: `${XDG_CONFIG_HOME:-~/.config}/vibecoding-voice/config.env`
+
+You can still use environment variables or a local `.env` file. A local `.env` overrides the user-level config.
 
 Minimum config for Codex + Volcengine:
 
@@ -93,15 +110,16 @@ Minimum config for Codex + Volcengine:
 STT_PROVIDER=volcengine
 VOLCENGINE_APP_KEY=your-app-key
 VOLCENGINE_ACCESS_KEY=your-access-key
-SEND_TARGET=codex_exec
 TRANSCRIPT_DELIVERY_MODE=confirm_on_device
 LAN_SHARED_SECRET=replace-with-a-long-random-secret
 ```
 
+`vibe codex`, `vibe claude`, and `vibe` choose the send target for you. You only need `SEND_TARGET` when launching `src/server.mjs` directly.
+
 **3. Run**
 
 ```powershell
-npm start
+vibe codex
 ```
 
 The server prints the WebSocket URL and UDP discovery address on startup. The bridge is ready as soon as you see `server ready`.
@@ -109,10 +127,40 @@ The server prints the WebSocket URL and UDP discovery address on startup. The br
 **4. Diagnose (optional)**
 
 ```powershell
-npm run doctor
+vibe doctor
 ```
 
 Checks CLI tools, API keys, port availability, and STT provider connectivity.
+
+#### Command Reference
+
+| Command | Purpose |
+|---------|---------|
+| `vibe` | Start in text injection mode |
+| `vibe codex` | Start bridge + console in Codex mode |
+| `vibe claude` | Start bridge + console in Claude Code mode |
+| `vibe config` | Run the interactive setup / repair wizard |
+| `vibe doctor` | Validate config, keys, CLI binaries, and ports |
+
+#### Configuration Priority
+
+Configuration is loaded in this order, lowest to highest priority:
+
+1. User config file: `config.env`
+2. Repo root `.env`
+3. Current working directory `.env`
+4. Environment variables from the current shell
+
+This means a local `.env` in your current project overrides the saved user-level config.
+
+#### Troubleshooting
+
+- `vibe` says STT is not configured:
+  Run `vibe config` and enter either Volcengine or OpenAI credentials.
+- `vibe config` saved successfully, but old values are still used:
+  Run `vibe doctor` and check whether a local `.env` is overriding the user config.
+- You want different settings per project:
+  Keep your default keys in `config.env`, then add a project-local `.env` only when needed.
 
 ---
 
@@ -147,7 +195,13 @@ In `firmware/sdkconfig` (or via `idf.py menuconfig → LAN Mic`):
 CONFIG_LAN_SHARED_SECRET="your-secret-here"
 ```
 
-Set the same value in the host bridge `.env`:
+Set the same value in the host bridge config. Any of these is fine:
+
+- run `vibe config`
+- set `LAN_SHARED_SECRET` in a local `.env`
+- export `LAN_SHARED_SECRET` in your shell
+
+Example:
 
 ```env
 LAN_SHARED_SECRET=your-secret-here
@@ -247,7 +301,7 @@ node --test test/lan-auth.test.mjs   # run a single test file
 node scripts/mock-client.mjs         # simulate a device connection
 ```
 
-Debug workflow: `MOCK_TRANSCRIPT=hello world DRY_RUN_TEXT_INJECTION=1 npm start`
+Debug workflow (source mode): `MOCK_TRANSCRIPT=hello world DRY_RUN_TEXT_INJECTION=1 node src/server.mjs`
 
 ---
 
@@ -330,7 +384,15 @@ Debug workflow: `MOCK_TRANSCRIPT=hello world DRY_RUN_TEXT_INJECTION=1 npm start`
 
 #### 快速开始
 
-**1. 安装依赖**
+**1. 安装**
+
+推荐直接全局安装：
+
+```powershell
+npm install -g @mac20777/vibecoding-voice
+```
+
+如果你是在源码仓库里开发：
 
 ```powershell
 npm install
@@ -339,9 +401,18 @@ npm install
 **2. 配置**
 
 ```powershell
-Copy-Item .env.example .env
-# 然后编辑 .env
+vibe config
 ```
+
+首次运行 `vibe`、`vibe codex` 或 `vibe claude` 时，如果缺少语音识别密钥，会自动弹出这个配置向导。
+
+向导会把用户级配置保存到：
+
+- Windows：`%APPDATA%\vibecoding-voice\config.env`
+- macOS：`~/Library/Application Support/vibecoding-voice/config.env`
+- Linux：`${XDG_CONFIG_HOME:-~/.config}/vibecoding-voice/config.env`
+
+你仍然可以继续使用环境变量或当前目录下的 `.env` 文件；本地 `.env` 的优先级更高。
 
 使用 Codex + 火山引擎的最简配置：
 
@@ -349,15 +420,16 @@ Copy-Item .env.example .env
 STT_PROVIDER=volcengine
 VOLCENGINE_APP_KEY=你的-app-key
 VOLCENGINE_ACCESS_KEY=你的-access-key
-SEND_TARGET=codex_exec
 TRANSCRIPT_DELIVERY_MODE=confirm_on_device
 LAN_SHARED_SECRET=替换为一个足够长的随机密钥
 ```
 
+`vibe codex`、`vibe claude` 和 `vibe` 会自动决定发送目标。只有你直接启动 `src/server.mjs` 时，才需要自己设置 `SEND_TARGET`。
+
 **3. 启动**
 
 ```powershell
-npm start
+vibe codex
 ```
 
 服务启动时会打印 WebSocket 地址和 UDP 发现地址。看到 `server ready` 即表示桥接服务已就绪。
@@ -365,10 +437,40 @@ npm start
 **4. 诊断（可选）**
 
 ```powershell
-npm run doctor
+vibe doctor
 ```
 
 检查 CLI 工具、API 密钥、端口可用性和语音识别服务连通性。
+
+#### 常用命令
+
+| 命令 | 用途 |
+|------|------|
+| `vibe` | 以文本注入模式启动 |
+| `vibe codex` | 以 Codex 模式启动桥接服务和控制台 |
+| `vibe claude` | 以 Claude Code 模式启动桥接服务和控制台 |
+| `vibe config` | 重新运行交互式配置/修复向导 |
+| `vibe doctor` | 检查配置、密钥、CLI 和端口状态 |
+
+#### 配置优先级
+
+配置按以下顺序加载，后者覆盖前者：
+
+1. 用户配置文件 `config.env`
+2. 仓库根目录 `.env`
+3. 当前工作目录 `.env`
+4. 当前 shell 环境变量
+
+也就是说，如果你当前项目目录里有 `.env`，它会覆盖通过 `vibe config` 保存的用户级配置。
+
+#### 常见问题
+
+- 提示 STT 未配置：
+  运行 `vibe config`，填写火山引擎或 OpenAI 的密钥。
+- 明明已经运行过 `vibe config`，但还是用了旧值：
+  运行 `vibe doctor`，检查是不是被当前目录下的 `.env` 覆盖了。
+- 想按项目使用不同配置：
+  默认密钥放在用户级 `config.env` 里，只有少数项目再单独放本地 `.env`。
 
 ---
 
@@ -403,7 +505,13 @@ cd firmware
 CONFIG_LAN_SHARED_SECRET="你的密钥"
 ```
 
-在主机桥接服务的 `.env` 中设置相同的值：
+在主机桥接服务中设置相同的值即可，下面三种方式任选一种：
+
+- 运行 `vibe config`
+- 在本地 `.env` 中设置 `LAN_SHARED_SECRET`
+- 在 shell 环境变量里设置 `LAN_SHARED_SECRET`
+
+例如：
 
 ```env
 LAN_SHARED_SECRET=你的密钥
@@ -503,7 +611,7 @@ node --test test/lan-auth.test.mjs   # 运行单个测试文件
 node scripts/mock-client.mjs         # 模拟设备连接
 ```
 
-调试工作流：`MOCK_TRANSCRIPT=你好世界 DRY_RUN_TEXT_INJECTION=1 npm start`
+调试工作流（源码模式）：`MOCK_TRANSCRIPT=你好世界 DRY_RUN_TEXT_INJECTION=1 node src/server.mjs`
 
 ---
 

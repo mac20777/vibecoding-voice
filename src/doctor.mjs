@@ -1,9 +1,6 @@
 import { createServer } from "node:net";
-import fs from "node:fs";
-import path from "node:path";
 
 import { isCliAvailable } from "./config.mjs";
-import { projectRoot } from "./paths.mjs";
 
 function ok(label) {
   console.log(`  \x1b[32m[✓]\x1b[0m ${label}`);
@@ -50,12 +47,10 @@ export async function runDoctor(config) {
 
   let hasError = false;
 
-  // .env file
-  const envPath = path.join(projectRoot, ".env");
-  if (fs.existsSync(envPath)) {
-    ok(".env file found");
+  if (config.loadedConfigFiles?.length) {
+    ok(`config loaded from: ${config.loadedConfigFiles.join(", ")}`);
   } else {
-    warn(".env not found — copy .env.example to .env");
+    warn(`no config file loaded — run "vibe config" to create ${config.userConfigPath}`);
   }
 
   // STT provider
@@ -109,7 +104,7 @@ export async function runDoctor(config) {
   const autoNote = config.sendTargetAuto ? " [auto-detected]" : "";
   console.log(`\n  Target: \x1b[1m${config.sendTarget}\x1b[0m${autoNote}`);
   if (hasError) {
-    console.log("  \x1b[31mSome checks failed — fix the issues above before starting.\x1b[0m\n");
+    console.log('  \x1b[31mSome checks failed — fix the issues above before starting. Run "vibe config" if needed.\x1b[0m\n');
     process.exit(1);
   } else {
     console.log("  \x1b[32mAll checks passed.\x1b[0m\n");

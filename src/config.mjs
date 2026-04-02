@@ -2,19 +2,13 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { projectRoot } from "./paths.mjs";
+import { getUserConfigPath, projectRoot } from "./paths.mjs";
 
-function loadDotEnvFile() {
-  const filePath = path.join(projectRoot, ".env");
-  if (!fs.existsSync(filePath)) {
-    console.warn(
-      "[vibecoding-voice] .env not found — copy .env.example to .env and configure your keys.\n" +
-        "                   Running with environment defaults (MOCK_TRANSCRIPT may be required)."
-    );
-    return;
-  }
+const INITIAL_ENV_KEYS = new Set(Object.keys(process.env));
+let appliedConfigKeys = new Set();
 
-  const content = fs.readFileSync(filePath, "utf8");
+function parseEnvContent(content) {
+  const values = {};
   for (const rawLine of content.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) {
@@ -28,10 +22,81 @@ function loadDotEnvFile() {
 
     const key = line.slice(0, separatorIndex).trim();
     const value = line.slice(separatorIndex + 1).trim();
-    if (!(key in process.env)) {
-      process.env[key] = value;
+    values[key] = value;
+  }
+  return values;
+}
+
+function readEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+
+  return parseEnvContent(fs.readFileSync(filePath, "utf8"));
+}
+
+function applyEnvValues(values) {
+  for (const [key, value] of Object.entries(values)) {
+    if (INITIAL_ENV_KEYS.has(key)) {
+      continue;
+    }
+    process.env[key] = value;
+  }
+}
+
+function uniqPaths(paths) {
+  return [...new Set(paths.map((candidate) => path.resolve(candidate)))];
+}
+
+function invokeCwd() {
+  return String(process.env.VIBE_INVOKE_CWD || "").trim() || process.cwd();
+}
+
+export function listConfigFileCandidates() {
+  const userConfigPath = getUserConfigPath();
+  const projectConfigPath = path.join(projectRoot, ".env");
+  const cwdConfigPath = path.join(invokeCwd(), ".env");
+
+  return uniqPaths([userConfigPath, projectConfigPath, cwdConfigPath]);
+}
+
+export function loadConfigFiles({ quietMissing = false } = {}) {
+  const mergedValues = {};
+  const loadedConfigFiles = [];
+
+  for (const filePath of listConfigFileCandidates()) {
+    const values = readEnvFile(filePath);
+    if (!values) {
+      continue;
+    }
+
+    Object.assign(mergedValues, values);
+    loadedConfigFiles.push(filePath);
+  }
+
+  for (const key of appliedConfigKeys) {
+    if (!INITIAL_ENV_KEYS.has(key)) {
+      delete process.env[key];
     }
   }
+
+  applyEnvValues(mergedValues);
+  appliedConfigKeys = new Set(Object.keys(mergedValues).filter((key) => !INITIAL_ENV_KEYS.has(key)));
+
+  if (!quietMissing && loadedConfigFiles.length === 0) {
+    console.warn(
+      `[vibecoding-voice] No config file found.\n` +
+        `                   Run "vibe config" to create ${getUserConfigPath()}.\n` +
+        `                   You can also use environment variables or a local .env file.`
+    );
+  }
+
+  return {
+    loadedConfigFiles,
+    userConfigPath: getUserConfigPath(),
+    cwdConfigPath: path.join(invokeCwd(), ".env"),
+    projectConfigPath: path.join(projectRoot, ".env")
+  };
 }
 
 function resolveCodexCommand() {
@@ -60,10 +125,6 @@ function resolveClaudeCommand() {
   return fs.existsSync(npmShimPath) ? npmShimPath : "claude";
 }
 
-function invokeCwd() {
-  return String(process.env.VIBE_INVOKE_CWD || "").trim() || process.cwd();
-}
-
 function resolveCodexCwd() {
   const configured = String(process.env.CODEX_CWD || "").trim();
   if (!configured) {
@@ -78,12 +139,10 @@ export function isCliAvailable(command) {
     return false;
   }
 
-  // Absolute path or relative path with separator — check file existence directly
   if (path.isAbsolute(command) || command.includes(path.sep)) {
     return fs.existsSync(command);
   }
 
-  // Plain command name — probe PATH
   try {
     const finder = process.platform === "win32" ? "where" : "which";
     execSync(`${finder} ${command}`, { stdio: "ignore" });
@@ -103,8 +162,111 @@ function autoDetectSendTarget(claudeCommand, codexCommand) {
   return { sendTarget: "text_injector", sendTargetAuto: true };
 }
 
-export function loadConfig() {
-  loadDotEnvFile();
+export function detectConfiguredSttProvider(config) {
+  const explicit = String(config.sttProvider || "").trim().toLowerCase();
+  if (explicit) {
+    return explicit;
+  }
+
+  if (config.openaiApiKey) {
+    return "openai";
+  }
+
+  if (config.volcengineAppKey || config.volcengineAccessKey) {
+    return "volcengine";
+  }
+
+  return "";
+}
+
+export function getConfigIssues(config) {
+  if (config.mockTranscript) {
+    return [];
+  }
+
+  const provider = detectConfiguredSttProvider(config);
+  if (!provider) {
+    return [
+      "No STT provider is configured. Set OPENAI_API_KEY or VOLCENGINE_APP_KEY + VOLCENGINE_ACCESS_KEY."
+    ];
+  }
+
+  if (provider === "openai") {
+    return config.openaiApiKey ? [] : ["OPENAI_API_KEY is not set."];
+  }
+
+  if (provider === "volcengine") {
+    const issues = [];
+    if (!config.volcengineAppKey) {
+      issues.push("VOLCENGINE_APP_KEY is not set.");
+    }
+    if (!config.volcengineAccessKey) {
+      issues.push("VOLCENGINE_ACCESS_KEY is not set.");
+    }
+    return issues;
+  }
+
+  return [`Unsupported STT_PROVIDER: ${config.sttProvider}`];
+}
+
+export function hasRequiredConfig(config) {
+  return getConfigIssues(config).length === 0;
+}
+
+export function readUserConfigValues() {
+  return readEnvFile(getUserConfigPath()) || {};
+}
+
+function normalizeEnvValue(value) {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  return String(value).replace(/\r?\n/g, " ").trim();
+}
+
+function formatEnvFile(values) {
+  const keys = Object.keys(values).sort((left, right) => left.localeCompare(right));
+  return `${keys.map((key) => `${key}=${normalizeEnvValue(values[key])}`).join("\n")}\n`;
+}
+
+export function writeUserConfigValues(updates) {
+  const currentValues = readUserConfigValues();
+  const nextValues = { ...currentValues };
+
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === undefined) {
+      continue;
+    }
+
+    if (value === null) {
+      delete nextValues[key];
+      continue;
+    }
+
+    nextValues[key] = normalizeEnvValue(value);
+  }
+
+  const userConfigPath = getUserConfigPath();
+  fs.mkdirSync(path.dirname(userConfigPath), { recursive: true });
+  fs.writeFileSync(userConfigPath, formatEnvFile(nextValues), "utf8");
+  return userConfigPath;
+}
+
+export function redactValue(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return "(not set)";
+  }
+
+  if (trimmed.length <= 8) {
+    return `${trimmed.slice(0, 1)}***${trimmed.slice(-1)}`;
+  }
+
+  return `${trimmed.slice(0, 4)}***${trimmed.slice(-4)}`;
+}
+
+export function loadConfig(options = {}) {
+  const { loadedConfigFiles, userConfigPath, cwdConfigPath, projectConfigPath } = loadConfigFiles(options);
 
   const claudeCommand = resolveClaudeCommand();
   const codexCommand = resolveCodexCommand();
@@ -151,6 +313,10 @@ export function loadConfig() {
     volcengineResourceId: process.env.VOLCENGINE_RESOURCE_ID || "volc.bigasr.auc_turbo",
     volcengineLanguage: process.env.VOLCENGINE_LANGUAGE || "zh-CN",
     mockTranscript: process.env.MOCK_TRANSCRIPT || "",
-    saveDebugWav: process.env.SAVE_DEBUG_WAV === "1"
+    saveDebugWav: process.env.SAVE_DEBUG_WAV === "1",
+    loadedConfigFiles,
+    userConfigPath,
+    cwdConfigPath,
+    projectConfigPath
   };
 }
