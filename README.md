@@ -2,6 +2,8 @@
 
 [English](#english) · [中文](#中文)
 
+Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac20777)
+
 ---
 
 ## English
