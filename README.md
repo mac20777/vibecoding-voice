@@ -97,6 +97,7 @@ vibe config
 ```
 
 On first run, `vibe`, `vibe codex`, and `vibe claude` will launch this setup wizard automatically if the STT keys are missing.
+The wizard also lets you choose how transcripts are delivered. The recommended default is `confirm_on_device`, which keeps text on the board until you press `UP` to send.
 
 The wizard saves user-level config to:
 
@@ -161,6 +162,8 @@ This means a local `.env` in your current project overrides the saved user-level
   Run `vibe config` and enter either Volcengine or OpenAI credentials.
 - `vibe config` saved successfully, but old values are still used:
   Run `vibe doctor` and check whether a local `.env` is overriding the user config.
+- The board sends immediately after recording, but you expected `UP` to confirm:
+  Run `vibe config` and set `TRANSCRIPT_DELIVERY_MODE=confirm_on_device`, then use `vibe doctor` to check whether a local `.env` is overriding it.
 - You want different settings per project:
   Keep your default keys in `config.env`, then add a project-local `.env` only when needed.
 
@@ -276,7 +279,7 @@ Screen footer shows `BOOT Add · UP Send · DN Undo` when a transcript is pendin
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SEND_TARGET` | `text_injector` | `text_injector`, `codex_exec`, or `claude_code` |
-| `TRANSCRIPT_DELIVERY_MODE` | `immediate` | `immediate` or `confirm_on_device` |
+| `TRANSCRIPT_DELIVERY_MODE` | `confirm_on_device` | `immediate` or `confirm_on_device` |
 | `TEXT_INJECTION_MODE` | `type_only` | `type_only` or `type_and_enter` |
 
 #### CLI Session
@@ -414,6 +417,7 @@ vibe config
 ```
 
 首次运行 `vibe`、`vibe codex` 或 `vibe claude` 时，如果缺少语音识别密钥，会自动弹出这个配置向导。
+向导也会让你选择“转写发送模式”。推荐默认值是 `confirm_on_device`，也就是先在板子上确认，再按 `UP` 发送。
 
 向导会把用户级配置保存到：
 
@@ -478,6 +482,8 @@ vibe doctor
   运行 `vibe config`，填写火山引擎或 OpenAI 的密钥。
 - 明明已经运行过 `vibe config`，但还是用了旧值：
   运行 `vibe doctor`，检查是不是被当前目录下的 `.env` 覆盖了。
+- 板子录完音就直接发了，没有等 `UP` 确认：
+  运行 `vibe config`，把 `TRANSCRIPT_DELIVERY_MODE` 设为 `confirm_on_device`，再用 `vibe doctor` 看是不是被当前目录下的 `.env` 覆盖了。
 - 想按项目使用不同配置：
   默认密钥放在用户级 `config.env` 里，只有少数项目再单独放本地 `.env`。
 
@@ -593,7 +599,7 @@ LAN_SHARED_SECRET=你的密钥
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `SEND_TARGET` | `text_injector` | `text_injector`、`codex_exec` 或 `claude_code` |
-| `TRANSCRIPT_DELIVERY_MODE` | `immediate` | `immediate` 或 `confirm_on_device` |
+| `TRANSCRIPT_DELIVERY_MODE` | `confirm_on_device` | `immediate` 或 `confirm_on_device` |
 | `TEXT_INJECTION_MODE` | `type_only` | `type_only` 或 `type_and_enter` |
 
 #### CLI 会话

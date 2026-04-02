@@ -103,6 +103,7 @@ export async function runDoctor(config) {
   // Summary
   const autoNote = config.sendTargetAuto ? " [auto-detected]" : "";
   console.log(`\n  Target: \x1b[1m${config.sendTarget}\x1b[0m${autoNote}`);
+  console.log(`  Delivery: \x1b[1m${config.transcriptDeliveryMode}\x1b[0m`);
   if (hasError) {
     console.log('  \x1b[31mSome checks failed — fix the issues above before starting. Run "vibe config" if needed.\x1b[0m\n');
     process.exit(1);

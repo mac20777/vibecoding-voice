@@ -69,14 +69,17 @@ function createPromptInterface() {
 
 function printWizardIntro(config) {
   const provider = detectConfiguredSttProvider(config) || "not configured";
+  const deliveryMode =
+    config.transcriptDeliveryMode === "immediate" ? "immediate" : "confirm_on_device";
   const overridingFiles = (config.loadedConfigFiles || []).filter((filePath) => filePath !== config.userConfigPath);
 
   output.write("\nVibe setup\n\n");
   output.write(`Config file: ${config.userConfigPath}\n`);
   output.write(`Current STT provider: ${provider}\n`);
+  output.write(`Current transcript delivery: ${deliveryMode}\n`);
   output.write("This wizard configures the required STT settings for first use.\n");
   output.write("Required: STT provider + matching API keys\n");
-  output.write("Optional: LAN_SHARED_SECRET (only if your board uses LAN auth)\n");
+  output.write("Optional: transcript delivery mode, LAN_SHARED_SECRET (only if your board uses LAN auth)\n");
   output.write('Run "vibe config" again anytime to change these values.\n\n');
 
   if (overridingFiles.length > 0) {
@@ -183,6 +186,27 @@ async function askProvider(rl, currentProvider) {
   }
 }
 
+async function askTranscriptDeliveryMode(rl, currentMode) {
+  const defaultOption = currentMode === "immediate" ? "2" : "1";
+
+  while (true) {
+    output.write("Choose transcript delivery mode:\n");
+    output.write("  1. Confirm on device (recommended) — keep transcript on the board, UP sends, DN undoes\n");
+    output.write("  2. Immediate — send as soon as each recording segment is transcribed\n");
+    const answer = String(await rl.question(`Selection [${defaultOption}]: `)).trim();
+    const selection = answer || defaultOption;
+
+    if (selection === "1" || selection.toLowerCase() === "confirm_on_device") {
+      return "confirm_on_device";
+    }
+    if (selection === "2" || selection.toLowerCase() === "immediate") {
+      return "immediate";
+    }
+
+    output.write("Please choose 1 or 2.\n");
+  }
+}
+
 export async function runConfigWizard() {
   if (!input.isTTY || !output.isTTY) {
     throw new Error('Interactive setup requires a TTY. Run "vibe config" in a terminal.');
@@ -190,6 +214,8 @@ export async function runConfigWizard() {
 
   const currentConfig = loadConfig({ quietMissing: true });
   const currentProvider = detectConfiguredSttProvider(currentConfig) || "volcengine";
+  const currentDeliveryMode =
+    currentConfig.transcriptDeliveryMode === "immediate" ? "immediate" : "confirm_on_device";
 
   printWizardIntro(currentConfig);
 
@@ -228,6 +254,8 @@ export async function runConfigWizard() {
       });
     }
 
+    updates.TRANSCRIPT_DELIVERY_MODE = await askTranscriptDeliveryMode(rl, currentDeliveryMode);
+
     updates.LAN_SHARED_SECRET = await askSecret(rl, mutedOutput, "LAN_SHARED_SECRET", {
       defaultValue: currentConfig.lanSharedSecret,
       optional: true,
@@ -246,6 +274,7 @@ export async function runConfigWizard() {
       output.write(`  OPENAI_TRANSCRIBE_MODEL=${updates.OPENAI_TRANSCRIBE_MODEL}\n`);
       output.write(`  OPENAI_TRANSCRIBE_LANGUAGE=${updates.OPENAI_TRANSCRIBE_LANGUAGE || "(auto)"}\n`);
     }
+    output.write(`  TRANSCRIPT_DELIVERY_MODE=${updates.TRANSCRIPT_DELIVERY_MODE}\n`);
     output.write(`  LAN_SHARED_SECRET=${redactValue(updates.LAN_SHARED_SECRET)}\n\n`);
 
     const shouldSave = await askYesNo(rl, `Save these values to ${currentConfig.userConfigPath}?`, true);

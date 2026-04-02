@@ -134,6 +134,11 @@ function resolveCodexCwd() {
   return path.isAbsolute(configured) ? configured : path.resolve(invokeCwd(), configured);
 }
 
+function normalizeTranscriptDeliveryMode(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "immediate" ? "immediate" : "confirm_on_device";
+}
+
 export function isCliAvailable(command) {
   if (!command) {
     return false;
@@ -290,7 +295,9 @@ export function loadConfig(options = {}) {
     lanAuthWindowSec: Number(process.env.LAN_AUTH_WINDOW_SEC || "300"),
     sendTarget,
     sendTargetAuto,
-    transcriptDeliveryMode: process.env.TRANSCRIPT_DELIVERY_MODE || "immediate",
+    transcriptDeliveryMode: normalizeTranscriptDeliveryMode(
+      process.env.TRANSCRIPT_DELIVERY_MODE || "confirm_on_device"
+    ),
     textInjectionMode: process.env.TEXT_INJECTION_MODE || "type_only",
     dryRunTextInjection: process.env.DRY_RUN_TEXT_INJECTION === "1",
     codexCommand,
