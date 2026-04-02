@@ -36,24 +36,18 @@ static void LogNvsStats() {
 
 extern "C" void app_main(void)
 {
-    // After esptool flashes via USB-CDC, it issues a software reset (RTS line)
-    // which does not fully reinitialize the Wi-Fi RF peripheral, causing
-    // connection failures until a physical RST press.  We detect this by
-    // checking the reset reason: on ESP_RST_SW, do a 100 ms deep-sleep round-
-    // trip which produces a hardware-equivalent wakeup reset — clean for Wi-Fi.
-    // The RTC flag prevents an infinite bounce loop.
+    // Some soft/external reset paths leave the Wi-Fi RF state dirty until the
+    // next hardware-equivalent reset. For those reset reasons only, perform a
+    // brief deep-sleep round-trip once to come back with clean radio state.
     {
         const auto reason = esp_reset_reason();
         ESP_LOGI(TAG, "Boot reset reason=%d bounced=%d", reason, s_sw_reset_bounced ? 1 : 0);
-        // Deep-sleep wakeup produces a hardware-equivalent reset that properly
-        // reinitialises the Wi-Fi RF peripheral.  For every other reset type
-        // except power-on we do a brief deep-sleep round-trip to guarantee a
-        // clean RF state — this covers both esptool hard_reset (ESP_RST_EXT)
-        // and software reset (ESP_RST_SW).  The RTC flag prevents looping.
+        // Keep this narrowly scoped. External reset after flashing should boot
+        // like a normal hardware reset; bouncing that path through deep sleep
+        // has proven flaky on this board. Only software-reset paths still get
+        // the one-shot deep-sleep bounce.
         const bool need_bounce = !s_sw_reset_bounced &&
-                                 reason != ESP_RST_POWERON &&
-                                 reason != ESP_RST_DEEPSLEEP &&
-                                 reason != ESP_RST_BROWNOUT;
+                                 (reason == ESP_RST_SW);
         if (need_bounce) {
             ESP_LOGI(TAG, "Reset reason %d — bouncing via deep sleep for clean Wi-Fi init", reason);
             s_sw_reset_bounced = true;

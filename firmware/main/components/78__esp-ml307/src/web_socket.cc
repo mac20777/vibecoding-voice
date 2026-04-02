@@ -11,6 +11,7 @@
 
 
 #define TAG "WebSocket"
+static constexpr TickType_t kHandshakeTimeoutTicks = pdMS_TO_TICKS(3000);
 
 static bool IsIpLiteral(const std::string& host) {
     sockaddr_in sa4{};
@@ -226,13 +227,14 @@ bool WebSocket::Connect(const char* uri) {
         return false;
     }
 
-    // 等待握手完成，超时时间10秒
+    // LAN handshake should complete quickly. A long synchronous wait here
+    // stalls the app main loop and makes button handling look dead.
     EventBits_t bits = xEventGroupWaitBits(
         handshake_event_group_,
         HANDSHAKE_SUCCESS_BIT | HANDSHAKE_FAILED_BIT,
         pdFALSE,  // 不清除事件位
         pdFALSE,  // 等待任意一个事件位
-        pdMS_TO_TICKS(10000)  // 10秒超时
+        kHandshakeTimeoutTicks
     );
 
     if (bits & HANDSHAKE_SUCCESS_BIT) {

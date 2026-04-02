@@ -396,8 +396,6 @@ bool LanMicApp::EnsureWebSocketConnected() {
         return true;
     }
 
-    DiscoverServerUri();
-
     const char* target_uri = nullptr;
     const char* target_source = "none";
     std::string fallback_server_uri;
@@ -407,6 +405,12 @@ bool LanMicApp::EnsureWebSocketConnected() {
     } else if (!cached_server_uri_.empty()) {
         target_uri = cached_server_uri_.c_str();
         target_source = "cache";
+    } else {
+        DiscoverServerUri();
+        if (!server_uri_.empty()) {
+            target_uri = server_uri_.c_str();
+            target_source = "discovery";
+        }
     }
 
     if (target_uri == nullptr) {
@@ -442,6 +446,9 @@ bool LanMicApp::EnsureWebSocketConnected() {
         hint_text_ = "";  // BuildPromptBody() will show "Hold BOOT to talk"
         phase_ = Phase::Idle;
         UpdateDisplay();
+        if (display_ != nullptr) {
+            display_->RequestUrgentFullRefresh();
+        }
     });
     ws_->OnDisconnected([this]() {
         ESP_LOGW(kTag, "WebSocket disconnected");
@@ -465,6 +472,10 @@ bool LanMicApp::EnsureWebSocketConnected() {
         ESP_LOGW(kTag, "WebSocket connect failed: %s", target_uri);
         ws_.reset();
         hello_sent_ = false;
+        if (std::strcmp(target_source, "cache") == 0) {
+            ESP_LOGW(kTag, "Cache connect failed, clearing in-memory cache and retrying discovery next round");
+            cached_server_uri_.clear();
+        }
         status_text_ = "Connect failed";
         hint_text_ = target_uri;
         UpdateDisplay();

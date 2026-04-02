@@ -41,7 +41,7 @@ function Invoke-EsptoolFlash {
         "--chip", "esp32s3",
         "-b", "460800",
         "--before", "default_reset",
-        "--after", "watchdog_reset",
+        "--after", "hard_reset",
         "write_flash"
     )
     if ($PortName) {
@@ -56,7 +56,7 @@ function Invoke-EsptoolFlash {
         $flashArgs += ($trimmed -split "\s+")
     }
 
-    Write-Host "[INFO] Running esptool watchdog-reset flash"
+    Write-Host "[INFO] Running esptool hard-reset flash"
     Push-Location $BuildDir
     try {
         $esptoolOutput = & $EsptoolExe @flashArgs 2>&1
@@ -73,11 +73,11 @@ function Invoke-EsptoolFlash {
 
     $outputText = ($esptoolOutput | Out-String)
     $verifiedCount = ([regex]::Matches($outputText, "Hash of data verified\.")).Count
-    $watchdogResetIssued = $outputText -match "Hard resetting with a watchdog"
+    $hardResetIssued = $outputText -match "Hard resetting"
     $expectedPortDrop = $outputText -match "Cannot configure port"
 
-    if ($watchdogResetIssued -and $expectedPortDrop -and $verifiedCount -ge 4) {
-        Write-Warning "esptool watchdog reset caused COM port re-enumeration after verified flash; treating as success"
+    if ($hardResetIssued -and $expectedPortDrop -and $verifiedCount -ge 4) {
+        Write-Warning "esptool reset caused COM port re-enumeration after verified flash; treating as success"
         return
     }
 
