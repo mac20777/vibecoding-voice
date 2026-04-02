@@ -32,6 +32,15 @@ namespace {
 
 constexpr char kTag[] = "ZectrixFtBoard";
 constexpr uint16_t kNavLongPressMs = 1000;
+#if CONFIG_ZECTRIX_LAN_MIC_MODE
+constexpr gpio_num_t kBoardUpButtonGpio = GPIO_NUM_NC;
+constexpr gpio_num_t kBoardDownButtonGpio = GPIO_NUM_NC;
+constexpr gpio_num_t kBoardConfirmButtonGpio = GPIO_NUM_NC;
+#else
+constexpr gpio_num_t kBoardUpButtonGpio = TODO_UP_BUTTON_GPIO;
+constexpr gpio_num_t kBoardDownButtonGpio = TODO_DOWN_BUTTON_GPIO;
+constexpr gpio_num_t kBoardConfirmButtonGpio = BOOT_BUTTON_GPIO;
+#endif
 
 std::string BuildConfigApPassword(const Board& board) {
     std::string source = board.GetDeviceKey();
@@ -60,9 +69,9 @@ std::string BuildConfigApPassword(const Board& board) {
 class CustomBoard : public Board {
 public:
     CustomBoard()
-        : up_button_(TODO_UP_BUTTON_GPIO, false, kNavLongPressMs),
-          down_button_(TODO_DOWN_BUTTON_GPIO, false, kNavLongPressMs),
-          confirm_button_(BOOT_BUTTON_GPIO, false, kNavLongPressMs) {
+        : up_button_(kBoardUpButtonGpio, false, kNavLongPressMs),
+          down_button_(kBoardDownButtonGpio, false, kNavLongPressMs),
+          confirm_button_(kBoardConfirmButtonGpio, false, kNavLongPressMs) {
         InitializePower();
         InitializeI2c();
         InitializeRtc();

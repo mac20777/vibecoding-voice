@@ -67,6 +67,8 @@ constexpr int kDiscoveryRetryDelayMs = 150;
 constexpr int64_t kReconnectIntervalMinMs = 2000;
 constexpr int64_t kReconnectIntervalMaxMs = 60000;
 constexpr int64_t kPongTimeoutMs = 45000;
+constexpr uint32_t kConnectTaskStackSize = 6 * 1024;
+constexpr UBaseType_t kConnectTaskPriority = 2;
 // If no server connection is established within this window, enter deep sleep
 // to preserve battery.  BOOT button or a 5-minute timer wakes the board for
 // another retry cycle.  Pressing BOOT while disconnected resets this window.
@@ -374,15 +376,19 @@ void LanMicApp::ConfigureButtons() {
     ESP_ERROR_CHECK(gpio_config(&cfg));
 
     up_button_.OnClick([this]() {
+        ESP_LOGI(kTag, "UP click");
         up_clicked_.store(true);
     });
     down_button_.OnClick([this]() {
+        ESP_LOGI(kTag, "DOWN click");
         down_clicked_.store(true);
     });
     up_button_.OnLongPress([this]() {
+        ESP_LOGI(kTag, "UP long press");
         up_long_pressed_.store(true);
     });
     down_button_.OnLongPress([this]() {
+        ESP_LOGI(kTag, "DOWN long press");
         down_long_pressed_.store(true);
     });
 }
@@ -391,8 +397,57 @@ bool LanMicApp::IsWifiConnected() const {
     return (xEventGroupGetBits(wifi_event_group_) & kWifiConnectedBit) != 0;
 }
 
+bool LanMicApp::IsServerConnected() const {
+    return ws_ != nullptr && ws_->IsConnected();
+}
+
+void LanMicApp::StartConnectAttemptAsync() {
+    if (IsServerConnected()) {
+        return;
+    }
+
+    bool expected = false;
+    if (!connect_attempt_running_.compare_exchange_strong(expected, true,
+                                                          std::memory_order_acq_rel,
+                                                          std::memory_order_acquire)) {
+        return;
+    }
+
+    connect_attempt_completed_.store(false, std::memory_order_release);
+    connect_cancel_requested_.store(false, std::memory_order_release);
+
+    if (xTaskCreate([](void* arg) {
+            auto* self = static_cast<LanMicApp*>(arg);
+            self->RunConnectAttemptTask();
+            self->connect_task_handle_ = nullptr;
+            self->connect_attempt_running_.store(false, std::memory_order_release);
+            self->connect_attempt_completed_.store(true, std::memory_order_release);
+            vTaskDelete(nullptr);
+        },
+        "lan_reconnect",
+        kConnectTaskStackSize,
+        this,
+        kConnectTaskPriority,
+        &connect_task_handle_) != pdPASS) {
+        connect_task_handle_ = nullptr;
+        connect_attempt_running_.store(false, std::memory_order_release);
+        connect_attempt_completed_.store(true, std::memory_order_release);
+        status_text_ = "Reconnect error";
+        hint_text_ = "Task create failed";
+        UpdateDisplay();
+    }
+}
+
+void LanMicApp::RunConnectAttemptTask() {
+    EnsureWebSocketConnected();
+    if (connect_cancel_requested_.exchange(false, std::memory_order_acq_rel) && !IsServerConnected()) {
+        ws_.reset();
+        hello_sent_ = false;
+    }
+}
+
 bool LanMicApp::EnsureWebSocketConnected() {
-    if (ws_ != nullptr && ws_->IsConnected()) {
+    if (IsServerConnected()) {
         return true;
     }
 
@@ -738,7 +793,9 @@ void LanMicApp::EnterWifiSetupMode() {
 }
 
 void LanMicApp::DisconnectWebSocket() {
-    if (ws_ != nullptr) {
+    if (connect_attempt_running_.load(std::memory_order_acquire) && !IsServerConnected()) {
+        connect_cancel_requested_.store(true, std::memory_order_release);
+    } else if (ws_ != nullptr) {
         ws_.reset();
     }
     hello_sent_ = false;
@@ -1561,6 +1618,16 @@ void LanMicApp::Run() {
 
     while (true) {
         const int64_t now_ms = esp_timer_get_time() / 1000;
+        if (connect_attempt_completed_.exchange(false, std::memory_order_acq_rel)) {
+            if (IsServerConnected()) {
+                reconnect_interval_ms = kReconnectIntervalMinMs;
+                disconnected_since_ms = now_ms;
+            } else if (server_uri_.empty() && cached_server_uri_.empty() && GetFallbackServerUri().empty()) {
+                reconnect_interval_ms = kReconnectIntervalMinMs;
+            } else {
+                reconnect_interval_ms = std::min(reconnect_interval_ms * 2, kReconnectIntervalMaxMs);
+            }
+        }
         if (ws_disconnected_pending_.exchange(false)) {
             hello_sent_ = false;
             network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
@@ -1615,40 +1682,30 @@ void LanMicApp::Run() {
             continue;
         }
 
-        if ((ws_ == nullptr || !ws_->IsConnected()) && (now_ms - last_reconnect_ms) >= reconnect_interval_ms) {
+        if (!IsServerConnected() &&
+            !connect_attempt_running_.load(std::memory_order_acquire) &&
+            (now_ms - last_reconnect_ms) >= reconnect_interval_ms) {
             last_reconnect_ms = now_ms;
-            const bool ok = EnsureWebSocketConnected();
-            if (ok) {
-                reconnect_interval_ms = kReconnectIntervalMinMs;
-                disconnected_since_ms = now_ms;
-            } else if (server_uri_.empty()) {
-                // Discovery still searching — keep fast cadence so we pick up
-                // the server quickly once it appears.
-                reconnect_interval_ms = kReconnectIntervalMinMs;
-            } else {
-                // Had a URI but TCP/WS connect failed — back off gradually.
-                reconnect_interval_ms = std::min(reconnect_interval_ms * 2, kReconnectIntervalMaxMs);
-            }
-
-            // Time-based sleep: if no connection has been established within
-            // kNoConnectionSleepMs, enter deep sleep to save battery.
-            // The board wakes on BOOT press or a 5-minute timer for the next
-            // retry cycle.  This path is taken regardless of discovery state,
-            // so it works correctly when CONFIG_LAN_DISCOVERY_ENABLED=y.
-            if (!ok && (now_ms - disconnected_since_ms) >= kNoConnectionSleepMs) {
-                DisconnectWebSocket();
-                status_text_ = "No server";
-                hint_text_ = "Press BOOT to retry";
-                active_page_ = Page::Summary;
-                UpdateDisplay();
-                vTaskDelay(pdMS_TO_TICKS(800));
-                esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(BOOT_BUTTON_GPIO), 0);
-                esp_sleep_enable_timer_wakeup(5ULL * 60 * 1000 * 1000);  // 5 minutes
-                esp_deep_sleep_start();
-            }
+            StartConnectAttemptAsync();
         }
 
-        if (ws_ != nullptr && ws_->IsConnected()) {
+        // Time-based sleep: if no connection has been established within
+        // kNoConnectionSleepMs, enter deep sleep to save battery.
+        if (!IsServerConnected() &&
+            !connect_attempt_running_.load(std::memory_order_acquire) &&
+            (now_ms - disconnected_since_ms) >= kNoConnectionSleepMs) {
+            DisconnectWebSocket();
+            status_text_ = "No server";
+            hint_text_ = "Press BOOT to retry";
+            active_page_ = Page::Summary;
+            UpdateDisplay();
+            vTaskDelay(pdMS_TO_TICKS(800));
+            esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(BOOT_BUTTON_GPIO), 0);
+            esp_sleep_enable_timer_wakeup(5ULL * 60 * 1000 * 1000);  // 5 minutes
+            esp_deep_sleep_start();
+        }
+
+        if (IsServerConnected()) {
             const int64_t last_pong_ms = ws_->GetLastPongMs();
             if (last_pong_ms > 0 && (now_ms - last_pong_ms) >= kPongTimeoutMs) {
                 ESP_LOGW(kTag,
@@ -1665,8 +1722,16 @@ void LanMicApp::Run() {
 
         if (up_click) {
             if (has_pending_transcript_) {
-                if (EnsureWebSocketConnected()) {
+                if (IsServerConnected()) {
                     SendAction("action_send");
+                } else {
+                    disconnected_since_ms = now_ms;
+                    reconnect_interval_ms = kReconnectIntervalMinMs;
+                    last_reconnect_ms = now_ms;
+                    StartConnectAttemptAsync();
+                    status_text_ = "Connecting";
+                    hint_text_ = "Retrying host...";
+                    UpdateDisplay();
                 }
             } else {
                 HandleScroll(-1);
@@ -1674,8 +1739,16 @@ void LanMicApp::Run() {
         }
         if (down_click) {
             if (has_pending_transcript_) {
-                if (EnsureWebSocketConnected()) {
+                if (IsServerConnected()) {
                     SendAction("action_undo");
+                } else {
+                    disconnected_since_ms = now_ms;
+                    reconnect_interval_ms = kReconnectIntervalMinMs;
+                    last_reconnect_ms = now_ms;
+                    StartConnectAttemptAsync();
+                    status_text_ = "Connecting";
+                    hint_text_ = "Retrying host...";
+                    UpdateDisplay();
                 }
             } else {
                 HandleScroll(1);
@@ -1684,15 +1757,20 @@ void LanMicApp::Run() {
 
         const bool pressed = IsPttPressed();
         if (pressed && !last_pressed) {
-            // BOOT pressed while disconnected: reset the no-connection sleep
-            // timer so the user gets another full retry window, and force an
-            // immediate reconnect attempt on this iteration.
-            if (ws_ == nullptr || !ws_->IsConnected()) {
+            ESP_LOGI(kTag, "BOOT press connected=%d connect_task=%d phase=%d",
+                     IsServerConnected() ? 1 : 0,
+                     connect_attempt_running_.load(std::memory_order_acquire) ? 1 : 0,
+                     static_cast<int>(phase_));
+            if (!IsServerConnected()) {
                 disconnected_since_ms = now_ms;
                 reconnect_interval_ms = kReconnectIntervalMinMs;
-                last_reconnect_ms = 0;
-            }
-            if (EnsureWebSocketConnected()) {
+                last_reconnect_ms = now_ms;
+                StartConnectAttemptAsync();
+                hint_text_ = "Retrying host...";
+                status_text_ = "Connecting";
+                phase_ = Phase::Idle;
+                UpdateDisplay();
+            } else {
                 ESP_LOGI(kTag, "PTT start");
                 SendPttStart();
                 phase_ = Phase::Recording;
@@ -1703,28 +1781,30 @@ void LanMicApp::Run() {
                 FlushPrerollFrames();
                 StreamAudioFrame();
                 UpdateDisplay();
-            } else {
-                // No server — give visible feedback
-                hint_text_ = "No server — check host";
-                status_text_ = "Offline";
-                UpdateDisplay();
             }
             last_pressed = true;
         }
 
         if (!pressed && last_pressed) {
-            ESP_LOGI(kTag, "PTT stop");
-            SendPttStop();
-            phase_ = Phase::Transcribing;
-            status_text_ = "Transcribing";
-            UpdateDisplay();
+            ESP_LOGI(kTag, "BOOT release phase=%d", static_cast<int>(phase_));
+            if (phase_ == Phase::Recording) {
+                ESP_LOGI(kTag, "PTT stop");
+                SendPttStop();
+                phase_ = Phase::Transcribing;
+                status_text_ = "Transcribing";
+                UpdateDisplay();
+            }
             last_pressed = false;
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
 
         if (pressed) {
-            StreamAudioFrame();
+            if (phase_ == Phase::Recording) {
+                StreamAudioFrame();
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
             continue;
         }
 

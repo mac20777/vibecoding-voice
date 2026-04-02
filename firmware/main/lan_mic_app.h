@@ -10,6 +10,7 @@
 #include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
+#include <freertos/task.h>
 
 #include "audio_codec.h"
 #include "button.h"
@@ -39,6 +40,10 @@ private:
     std::atomic<bool> up_long_pressed_{false};
     std::atomic<bool> down_long_pressed_{false};
     std::atomic<bool> ws_disconnected_pending_{false};
+    std::atomic<bool> connect_attempt_running_{false};
+    std::atomic<bool> connect_attempt_completed_{false};
+    std::atomic<bool> connect_cancel_requested_{false};
+    TaskHandle_t connect_task_handle_ = nullptr;
     bool has_pending_transcript_ = false;
     std::string send_target_;         // received from server_ready: "claude_code" | "codex_exec" | "text_injector"
     std::vector<int16_t> audio_frame_buffer_; // reused across StreamAudioFrame() calls
@@ -104,7 +109,10 @@ private:
     void ClearPersistedHost();
     void ConfigureButtons();
     bool IsWifiConnected() const;
+    bool IsServerConnected() const;
     bool EnsureWebSocketConnected();
+    void StartConnectAttemptAsync();
+    void RunConnectAttemptTask();
     bool DiscoverServerUri();
     std::string GetExpectedDiscoveryHostId() const;
     std::string GetFallbackServerUri() const;
