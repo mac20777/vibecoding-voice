@@ -47,7 +47,7 @@ You hold a button on the device, speak a coding instruction, release the button,
 
 Both boards use ESP32-S3 with onboard MEMS mic and push-button.
 
-Planned next: a fully open DIY ESP32-S3 build based on off-the-shelf modules, with a BOM, wiring guide, and hand-assembly notes so the project does not depend on a specific commercial board.
+> **Planned DIY hardware**: a fully open ESP32-S3 build based on off-the-shelf modules, with a BOM, wiring guide, and hand-assembly notes so the project does not depend on a specific commercial board.
 
 ### Features
 
@@ -118,6 +118,9 @@ VOLCENGINE_ACCESS_KEY=your-access-key
 TRANSCRIPT_DELIVERY_MODE=confirm_on_device
 LAN_SHARED_SECRET=replace-with-a-long-random-secret
 ```
+
+If you're using Volcengine Ark and are not sure which recording recognition model / resource to use, start here:
+[Volcengine Ark Recording Recognition](https://console.volcengine.com/ark/region:ark+cn-beijing/tts/recordingRecognition)
 
 `vibe codex`, `vibe claude`, and `vibe` choose the send target for you. You only need `SEND_TARGET` when launching `src/server.mjs` directly.
 For plain `vibe` / text injection mode, the recommended default is `TEXT_INJECTION_MODE=type_and_enter`, so the typed transcript is also submitted with Enter.
@@ -372,7 +375,7 @@ Debug workflow (source mode): `MOCK_TRANSCRIPT=hello world DRY_RUN_TEXT_INJECTIO
 
 两款板子均采用 ESP32-S3，板载 MEMS 麦克风和按键。
 
-后续计划：补一个完全开源的 DIY ESP32-S3 方案，基于通用模块和手工连线，提供 BOM、接线说明和装配笔记，尽量不依赖特定商业开发板。
+> **后续 DIY 方案**：补一个完全开源的 ESP32-S3 方案，基于通用模块和手工连线，提供 BOM、接线说明和装配笔记，尽量不依赖特定商业开发板。
 
 ### 功能特性
 
@@ -443,6 +446,9 @@ VOLCENGINE_ACCESS_KEY=你的-access-key
 TRANSCRIPT_DELIVERY_MODE=confirm_on_device
 LAN_SHARED_SECRET=替换为一个足够长的随机密钥
 ```
+
+如果你用的是火山引擎 Ark，但不确定该选哪个录音识别模型或 `VOLCENGINE_RESOURCE_ID`，可以从这里开始：
+[火山引擎 Ark 录音识别页面](https://console.volcengine.com/ark/region:ark+cn-beijing/tts/recordingRecognition)
 
 `vibe codex`、`vibe claude` 和 `vibe` 会自动决定发送目标。只有你直接启动 `src/server.mjs` 时，才需要自己设置 `SEND_TARGET`。
 如果你用的是普通 `vibe` 文本注入模式，推荐默认值为 `TEXT_INJECTION_MODE=type_and_enter`，这样注入文字后会自动补一个回车。
