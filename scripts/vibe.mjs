@@ -29,7 +29,7 @@ const TARGET_MAP = {
 
 const arg = (process.argv[2] || "inject").toLowerCase().replace(/^--/, "");
 if (!TARGET_MAP[arg]) {
-  process.stderr.write(`Usage: happy [claude|codex|inject]\n`);
+  process.stderr.write(`Usage: vibe [claude|codex|inject]\n`);
   process.exit(1);
 }
 const sendTarget = TARGET_MAP[arg];

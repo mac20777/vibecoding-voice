@@ -1,11 +1,30 @@
 {
-  "name": "vibecoding-voice",
+  "name": "@macheng2017/vibecoding-voice",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "Host bridge for LAN voice coding with an ESP32 device and Codex CLI.",
   "type": "module",
+  "files": [
+    "src",
+    "scripts",
+    "README.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    ".env.example"
+  ],
   "bin": {
     "vibe": "scripts/vibe.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/macheng2017/vibecoding-voice.git"
+  },
+  "bugs": {
+    "url": "https://github.com/macheng2017/vibecoding-voice/issues"
+  },
+  "homepage": "https://github.com/macheng2017/vibecoding-voice#readme",
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "start": "node src/server.mjs",
