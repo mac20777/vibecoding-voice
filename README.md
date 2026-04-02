@@ -219,6 +219,13 @@ LAN_SHARED_SECRET=your-secret-here
 
 To re-enter config mode later: hold **UP + DOWN** until the screen clears.
 
+#### Board Notes
+
+- Use the provided flashing flow in `firmware/build_windows.ps1` when possible. The post-flash reset mode matters on this board.
+- If you are validating the very first boot after flashing, test it once before attaching a serial monitor. Opening the monitor can trigger an extra USB reset and hide the original behavior.
+- If the board behaves differently after flashing vs. after a later USB reset, check the reset path first before assuming the reconnect logic is broken.
+- Maintainer-only bring-up notes and regression checks are documented in `CONTRIBUTING.md`.
+
 ---
 
 ### Device Button Reference
@@ -528,6 +535,13 @@ LAN_SHARED_SECRET=你的密钥
 5. 设备重启，连上 Wi-Fi，通过 UDP 自动发现桥接服务，屏幕显示 **Ready**。
 
 之后需要重新配网：同时按住 **UP + DOWN** 直到屏幕清除并重新进入 AP 模式。
+
+#### 开发板注意事项
+
+- 尽量使用 `firmware/build_windows.ps1` 里的烧录流程，这块板子的刷机后 reset 方式确实会影响行为。
+- 如果你在验证“刷机后的第一次启动”，先不要急着连串口监视器。打开串口有可能额外触发一次 USB 重置，从而掩盖首启问题。
+- 如果板子表现为“刚刷完不对，后来按 USB / reset 又正常”，先排查 reset 路径，不要第一时间怀疑重连逻辑。
+- 更完整的 bring-up 踩坑和回归清单见 `CONTRIBUTING.md`。
 
 ---
 
