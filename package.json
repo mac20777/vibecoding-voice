@@ -1,5 +1,5 @@
 {
-  "name": "@macheng2017/vibecoding-voice",
+  "name": "@mac20777/vibecoding-voice",
   "version": "0.1.0",
   "private": false,
   "description": "Host bridge for LAN voice coding with an ESP32 device and Codex CLI.",
