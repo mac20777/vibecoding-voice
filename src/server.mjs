@@ -86,8 +86,30 @@ function createClientState() {
     authenticated: !config.lanSharedSecret,
     segmentActive: false,
     chunks: [],
+    pendingSegments: [],
     pendingTranscript: ""
   };
+}
+
+function joinPendingSegments(segments) {
+  const normalized = segments
+    .map((segment) => String(segment || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  return normalized.reduce((combined, segment) => {
+    if (!combined) {
+      return segment;
+    }
+
+    const endsWithPunctuation = /[。！？!?；;：:，,、.]$/.test(combined);
+    const startsWithPunctuation = /^[。！？!?；;：:，,、.]/.test(segment);
+    return combined + (endsWithPunctuation || startsWithPunctuation ? "" : " ") + segment;
+  }, "");
+}
+
+function updatePendingTranscript(state) {
+  state.pendingTranscript = joinPendingSegments(state.pendingSegments);
+  return state.pendingTranscript;
 }
 
 function emitCliSnapshot(ws) {
@@ -373,26 +395,37 @@ async function finalizeSegment(ws, state) {
   });
 
   const startedAt = Date.now();
-  const transcript = await transcribePcm16Mono({ pcmBuffer, config });
+  const transcript = String(await transcribePcm16Mono({ pcmBuffer, config }) || "").trim();
+  const hadPendingTranscript = Boolean(String(state.pendingTranscript || "").trim());
+
+  if (!transcript) {
+    sendJson(ws, {
+      type: "status",
+      status: hadPendingTranscript ? "empty_segment" : "transcript_empty",
+      text: state.pendingTranscript
+    });
+    return;
+  }
+
+  if (config.transcriptDeliveryMode === "confirm_on_device") {
+    state.pendingSegments.push(transcript);
+    const pendingTranscript = updatePendingTranscript(state);
+    sendJson(ws, {
+      type: "transcript_final",
+      text: pendingTranscript,
+      latencyMs: Date.now() - startedAt,
+      requiresAction: true
+    });
+    sendJson(ws, { type: "status", status: "awaiting_action", text: pendingTranscript });
+    return;
+  }
 
   sendJson(ws, {
     type: "transcript_final",
     text: transcript,
     latencyMs: Date.now() - startedAt,
-    requiresAction: config.transcriptDeliveryMode === "confirm_on_device"
+    requiresAction: false
   });
-
-  if (!transcript) {
-    state.pendingTranscript = "";
-    sendJson(ws, { type: "status", status: "transcript_empty" });
-    return;
-  }
-
-  if (config.transcriptDeliveryMode === "confirm_on_device") {
-    state.pendingTranscript = transcript;
-    sendJson(ws, { type: "status", status: "awaiting_action", text: transcript });
-    return;
-  }
 
   if (config.sendTarget === "codex_exec") {
     if (codexSession.isRunning()) {
@@ -459,6 +492,7 @@ async function sendPendingTranscript(ws, state) {
   }
 
   state.pendingTranscript = "";
+  state.pendingSegments = [];
   sendJson(ws, { type: "status", status: "typed", text: transcript });
   if (config.sendTarget === "codex_exec") {
     launchCodexPrompt(transcript);
@@ -474,11 +508,15 @@ async function sendPendingTranscript(ws, state) {
 }
 
 function undoPendingTranscript(ws, state) {
-  const transcript = String(state.pendingTranscript || "").trim();
-  state.pendingTranscript = "";
-
-  if (!transcript) {
+  if (state.pendingSegments.length === 0) {
     sendJson(ws, { type: "status", status: "no_pending" });
+    return;
+  }
+
+  state.pendingSegments.pop();
+  const transcript = updatePendingTranscript(state);
+  if (transcript) {
+    sendJson(ws, { type: "status", status: "awaiting_action", text: transcript });
     return;
   }
 
@@ -563,7 +601,6 @@ wss.on("connection", (ws, req) => {
           log("ptt_start", state.deviceId);
           state.segmentActive = true;
           state.chunks = [];
-          state.pendingTranscript = "";
           sendJson(ws, { type: "status", status: "recording" });
           break;
         case "ptt_stop":

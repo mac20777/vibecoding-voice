@@ -1004,11 +1004,19 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
                 status_text_ = "Canceled";
                 has_pending_transcript_ = false;
             } else if (strcmp(status, "transcript_empty") == 0 || strcmp(status, "empty_segment") == 0) {
-                phase_ = Phase::Idle;
-                status_text_ = "No speech detected";
-                hint_text_ = "Try again";
-                has_pending_transcript_ = false;
-                transcript_text_.clear();
+                if (text_value != nullptr && text_value[0] != '\0') {
+                    phase_ = Phase::AwaitingAction;
+                    status_text_ = "No speech added";
+                    has_pending_transcript_ = true;
+                    transcript_text_ = text_value;
+                    active_page_ = Page::Summary;
+                } else {
+                    phase_ = Phase::Idle;
+                    status_text_ = "No speech detected";
+                    hint_text_ = "Try again";
+                    has_pending_transcript_ = false;
+                    transcript_text_.clear();
+                }
             } else if (strcmp(status, "no_pending") == 0) {
                 phase_ = Phase::Idle;
                 status_text_ = "Nothing pending";
@@ -1303,7 +1311,7 @@ std::string LanMicApp::GetPhaseLabel() const {
 
 std::string LanMicApp::GetFooterText() const {
     if (has_pending_transcript_) {
-        return "UP Send | DN Undo";
+        return "BOOT Add | UP Send | DN Undo";
     }
     if (phase_ == Phase::Recording) {
         return "Release BOOT to stop";
