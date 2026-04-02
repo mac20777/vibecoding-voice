@@ -118,6 +118,7 @@ LAN_SHARED_SECRET=replace-with-a-long-random-secret
 ```
 
 `vibe codex`, `vibe claude`, and `vibe` choose the send target for you. You only need `SEND_TARGET` when launching `src/server.mjs` directly.
+For plain `vibe` / text injection mode, the recommended default is `TEXT_INJECTION_MODE=type_and_enter`, so the typed transcript is also submitted with Enter.
 
 **3. Run**
 
@@ -164,6 +165,8 @@ This means a local `.env` in your current project overrides the saved user-level
   Run `vibe doctor` and check whether a local `.env` is overriding the user config.
 - The board sends immediately after recording, but you expected `UP` to confirm:
   Run `vibe config` and set `TRANSCRIPT_DELIVERY_MODE=confirm_on_device`, then use `vibe doctor` to check whether a local `.env` is overriding it.
+- The text is injected, but Enter is not pressed automatically:
+  Run `vibe config` and set `TEXT_INJECTION_MODE=type_and_enter`, then use `vibe doctor` to confirm the active value.
 - You want different settings per project:
   Keep your default keys in `config.env`, then add a project-local `.env` only when needed.
 
@@ -280,7 +283,7 @@ Screen footer shows `BOOT Add · UP Send · DN Undo` when a transcript is pendin
 |----------|---------|-------------|
 | `SEND_TARGET` | `text_injector` | `text_injector`, `codex_exec`, or `claude_code` |
 | `TRANSCRIPT_DELIVERY_MODE` | `confirm_on_device` | `immediate` or `confirm_on_device` |
-| `TEXT_INJECTION_MODE` | `type_only` | `type_only` or `type_and_enter` |
+| `TEXT_INJECTION_MODE` | `type_and_enter` | `type_only` or `type_and_enter` |
 
 #### CLI Session
 
@@ -438,6 +441,7 @@ LAN_SHARED_SECRET=替换为一个足够长的随机密钥
 ```
 
 `vibe codex`、`vibe claude` 和 `vibe` 会自动决定发送目标。只有你直接启动 `src/server.mjs` 时，才需要自己设置 `SEND_TARGET`。
+如果你用的是普通 `vibe` 文本注入模式，推荐默认值为 `TEXT_INJECTION_MODE=type_and_enter`，这样注入文字后会自动补一个回车。
 
 **3. 启动**
 
@@ -484,6 +488,8 @@ vibe doctor
   运行 `vibe doctor`，检查是不是被当前目录下的 `.env` 覆盖了。
 - 板子录完音就直接发了，没有等 `UP` 确认：
   运行 `vibe config`，把 `TRANSCRIPT_DELIVERY_MODE` 设为 `confirm_on_device`，再用 `vibe doctor` 看是不是被当前目录下的 `.env` 覆盖了。
+- 文本已经注入了，但没有自动按回车：
+  运行 `vibe config`，把 `TEXT_INJECTION_MODE` 设为 `type_and_enter`，再用 `vibe doctor` 确认当前生效值。
 - 想按项目使用不同配置：
   默认密钥放在用户级 `config.env` 里，只有少数项目再单独放本地 `.env`。
 
@@ -600,7 +606,7 @@ LAN_SHARED_SECRET=你的密钥
 |------|--------|------|
 | `SEND_TARGET` | `text_injector` | `text_injector`、`codex_exec` 或 `claude_code` |
 | `TRANSCRIPT_DELIVERY_MODE` | `confirm_on_device` | `immediate` 或 `confirm_on_device` |
-| `TEXT_INJECTION_MODE` | `type_only` | `type_only` 或 `type_and_enter` |
+| `TEXT_INJECTION_MODE` | `type_and_enter` | `type_only` 或 `type_and_enter` |
 
 #### CLI 会话
 

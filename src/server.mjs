@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { createServer } from "node:http";
+import path from "node:path";
 
 import { WebSocketServer, WebSocket } from "ws";
 
@@ -28,6 +29,7 @@ const recentHelloNonces = new Map();
 applyRateLimitSnapshot(readLatestRateLimits());
 
 const MIN_PLAUSIBLE_EPOCH_MS = Date.UTC(2020, 0, 1);
+const VALID_SEND_TARGETS = new Set(["text_injector", "codex_exec", "claude_code"]);
 
 function log(...args) {
   console.log(new Date().toISOString(), ...args);
@@ -66,6 +68,61 @@ function printBanner() {
   }
   process.stderr.write(`  cwd        ${config.claudeCwd || process.cwd()} (VIBE_INVOKE_CWD=${process.env.VIBE_INVOKE_CWD || "(not set)"})\n`);
   console.log(`\nRun with --doctor to check your environment.\n`);
+}
+
+function getTargetLabel(sendTarget) {
+  if (sendTarget === "claude_code") {
+    return "Claude";
+  }
+  if (sendTarget === "codex_exec") {
+    return "Codex";
+  }
+  return "";
+}
+
+function getTargetCwd(sendTarget) {
+  return sendTarget === "claude_code" ? config.claudeCwd : config.codexCwd;
+}
+
+function emitServerReady(ws) {
+  sendJson(ws, {
+    type: "server_ready",
+    textInjectionMode: config.textInjectionMode,
+    transcriptDeliveryMode: config.transcriptDeliveryMode,
+    sendTarget: config.sendTarget,
+    authRequired: Boolean(config.lanSharedSecret)
+  });
+}
+
+function broadcastServerReady() {
+  broadcastJson({
+    type: "server_ready",
+    textInjectionMode: config.textInjectionMode,
+    transcriptDeliveryMode: config.transcriptDeliveryMode,
+    sendTarget: config.sendTarget,
+    authRequired: Boolean(config.lanSharedSecret)
+  });
+}
+
+function applySendTarget(nextTarget) {
+  if (!VALID_SEND_TARGETS.has(nextTarget)) {
+    throw new Error(`unsupported send target: ${nextTarget}`);
+  }
+
+  config.sendTarget = nextTarget;
+  config.sendTargetAuto = false;
+
+  const label = getTargetLabel(nextTarget);
+  const cwd = getTargetCwd(nextTarget);
+  cliView.cwd = cwd;
+  cliView.repoName = path.basename(cwd);
+  if (!cliView.latestAssistantText) {
+    cliView.statusLine = label ? `${label} idle` : "Idle";
+  }
+
+  broadcastCliState();
+  broadcastCliSummary();
+  broadcastServerReady();
 }
 
 function sendJson(ws, payload) {
@@ -584,13 +641,7 @@ wss.on("connection", (ws, req) => {
           state.authenticated = true;
           log("hello", { deviceId: state.deviceId, boardType: message.boardType || "unknown" });
           sendJson(ws, { type: "hello_ack", deviceId: state.deviceId });
-          sendJson(ws, {
-            type: "server_ready",
-            textInjectionMode: config.textInjectionMode,
-            transcriptDeliveryMode: config.transcriptDeliveryMode,
-            sendTarget: config.sendTarget,
-            authRequired: Boolean(config.lanSharedSecret)
-          });
+          emitServerReady(ws);
           emitCliSnapshot(ws);
           break;
         case "ptt_start":
@@ -627,6 +678,28 @@ wss.on("connection", (ws, req) => {
           log("action_undo", state.deviceId);
           undoPendingTranscript(ws, state);
           break;
+        case "set_target": {
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
+          const nextTarget = String(message.sendTarget || "").trim();
+          if (!VALID_SEND_TARGETS.has(nextTarget)) {
+            sendJson(ws, { type: "warning", warning: "invalid_send_target" });
+            break;
+          }
+          if (codexSession.isRunning() || claudeSession.isRunning()) {
+            sendJson(ws, { type: "status", status: "cli_busy" });
+            break;
+          }
+          if (config.sendTarget !== nextTarget) {
+            log("set_target", state.deviceId, nextTarget);
+            applySendTarget(nextTarget);
+          } else {
+            emitServerReady(ws);
+          }
+          break;
+        }
         case "prompt": {
           if (!state.authenticated) { closeWithAuthError(ws, state, "auth_required"); break; }
           const promptText = String(message.text || "").trim();

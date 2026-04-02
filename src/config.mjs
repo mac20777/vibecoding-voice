@@ -139,6 +139,11 @@ function normalizeTranscriptDeliveryMode(value) {
   return normalized === "immediate" ? "immediate" : "confirm_on_device";
 }
 
+function normalizeTextInjectionMode(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "type_only" ? "type_only" : "type_and_enter";
+}
+
 export function isCliAvailable(command) {
   if (!command) {
     return false;
@@ -298,7 +303,9 @@ export function loadConfig(options = {}) {
     transcriptDeliveryMode: normalizeTranscriptDeliveryMode(
       process.env.TRANSCRIPT_DELIVERY_MODE || "confirm_on_device"
     ),
-    textInjectionMode: process.env.TEXT_INJECTION_MODE || "type_only",
+    textInjectionMode: normalizeTextInjectionMode(
+      process.env.TEXT_INJECTION_MODE || "type_and_enter"
+    ),
     dryRunTextInjection: process.env.DRY_RUN_TEXT_INJECTION === "1",
     codexCommand,
     codexCwd: resolveCodexCwd(),

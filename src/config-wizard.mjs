@@ -71,15 +71,18 @@ function printWizardIntro(config) {
   const provider = detectConfiguredSttProvider(config) || "not configured";
   const deliveryMode =
     config.transcriptDeliveryMode === "immediate" ? "immediate" : "confirm_on_device";
+  const injectionMode =
+    config.textInjectionMode === "type_only" ? "type_only" : "type_and_enter";
   const overridingFiles = (config.loadedConfigFiles || []).filter((filePath) => filePath !== config.userConfigPath);
 
   output.write("\nVibe setup\n\n");
   output.write(`Config file: ${config.userConfigPath}\n`);
   output.write(`Current STT provider: ${provider}\n`);
   output.write(`Current transcript delivery: ${deliveryMode}\n`);
+  output.write(`Current text injection mode: ${injectionMode}\n`);
   output.write("This wizard configures the required STT settings for first use.\n");
   output.write("Required: STT provider + matching API keys\n");
-  output.write("Optional: transcript delivery mode, LAN_SHARED_SECRET (only if your board uses LAN auth)\n");
+  output.write("Optional: transcript delivery mode, text injection mode, LAN_SHARED_SECRET (only if your board uses LAN auth)\n");
   output.write('Run "vibe config" again anytime to change these values.\n\n');
 
   if (overridingFiles.length > 0) {
@@ -207,6 +210,27 @@ async function askTranscriptDeliveryMode(rl, currentMode) {
   }
 }
 
+async function askTextInjectionMode(rl, currentMode) {
+  const defaultOption = currentMode === "type_only" ? "2" : "1";
+
+  while (true) {
+    output.write("Choose text injection mode (used by plain `vibe` / inject mode):\n");
+    output.write("  1. Type and press Enter (recommended)\n");
+    output.write("  2. Type only\n");
+    const answer = String(await rl.question(`Selection [${defaultOption}]: `)).trim();
+    const selection = answer || defaultOption;
+
+    if (selection === "1" || selection.toLowerCase() === "type_and_enter") {
+      return "type_and_enter";
+    }
+    if (selection === "2" || selection.toLowerCase() === "type_only") {
+      return "type_only";
+    }
+
+    output.write("Please choose 1 or 2.\n");
+  }
+}
+
 export async function runConfigWizard() {
   if (!input.isTTY || !output.isTTY) {
     throw new Error('Interactive setup requires a TTY. Run "vibe config" in a terminal.');
@@ -216,6 +240,8 @@ export async function runConfigWizard() {
   const currentProvider = detectConfiguredSttProvider(currentConfig) || "volcengine";
   const currentDeliveryMode =
     currentConfig.transcriptDeliveryMode === "immediate" ? "immediate" : "confirm_on_device";
+  const currentTextInjectionMode =
+    currentConfig.textInjectionMode === "type_only" ? "type_only" : "type_and_enter";
 
   printWizardIntro(currentConfig);
 
@@ -255,6 +281,7 @@ export async function runConfigWizard() {
     }
 
     updates.TRANSCRIPT_DELIVERY_MODE = await askTranscriptDeliveryMode(rl, currentDeliveryMode);
+    updates.TEXT_INJECTION_MODE = await askTextInjectionMode(rl, currentTextInjectionMode);
 
     updates.LAN_SHARED_SECRET = await askSecret(rl, mutedOutput, "LAN_SHARED_SECRET", {
       defaultValue: currentConfig.lanSharedSecret,
@@ -275,6 +302,7 @@ export async function runConfigWizard() {
       output.write(`  OPENAI_TRANSCRIBE_LANGUAGE=${updates.OPENAI_TRANSCRIBE_LANGUAGE || "(auto)"}\n`);
     }
     output.write(`  TRANSCRIPT_DELIVERY_MODE=${updates.TRANSCRIPT_DELIVERY_MODE}\n`);
+    output.write(`  TEXT_INJECTION_MODE=${updates.TEXT_INJECTION_MODE}\n`);
     output.write(`  LAN_SHARED_SECRET=${redactValue(updates.LAN_SHARED_SECRET)}\n\n`);
 
     const shouldSave = await askYesNo(rl, `Save these values to ${currentConfig.userConfigPath}?`, true);

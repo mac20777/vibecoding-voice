@@ -66,10 +66,11 @@ if (!TARGET_MAP[arg]) {
 
 const sendTarget = TARGET_MAP[arg];
 const PORT = process.env.LAN_VOICE_PORT || 8765;
+const LOCAL_WS_URL = `ws://127.0.0.1:${PORT}`;
 
 function probeServer() {
   return new Promise((resolve) => {
-    const probe = new WebSocket(`ws://127.0.0.1:${PORT}`);
+    const probe = new WebSocket(LOCAL_WS_URL);
     const timer = setTimeout(() => {
       probe.terminate();
       resolve(false);
@@ -85,6 +86,127 @@ function probeServer() {
       resolve(false);
     });
   });
+}
+
+function connectControlSocket() {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(LOCAL_WS_URL);
+    const timer = setTimeout(() => {
+      ws.terminate();
+      reject(new Error("Timed out while connecting to local vibe server."));
+    }, 2000);
+
+    ws.on("open", () => {
+      clearTimeout(timer);
+      resolve(ws);
+    });
+    ws.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
+async function queryRunningServer() {
+  const ws = await connectControlSocket();
+  try {
+    return await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        ws.close();
+        reject(new Error("Timed out while waiting for server metadata."));
+      }, 2000);
+
+      ws.on("message", (data) => {
+        try {
+          const message = JSON.parse(data.toString("utf8"));
+          if (message.type === "server_ready") {
+            clearTimeout(timer);
+            resolve(message);
+            ws.close();
+          } else if (message.type === "error") {
+            clearTimeout(timer);
+            reject(new Error(message.error || "Unknown server error"));
+            ws.close();
+          }
+        } catch (error) {
+          clearTimeout(timer);
+          reject(error);
+          ws.close();
+        }
+      });
+
+      ws.send(JSON.stringify({ type: "hello", deviceId: "vibe-cli", boardType: "cli" }));
+    });
+  } finally {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.close();
+    }
+  }
+}
+
+async function ensureRunningServerTarget(expectedTarget) {
+  const ws = await connectControlSocket();
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        ws.close();
+        reject(new Error("Timed out while checking local vibe server state."));
+      }, 3000);
+
+      let sawHello = false;
+
+      ws.on("message", (data) => {
+        try {
+          const message = JSON.parse(data.toString("utf8"));
+          if (message.type === "hello_ack") {
+            sawHello = true;
+            return;
+          }
+          if (message.type === "server_ready") {
+            if (message.sendTarget === expectedTarget) {
+              clearTimeout(timer);
+              resolve(message);
+              ws.close();
+              return;
+            }
+            if (!sawHello) {
+              return;
+            }
+            ws.send(JSON.stringify({ type: "set_target", sendTarget: expectedTarget }));
+            sawHello = false;
+            return;
+          }
+          if (message.type === "status" && message.status === "cli_busy") {
+            clearTimeout(timer);
+            reject(new Error("Local vibe server is busy running a CLI session. Wait for it to finish, then retry."));
+            ws.close();
+            return;
+          }
+          if (message.type === "warning" && message.warning === "invalid_send_target") {
+            clearTimeout(timer);
+            reject(new Error(`Local vibe server rejected target ${expectedTarget}.`));
+            ws.close();
+            return;
+          }
+          if (message.type === "error") {
+            clearTimeout(timer);
+            reject(new Error(message.error || "Unknown server error"));
+            ws.close();
+          }
+        } catch (error) {
+          clearTimeout(timer);
+          reject(error);
+          ws.close();
+        }
+      });
+
+      ws.send(JSON.stringify({ type: "hello", deviceId: "vibe-cli", boardType: "cli" }));
+    });
+  } finally {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.close();
+    }
+  }
 }
 
 async function waitForServer(maxMs = 6000) {
@@ -104,7 +226,13 @@ let stopping = false;
 const alreadyRunning = await probeServer();
 
 if (alreadyRunning) {
-  process.stdout.write(`Server already running — connecting as [${arg}]\n`);
+  const running = await queryRunningServer();
+  if (running.sendTarget !== sendTarget) {
+    await ensureRunningServerTarget(sendTarget);
+    process.stdout.write(`Server already running — switched target to [${arg}]\n`);
+  } else {
+    process.stdout.write(`Server already running — connecting as [${arg}]\n`);
+  }
 } else {
   try {
     const { ensureConfigReadyInteractive } = await import("../src/config-wizard.mjs");
