@@ -42,10 +42,12 @@ You hold a button on the device, speak a coding instruction, release the button,
 
 | Board | Screen | Status |
 |-------|--------|--------|
-| [Zectrix S3 e-paper 4.2"](https://www.zectrix.ai/) | 400×300 grayscale e-ink | ✅ Primary dev board |
+| Zectrix S3 e-paper 4.2" | 400×300 grayscale e-ink | ✅ Primary dev board |
 | Waveshare ESP32-S3 e-paper 1.54" | 200×200 B/W e-ink | ✅ Supported |
 
 Both boards use ESP32-S3 with onboard MEMS mic and push-button.
+
+Planned next: a fully open DIY ESP32-S3 build based on off-the-shelf modules, with a BOM, wiring guide, and hand-assembly notes so the project does not depend on a specific commercial board.
 
 ### Features
 
@@ -365,10 +367,12 @@ Debug workflow (source mode): `MOCK_TRANSCRIPT=hello world DRY_RUN_TEXT_INJECTIO
 
 | 开发板 | 屏幕 | 状态 |
 |--------|------|------|
-| [Zectrix S3 e-paper 4.2"](https://www.zectrix.ai/) | 400×300 灰度电子墨水 | ✅ 主要开发板 |
+| Zectrix S3 e-paper 4.2" | 400×300 灰度电子墨水 | ✅ 主要开发板 |
 | Waveshare ESP32-S3 e-paper 1.54" | 200×200 黑白电子墨水 | ✅ 已支持 |
 
 两款板子均采用 ESP32-S3，板载 MEMS 麦克风和按键。
+
+后续计划：补一个完全开源的 DIY ESP32-S3 方案，基于通用模块和手工连线，提供 BOM、接线说明和装配笔记，尽量不依赖特定商业开发板。
 
 ### 功能特性
 
