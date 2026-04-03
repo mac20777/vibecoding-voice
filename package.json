@@ -2,7 +2,7 @@
   "name": "@mac20777/vibecoding-voice",
   "version": "0.2.2",
   "private": false,
-  "description": "Host bridge for LAN voice coding with an ESP32 device and Codex CLI.",
+  "description": "ESP32 LAN voice coding bridge with inject, Codex, and Claude modes; inject is the recommended default.",
   "type": "module",
   "files": [
     "src",

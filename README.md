@@ -15,6 +15,12 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 1. **Host bridge** (this repo) — a Node.js server that runs on your PC. It receives push-to-talk audio from an ESP32 device over WebSocket, transcribes it, and either injects the text into the active Windows input field or drives a Codex / Claude Code CLI session.
 2. **ESP32 firmware** (`firmware/`) — runs on supported e-paper boards such as Zectrix S3 and Waveshare S3, and is intended to grow into a fully DIY ESP32-S3 hardware path as well. It handles Wi-Fi, push-to-talk recording, device-side confirmation UI, and renders live CLI output on the e-ink screen.
 
+### Three working modes
+
+- **Inject mode** (`vibe` / `vibe inject`) — injects the transcript into the active input field. This is the most compatible mode and the recommended default.
+- **Codex mode** (`vibe codex`) — sends the transcript to a managed Codex CLI session.
+- **Claude mode** (`vibe claude`) — sends the transcript to a managed Claude Code CLI session.
+
 ### What it looks like in practice
 
 You hold a button on the device, speak a coding instruction, release the button, and within a second the transcribed text is sent to Claude Code or Codex. The AI agent's progress — which tools it's calling, what it wrote — streams back to the e-paper screen in real time. Your hands stay on the keyboard; the device is a voice remote for your AI coding assistant.
@@ -145,7 +151,7 @@ Checks CLI tools, API keys, port availability, and STT provider connectivity.
 
 | Command | Purpose |
 |---------|---------|
-| `vibe` | Start in text injection mode |
+| `vibe` | Start in inject mode (recommended; strongest compatibility) |
 | `vibe codex` | Start bridge + console in Codex mode |
 | `vibe claude` | Start bridge + console in Claude Code mode |
 | `vibe config` | Run the interactive setup / repair wizard |
@@ -344,6 +350,12 @@ Debug workflow (source mode): `MOCK_TRANSCRIPT=hello world DRY_RUN_TEXT_INJECTIO
 1. **主机桥接服务**（本仓库）— 运行在你电脑上的 Node.js 服务器。它通过 WebSocket 从 ESP32 设备接收按键说话（PTT）音频，调用语音识别将其转写，然后注入 Windows 当前输入框，或者驱动 Codex / Claude Code CLI 会话。
 2. **ESP32 固件**（`firmware/` 目录）— 可运行在 Zectrix S3、Waveshare S3 这类已支持的电子墨水屏开发板上，后续也会补一个完全 DIY 的 ESP32-S3 硬件方案。负责 Wi-Fi 连接、按键录音、设备端确认界面，并将 CLI 实时输出渲染到电子墨水屏上。
 
+### 三种工作模式
+
+- **注入模式**（`vibe` / `vibe inject`）— 将转写文本直接注入当前输入框，兼容性最强，推荐优先使用。
+- **Codex 模式**（`vibe codex`）— 将转写文本发送到托管的 Codex CLI 会话。
+- **Claude 模式**（`vibe claude`）— 将转写文本发送到托管的 Claude Code CLI 会话。
+
 ### 实际效果
 
 按住设备上的按键，说出一条编程指令，松开按键，不到一秒钟，转写后的文字就会发送给 Claude Code 或 Codex。AI 代理的执行进度——调用了哪些工具、写了什么代码——实时回传并显示在电子墨水屏上。你的手还在键盘上；这个设备就是你 AI 编程助手的语音遥控器。
@@ -473,7 +485,7 @@ vibe doctor
 
 | 命令 | 用途 |
 |------|------|
-| `vibe` | 以文本注入模式启动 |
+| `vibe` | 以注入模式启动（推荐，兼容性最强） |
 | `vibe codex` | 以 Codex 模式启动桥接服务和控制台 |
 | `vibe claude` | 以 Claude Code 模式启动桥接服务和控制台 |
 | `vibe config` | 重新运行交互式配置/修复向导 |
