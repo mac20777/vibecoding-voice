@@ -1,6 +1,6 @@
 {
   "name": "@mac20777/vibecoding-voice",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": false,
   "description": "ESP32 LAN voice coding bridge with inject, Codex, and Claude modes; inject is the recommended default.",
   "type": "module",
@@ -17,12 +17,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/macheng2017/vibecoding-voice.git"
+    "url": "git+https://github.com/mac20777/vibecoding-voice.git"
   },
   "bugs": {
-    "url": "https://github.com/macheng2017/vibecoding-voice/issues"
+    "url": "https://github.com/mac20777/vibecoding-voice/issues"
   },
-  "homepage": "https://github.com/macheng2017/vibecoding-voice#readme",
+  "homepage": "https://github.com/mac20777/vibecoding-voice#readme",
   "publishConfig": {
     "access": "public"
   },
