@@ -304,7 +304,7 @@ To re-enter config mode later: hold **UP + DOWN** until the screen clears.
 | UP click | Awaiting confirm | Send accumulated transcript to CLI |
 | DN click | Awaiting confirm | Undo last segment (cancel all if only one left) |
 | UP / DN click | Idle on Todo page | Move Todo selection |
-| UP / DN click | Page menu open | Move menu selection |
+| UP / DN click | Page menu open | Move menu selection with wrap-around |
 | UP double click | Idle on Todo / Live page | Toggle Todo / Live page |
 | Hold UP + DN | Any | Re-enter Wi-Fi setup mode |
 
@@ -706,7 +706,7 @@ LAN_SHARED_SECRET=你的密钥
 | UP 单击 | 等待确认 | 发送已累积的全部转写内容给 CLI |
 | DN 单击 | 等待确认 | 撤销最后一段（只剩一段时取消全部） |
 | UP / DN 单击 | Todo 页空闲态 | 移动待办选中项 |
-| UP / DN 单击 | 页面菜单打开时 | 移动菜单选中项 |
+| UP / DN 单击 | 页面菜单打开时 | 循环移动菜单选中项 |
 | UP 双击 | Todo / Live 页空闲态 | 快速切换 Todo / Live 页面 |
 | 按住 UP + DN | 任意 | 重新进入 Wi-Fi 配网模式 |
 

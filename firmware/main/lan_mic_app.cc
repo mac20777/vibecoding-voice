@@ -1710,15 +1710,17 @@ std::string LanMicApp::GetTodoMenuItemLabel(int item) const {
 }
 
 void LanMicApp::HandleTodoMenuInput(bool up_click, bool down_click, bool boot_press) {
-    if (up_click && todo_menu_selected_item_ > 0) {
-        --todo_menu_selected_item_;
-        UpdateDisplay();
+    const int item_count = GetTodoMenuItemCount();
+    if (item_count <= 0) {
+        return;
     }
-    if (down_click && todo_menu_selected_item_ < GetTodoMenuItemCount() - 1) {
-        ++todo_menu_selected_item_;
+    if (up_click) {
+        todo_menu_selected_item_ = (todo_menu_selected_item_ + item_count - 1) % item_count;
         UpdateDisplay();
-    }
-    if (boot_press) {
+    } else if (down_click) {
+        todo_menu_selected_item_ = (todo_menu_selected_item_ + 1) % item_count;
+        UpdateDisplay();
+    } else if (boot_press) {
         ExecuteTodoMenuItem(todo_menu_selected_item_);
     }
 }
@@ -1941,15 +1943,11 @@ void LanMicApp::HandleSettingsInput(bool up_click, bool down_click, bool boot_pr
     }
 
     if (up_click) {
-        if (settings_selected_item_ > 0) {
-            settings_selected_item_--;
-            UpdateDisplay();
-        }
+        settings_selected_item_ = (settings_selected_item_ + kSettingsItemCount - 1) % kSettingsItemCount;
+        UpdateDisplay();
     } else if (down_click) {
-        if (settings_selected_item_ < kSettingsItemCount - 1) {
-            settings_selected_item_++;
-            UpdateDisplay();
-        }
+        settings_selected_item_ = (settings_selected_item_ + 1) % kSettingsItemCount;
+        UpdateDisplay();
     } else if (boot_press) {
         ExecuteSettingsItem(settings_selected_item_);
     }
