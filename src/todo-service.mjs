@@ -349,10 +349,10 @@ export class TodoService {
       };
     }
 
-    const nextIndex = Math.min(
-      this.selectedIndex < 0 ? 0 : this.selectedIndex + 1,
-      this.items.length - 1
-    );
+    const current = this.selectedIndex < 0
+      ? 0
+      : Math.min(Math.max(this.selectedIndex, 0), this.items.length - 1);
+    const nextIndex = (current + 1) % this.items.length;
     const changed = nextIndex !== this.selectedIndex;
     this.selectedIndex = nextIndex;
     this.lastActionText = `当前计划 ${this.selectedIndex + 1}`;
@@ -378,7 +378,10 @@ export class TodoService {
       };
     }
 
-    const nextIndex = Math.max(this.selectedIndex < 0 ? 0 : this.selectedIndex - 1, 0);
+    const current = this.selectedIndex < 0
+      ? 0
+      : Math.min(Math.max(this.selectedIndex, 0), this.items.length - 1);
+    const nextIndex = (current - 1 + this.items.length) % this.items.length;
     const changed = nextIndex !== this.selectedIndex;
     this.selectedIndex = nextIndex;
     this.lastActionText = `当前计划 ${this.selectedIndex + 1}`;

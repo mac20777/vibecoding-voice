@@ -1388,11 +1388,11 @@ void LanMicApp::MoveTodoSelection(int direction) {
         return;
     }
 
-    const int max_index = static_cast<int>(todo_items_.size()) - 1;
-    const int current = todo_selected_index_ < 0 ? 0 : std::clamp(todo_selected_index_, 0, max_index);
+    const int count = static_cast<int>(todo_items_.size());
+    const int current = todo_selected_index_ < 0 ? 0 : std::clamp(todo_selected_index_, 0, count - 1);
     const int next = todo_selected_index_ < 0
         ? 0
-        : std::clamp(current + direction, 0, max_index);
+        : (current + direction + count) % count;
     if (next == todo_selected_index_) {
         return;
     }

@@ -34,6 +34,14 @@ test("TodoService supports CRUD and selection", () => {
     snapshot = service.getSnapshot();
     assert.equal(snapshot.selectedIndex, 0);
 
+    service.runCommand({ action: "select_prev" });
+    snapshot = service.getSnapshot();
+    assert.equal(snapshot.selectedIndex, 1);
+
+    service.runCommand({ action: "select_next" });
+    snapshot = service.getSnapshot();
+    assert.equal(snapshot.selectedIndex, 0);
+
     service.runCommand({ action: "toggle", id: firstId });
     snapshot = service.getSnapshot();
     assert.equal(snapshot.items[0].completed, true);
