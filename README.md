@@ -170,6 +170,8 @@ The device uses page-based voice routing:
 - The page menu also includes `Reconnect host` and `Restart device`; restart is blocked while offline Todo changes are waiting to sync.
 
 The Todo list is stored locally in the user config directory as `todo-list.json`.
+Fresh installs seed a few onboarding example plans that explain core board
+buttons. Once the file exists, deleting those examples keeps them deleted.
 Todo page recording always dispatches on BOOT release. It intentionally bypasses
 the global `confirm_on_device` transcript confirmation flow, so you do not need to
 press `UP` after speaking a Todo command.
@@ -573,7 +575,8 @@ vibe doctor
 - 双击 `UP` 可以在 `Todo` / `Live` 页面之间快速切换。
 - 页面菜单也包含 `Reconnect host` 和 `Restart device`；如果有离线 Todo 变更待同步，会阻止重启。
 
-Todo 列表保存在用户配置目录下的 `todo-list.json`。
+Todo 列表保存在用户配置目录下的 `todo-list.json`。新用户首次没有该文件时，
+会自动加入几条介绍板子常用按键的示例计划；文件创建后，用户删掉示例也不会反复出现。
 在 Todo 页，录音会在松开 BOOT 后直接发送并执行，刻意绕过全局
 `confirm_on_device` 转写确认流程，所以说完 Todo 命令后不需要再按 `UP` 发送。
 

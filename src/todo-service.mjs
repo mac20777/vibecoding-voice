@@ -5,6 +5,12 @@ import path from "node:path";
 export const VALID_VOICE_MODES = new Set(["normal", "todo"]);
 
 const TODO_FILE_VERSION = 1;
+const DEFAULT_TODO_ITEMS = [
+  "示例：按住 BOOT 说“添加计划 喝水”",
+  "示例：UP/DN 移动选中项",
+  "示例：短按 BOOT 完成或删除当前计划",
+  "示例：双击 UP 切换 Todo / Live"
+];
 
 function collapseWhitespace(value) {
   return String(value || "")
@@ -68,6 +74,21 @@ function sanitizePersistedState(rawState) {
     version: TODO_FILE_VERSION,
     items,
     selectedIndex: items.length === 0 ? -1 : selectedIndex
+  };
+}
+
+function createDefaultTodoState() {
+  const now = new Date().toISOString();
+  return {
+    version: TODO_FILE_VERSION,
+    items: DEFAULT_TODO_ITEMS.map((title) => ({
+      id: randomUUID(),
+      title,
+      completed: false,
+      createdAt: now,
+      updatedAt: now
+    })),
+    selectedIndex: 0
   };
 }
 
@@ -155,12 +176,16 @@ export function parseTodoVoiceCommand(input) {
 }
 
 export class TodoService {
-  constructor({ storagePath }) {
+  constructor({ storagePath, seedDefaultItems = true }) {
     this.storagePath = storagePath;
+    this.seedDefaultItems = seedDefaultItems;
     this.lastActionText = "";
     const loaded = this.#loadState();
     this.items = loaded.items;
     this.selectedIndex = loaded.selectedIndex;
+    if (loaded.seeded && this.storagePath) {
+      this.#persist();
+    }
   }
 
   getSnapshot() {
@@ -348,7 +373,9 @@ export class TodoService {
 
   #loadState() {
     if (!this.storagePath || !fs.existsSync(this.storagePath)) {
-      return sanitizePersistedState(null);
+      return this.seedDefaultItems
+        ? { ...createDefaultTodoState(), seeded: true }
+        : sanitizePersistedState(null);
     }
 
     try {
