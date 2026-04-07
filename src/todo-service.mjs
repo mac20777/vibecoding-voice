@@ -113,6 +113,10 @@ export function parseTodoVoiceCommand(input) {
     return { ok: true, action: "list" };
   }
 
+  if (/^(?:(?:删除|删掉|清空)(?:全部|所有|全都)?(?:计划|待办|todo)(?:列表)?|(?:全部|全都|所有)(?:删除|删掉))$/iu.test(text)) {
+    return { ok: true, action: "clear" };
+  }
+
   const createMatch = text.match(/^(?:添加(?:一个)?|新增|增加|加一个)(?:计划|待办|todo)?\s*(.*)$/iu);
   if (createMatch) {
     const title = normalizeTitle(createMatch[1]);
@@ -207,6 +211,8 @@ export class TodoService {
         return this.update(command?.index, command?.text, command?.id);
       case "delete":
         return this.delete(command?.index, command?.id);
+      case "clear":
+        return this.clear();
       case "toggle":
         return this.toggle(command?.index, command?.completed, command?.id);
       case "select_next":
@@ -292,6 +298,21 @@ export class TodoService {
       ok: true,
       action: "delete",
       changed: true,
+      message: this.lastActionText,
+      snapshot: this.getSnapshot()
+    };
+  }
+
+  clear() {
+    const count = this.items.length;
+    this.items = [];
+    this.selectedIndex = -1;
+    this.lastActionText = count === 0 ? "暂无计划可删除" : `已删除全部 ${count} 条计划`;
+    this.#persist();
+    return {
+      ok: true,
+      action: "clear",
+      changed: count > 0,
       message: this.lastActionText,
       snapshot: this.getSnapshot()
     };

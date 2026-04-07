@@ -83,3 +83,32 @@ test("TodoAssistant uses DeepSeek fallback for natural create phrasing", async (
   });
   assert.equal(result.source, "deepseek");
 });
+
+test("TodoAssistant accepts DeepSeek clear commands", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [
+      {
+        message: {
+          content: JSON.stringify({
+            type: "command",
+            action: "clear"
+          })
+        }
+      }
+    ]
+  }));
+
+  const assistant = createTodoAssistant({
+    todoIntentProvider: "deepseek",
+    todoIntentApiKey: "test-key"
+  });
+
+  const result = await assistant.interpret("把所有待办都删掉");
+  assert.deepEqual(result.command, { action: "clear" });
+  assert.equal(result.source, "deepseek");
+});

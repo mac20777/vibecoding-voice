@@ -27,6 +27,16 @@ test("parseTodoVoiceCommand parses create/list/update/delete/toggle commands", (
     index: 2
   });
 
+  assert.deepEqual(parseTodoVoiceCommand("删除全部计划"), {
+    ok: true,
+    action: "clear"
+  });
+
+  assert.deepEqual(parseTodoVoiceCommand("清空待办"), {
+    ok: true,
+    action: "clear"
+  });
+
   assert.deepEqual(parseTodoVoiceCommand("修改计划 3 改成 发版本"), {
     ok: true,
     action: "update",

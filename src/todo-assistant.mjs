@@ -1,6 +1,6 @@
 import { parseTodoVoiceCommand } from "./todo-service.mjs";
 
-const TODO_ACTIONS = new Set(["list", "create", "update", "delete", "toggle"]);
+const TODO_ACTIONS = new Set(["list", "create", "update", "delete", "clear", "toggle"]);
 const CHINESE_DIGITS = new Map([
   ["零", 0],
   ["一", 1],
@@ -208,9 +208,10 @@ function buildSystemPrompt() {
   return [
     "你是一个 Todo List 语义解析器，只输出 JSON，不要输出 Markdown。",
     "你只负责把中文口语解析成结构化命令，不要执行命令。",
-    "支持的 action 只有 list, create, update, delete, toggle。",
+    "支持的 action 只有 list, create, update, delete, clear, toggle。",
     "如果用户只是查看待办，输出 {\"type\":\"command\",\"action\":\"list\"}。",
     "如果用户想新增待办，输出 {\"type\":\"command\",\"action\":\"create\",\"text\":\"待办内容\"}。",
+    "如果用户想删除全部或清空待办，输出 {\"type\":\"command\",\"action\":\"clear\"}。",
     "如果用户想修改、删除、完成或取消完成某条待办，必须给出 1-based index；没有序号就输出 ask。",
     "如果用户只说添加/新增但没有内容，输出 {\"type\":\"ask\",\"question\":\"计划内容是什么？\",\"pending\":{\"action\":\"create\",\"missing\":\"text\"}}。",
     "如果缺少序号，pending.missing 必须是 index；如果缺少新内容，pending.missing 必须是 text。",
@@ -295,7 +296,7 @@ function normalizeLlmCommand(payload) {
     return { ok: false, action: "parse", message: "不支持这个待办操作", pendingIntent: null };
   }
 
-  if (action === "list") {
+  if (action === "list" || action === "clear") {
     return commandResult({ action }, "deepseek");
   }
 

@@ -48,9 +48,15 @@ test("TodoService supports CRUD and selection", () => {
     assert.equal(snapshot.items[0].title, "Ship stable release");
     assert.equal(snapshot.selectedIndex, 0);
 
+    const clearResult = service.runCommand({ action: "clear" });
+    snapshot = service.getSnapshot();
+    assert.equal(clearResult.action, "clear");
+    assert.equal(snapshot.items.length, 0);
+    assert.equal(snapshot.selectedIndex, -1);
+
     const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    assert.equal(persisted.items.length, 1);
-    assert.equal(persisted.selectedIndex, 0);
+    assert.equal(persisted.items.length, 0);
+    assert.equal(persisted.selectedIndex, -1);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
