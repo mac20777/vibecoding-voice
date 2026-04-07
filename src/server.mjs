@@ -11,9 +11,12 @@ import { loadConfig } from "./config.mjs";
 import { runDoctor } from "./doctor.mjs";
 import { startDiscoveryServer } from "./discovery-server.mjs";
 import { isFreshTimestamp, signHelloPayload, signaturesMatch } from "./lan-auth.mjs";
+import { getUserTodoListPath } from "./paths.mjs";
 import { ClaudeSessionManager } from "./claude-session.mjs";
 import { CodexSessionManager } from "./codex-session.mjs";
 import { transcribePcm16Mono } from "./stt.mjs";
+import { createTodoAssistant } from "./todo-assistant.mjs";
+import { createTodoService, VALID_VOICE_MODES } from "./todo-service.mjs";
 import { injectText } from "./text-injector.mjs";
 
 const config = loadConfig();
@@ -25,7 +28,10 @@ if (process.argv.includes("--doctor")) {
 const codexSession = new CodexSessionManager(config);
 const claudeSession = new ClaudeSessionManager(config);
 const cliView = createCliView(config);
+const todoService = createTodoService({ storagePath: getUserTodoListPath() });
+const todoAssistant = createTodoAssistant(config);
 const recentHelloNonces = new Map();
+let currentVoiceMode = "normal";
 applyRateLimitSnapshot(readLatestRateLimits());
 
 const MIN_PLAUSIBLE_EPOCH_MS = Date.UTC(2020, 0, 1);
@@ -61,6 +67,7 @@ function printBanner() {
   console.log(`\nvibecoding-voice v${version}`);
   console.log(`  target     ${targetLabel}`);
   console.log(`  stt        ${sttLabel}`);
+  console.log(`  todo       ${todoAssistant.label()}`);
   console.log(`  auth       ${authLabel}`);
   console.log(`  ws         ws://${config.bindHost}:${config.port}`);
   if (config.discoveryEnabled) {
@@ -90,6 +97,7 @@ function emitServerReady(ws) {
     textInjectionMode: config.textInjectionMode,
     transcriptDeliveryMode: config.transcriptDeliveryMode,
     sendTarget: config.sendTarget,
+    mode: currentVoiceMode,
     authRequired: Boolean(config.lanSharedSecret)
   });
 }
@@ -100,6 +108,7 @@ function broadcastServerReady() {
     textInjectionMode: config.textInjectionMode,
     transcriptDeliveryMode: config.transcriptDeliveryMode,
     sendTarget: config.sendTarget,
+    mode: currentVoiceMode,
     authRequired: Boolean(config.lanSharedSecret)
   });
 }
@@ -125,6 +134,185 @@ function applySendTarget(nextTarget) {
   broadcastServerReady();
 }
 
+function applyCliCwd(target, nextCwd) {
+  const resolvedCwd = path.resolve(String(nextCwd || "").trim());
+  if (!resolvedCwd || !fs.existsSync(resolvedCwd)) {
+    throw new Error(`invalid_cli_cwd:${nextCwd}`);
+  }
+
+  if (target === "codex_exec") {
+    config.codexCwd = resolvedCwd;
+  } else if (target === "claude_code") {
+    config.claudeCwd = resolvedCwd;
+  } else {
+    throw new Error(`unsupported_cli_cwd_target:${target}`);
+  }
+
+  if (config.sendTarget === target) {
+    cliView.cwd = resolvedCwd;
+    cliView.repoName = path.basename(resolvedCwd);
+    if (cliView.phase === "idle") {
+      const label = getTargetLabel(target);
+      cliView.statusLine = label ? `${label} idle` : "Idle";
+    }
+    broadcastCliState();
+    broadcastCliSummary();
+    broadcastServerReady();
+  }
+
+  return resolvedCwd;
+}
+
+function getTodoSnapshotPayload() {
+  const snapshot = todoService.getSnapshot();
+  return {
+    type: "todo_state",
+    items: snapshot.items,
+    selectedIndex: snapshot.selectedIndex,
+    lastActionText: snapshot.lastActionText
+  };
+}
+
+function emitModeState(ws) {
+  sendJson(ws, {
+    type: "mode_state",
+    mode: currentVoiceMode
+  });
+}
+
+function broadcastModeState() {
+  broadcastJson({
+    type: "mode_state",
+    mode: currentVoiceMode
+  });
+}
+
+function emitTodoState(ws) {
+  sendJson(ws, getTodoSnapshotPayload());
+}
+
+function broadcastTodoState() {
+  broadcastJson(getTodoSnapshotPayload());
+}
+
+function applyVoiceMode(nextMode) {
+  if (!VALID_VOICE_MODES.has(nextMode)) {
+    throw new Error(`unsupported_voice_mode:${nextMode}`);
+  }
+  currentVoiceMode = nextMode;
+  broadcastModeState();
+}
+
+function formatTodoErrorMessage(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  switch (message) {
+    case "todo_title_required":
+      return "计划内容不能为空";
+    case "todo_empty":
+      return "暂无计划";
+    case "todo_index_required":
+      return "请先选择计划";
+    case "todo_index_invalid":
+      return "计划序号无效";
+    case "todo_index_out_of_range":
+      return "计划序号超出范围";
+    case "todo_item_not_found":
+      return "计划已不存在";
+    default:
+      return "待办操作失败";
+  }
+}
+
+function sendTodoResult(ws, payload) {
+  sendJson(ws, {
+    type: "todo_result",
+    ok: Boolean(payload?.ok),
+    action: String(payload?.action || "unknown"),
+    message: String(payload?.message || "")
+  });
+}
+
+function clearPendingTodoIntent(state) {
+  if (state?.pendingTodoTimer) {
+    clearTimeout(state.pendingTodoTimer);
+    state.pendingTodoTimer = null;
+  }
+  if (state) {
+    state.pendingTodoIntent = null;
+    state.pendingTodoIntentExpiresAt = 0;
+  }
+}
+
+function setPendingTodoIntent(ws, state, pendingIntent) {
+  if (!state) {
+    return;
+  }
+
+  clearPendingTodoIntent(state);
+  if (!pendingIntent) {
+    return;
+  }
+
+  state.pendingTodoIntent = pendingIntent;
+  state.pendingTodoIntentExpiresAt = Date.now() + config.todoFollowupTimeoutMs;
+  state.pendingTodoTimer = setTimeout(() => {
+    if (ws.readyState !== WebSocket.OPEN || state.pendingTodoIntent !== pendingIntent) {
+      return;
+    }
+    clearPendingTodoIntent(state);
+    sendTodoResult(ws, {
+      ok: true,
+      action: "cancel",
+      message: "已取消待办追问"
+    });
+  }, config.todoFollowupTimeoutMs);
+  state.pendingTodoTimer.unref?.();
+}
+
+function runTodoCommand(command, { ws = null } = {}) {
+  try {
+    const result = todoService.runCommand(command);
+    broadcastTodoState();
+    if (ws) {
+      sendTodoResult(ws, result);
+    }
+    return result;
+  } catch (error) {
+    const result = {
+      ok: false,
+      action: String(command?.action || "unknown"),
+      message: formatTodoErrorMessage(error)
+    };
+    if (ws) {
+      sendTodoResult(ws, result);
+    }
+    return result;
+  }
+}
+
+async function dispatchTodoPrompt(ws, prompt, state) {
+  if (state?.pendingTodoIntent && state.pendingTodoIntentExpiresAt <= Date.now()) {
+    clearPendingTodoIntent(state);
+  }
+  const outcome = await todoAssistant.interpret(prompt, {
+    pendingIntent: state?.pendingTodoIntent,
+    snapshot: todoService.getSnapshot()
+  });
+  if (state) {
+    setPendingTodoIntent(ws, state, outcome.pendingIntent || null);
+  }
+
+  if (!outcome.command) {
+    sendTodoResult(ws, {
+      ok: outcome.ok,
+      action: outcome.action || "parse",
+      message: outcome.message
+    });
+    return;
+  }
+  runTodoCommand(outcome.command, { ws });
+}
+
 function sendJson(ws, payload) {
   ws.send(JSON.stringify(payload));
 }
@@ -144,7 +332,10 @@ function createClientState() {
     segmentActive: false,
     chunks: [],
     pendingSegments: [],
-    pendingTranscript: ""
+    pendingTranscript: "",
+    pendingTodoIntent: null,
+    pendingTodoIntentExpiresAt: 0,
+    pendingTodoTimer: null
   };
 }
 
@@ -193,6 +384,8 @@ function emitCliSnapshot(ws) {
     type: "cli_log_tail",
     lines: cliView.logLines
   });
+  emitModeState(ws);
+  emitTodoState(ws);
 }
 
 function broadcastCliState() {
@@ -464,6 +657,19 @@ async function finalizeSegment(ws, state) {
     return;
   }
 
+  if (currentVoiceMode === "todo") {
+    sendJson(ws, {
+      type: "transcript_final",
+      text: transcript,
+      latencyMs: Date.now() - startedAt,
+      requiresAction: false
+    });
+    state.pendingTranscript = "";
+    state.pendingSegments = [];
+    await dispatchTodoPrompt(ws, transcript, state);
+    return;
+  }
+
   if (config.transcriptDeliveryMode === "confirm_on_device") {
     state.pendingSegments.push(transcript);
     const pendingTranscript = updatePendingTranscript(state);
@@ -531,6 +737,16 @@ async function dispatchPrompt(prompt) {
   });
 }
 
+async function dispatchUserPrompt(ws, prompt, state) {
+  if (currentVoiceMode === "todo") {
+    await dispatchTodoPrompt(ws, prompt, state);
+    return "todo";
+  }
+
+  await dispatchPrompt(prompt);
+  return "normal";
+}
+
 async function sendPendingTranscript(ws, state) {
   const transcript = String(state.pendingTranscript || "").trim();
   if (!transcript) {
@@ -538,18 +754,23 @@ async function sendPendingTranscript(ws, state) {
     return;
   }
 
-  if (config.sendTarget === "codex_exec" && codexSession.isRunning()) {
+  if (currentVoiceMode !== "todo" && config.sendTarget === "codex_exec" && codexSession.isRunning()) {
     sendJson(ws, { type: "status", status: "cli_busy" });
     return;
   }
 
-  if (config.sendTarget === "claude_code" && claudeSession.isRunning()) {
+  if (currentVoiceMode !== "todo" && config.sendTarget === "claude_code" && claudeSession.isRunning()) {
     sendJson(ws, { type: "status", status: "cli_busy" });
     return;
   }
 
   state.pendingTranscript = "";
   state.pendingSegments = [];
+  if (currentVoiceMode === "todo") {
+    await dispatchTodoPrompt(ws, transcript, state);
+    return;
+  }
+
   sendJson(ws, { type: "status", status: "typed", text: transcript });
   if (config.sendTarget === "codex_exec") {
     launchCodexPrompt(transcript);
@@ -700,24 +921,108 @@ wss.on("connection", (ws, req) => {
           }
           break;
         }
+        case "set_cli_cwd": {
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
+          const target = String(message.sendTarget || "").trim();
+          const nextCwd = String(message.cwd || "").trim();
+          if (!(target === "codex_exec" || target === "claude_code")) {
+            sendJson(ws, { type: "warning", warning: "invalid_cli_cwd_target" });
+            break;
+          }
+          if (!nextCwd) {
+            sendJson(ws, { type: "warning", warning: "cli_cwd_empty" });
+            break;
+          }
+          try {
+            const resolvedCwd = applyCliCwd(target, nextCwd);
+            log("set_cli_cwd", state.deviceId, target, resolvedCwd);
+            sendJson(ws, {
+              type: "cli_cwd_updated",
+              sendTarget: target,
+              cwd: resolvedCwd
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            sendJson(ws, { type: "warning", warning: message });
+          }
+          break;
+        }
+        case "set_mode": {
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
+          const nextMode = String(message.mode || "").trim().toLowerCase();
+          if (!VALID_VOICE_MODES.has(nextMode)) {
+            sendJson(ws, { type: "warning", warning: "invalid_voice_mode" });
+            break;
+          }
+          if (currentVoiceMode !== nextMode) {
+            log("set_mode", state.deviceId, nextMode);
+            if (nextMode !== "todo") {
+              clearPendingTodoIntent(state);
+            }
+            applyVoiceMode(nextMode);
+          } else {
+            emitModeState(ws);
+          }
+          break;
+        }
+        case "todo_command": {
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
+          const action = String(message.action || "").trim().toLowerCase();
+          if (!action) {
+            sendTodoResult(ws, {
+              ok: false,
+              action: "unknown",
+              message: "缺少待办操作"
+            });
+            break;
+          }
+          log("todo_command", state.deviceId, action);
+          clearPendingTodoIntent(state);
+          runTodoCommand(
+            {
+              action,
+              id: message.id,
+              index: message.index,
+              text: message.text,
+              completed: message.completed
+            },
+            { ws }
+          );
+          break;
+        }
         case "prompt": {
           if (!state.authenticated) { closeWithAuthError(ws, state, "auth_required"); break; }
           const promptText = String(message.text || "").trim();
           if (!promptText) { sendJson(ws, { type: "warning", warning: "prompt_empty" }); break; }
           log("prompt (console)", state.deviceId, promptText.slice(0, 80));
-          if (config.sendTarget === "claude_code") {
-            if (claudeSession.isRunning()) { sendJson(ws, { type: "status", status: "cli_busy" }); break; }
-            launchClaudePrompt(promptText);
-          } else if (config.sendTarget === "codex_exec") {
-            if (codexSession.isRunning()) { sendJson(ws, { type: "status", status: "cli_busy" }); break; }
-            launchCodexPrompt(promptText);
-          } else {
-            void dispatchPrompt(promptText).catch((e) => {
-              const msg = e instanceof Error ? e.message : String(e);
-              appendCliLog(`error: ${msg}`); setCliState({ phase: "error", statusLine: msg });
-            });
+          if (currentVoiceMode === "normal") {
+            if (config.sendTarget === "claude_code" && claudeSession.isRunning()) {
+              sendJson(ws, { type: "status", status: "cli_busy" });
+              break;
+            }
+            if (config.sendTarget === "codex_exec" && codexSession.isRunning()) {
+              sendJson(ws, { type: "status", status: "cli_busy" });
+              break;
+            }
           }
-          sendJson(ws, { type: "status", status: "typed", text: promptText });
+          void dispatchUserPrompt(ws, promptText, state).then((route) => {
+            if (route === "normal") {
+              sendJson(ws, { type: "status", status: "typed", text: promptText });
+            }
+          }).catch((e) => {
+            const msg = e instanceof Error ? e.message : String(e);
+            appendCliLog(`error: ${msg}`);
+            setCliState({ phase: "error", statusLine: msg });
+          });
           break;
         }
         case "ping":
@@ -743,6 +1048,7 @@ wss.on("connection", (ws, req) => {
   });
 
   ws.on("close", () => {
+    clearPendingTodoIntent(state);
     log("client disconnected", state.deviceId);
   });
 

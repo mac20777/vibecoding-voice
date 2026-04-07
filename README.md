@@ -62,6 +62,7 @@ Both boards use ESP32-S3 with onboard MEMS mic and push-button.
 - Windows text injection via clipboard (Ctrl+V)
 - Managed `codex exec --json` session bridge
 - Managed `claude -p --output-format stream-json` session bridge
+- **Todo List page** with local persistence and page-based voice CRUD for simple plans
 - Live CLI status, prompt/reply summary, log tail, and quota snapshot projected to e-paper
 - **Multi-segment accumulation** — hold BOOT to keep appending speech, UP to send, DN to undo the last segment
 - Device-side confirm flow: transcript shown first, explicit action required to send
@@ -157,6 +158,48 @@ Checks CLI tools, API keys, port availability, and STT provider connectivity.
 | `vibe config` | Run the interactive setup / repair wizard |
 | `vibe doctor` | Validate config, keys, CLI binaries, and ports |
 
+#### Todo Page
+
+The device uses page-based voice routing:
+
+- On the `Todo` page, hold `BOOT` to speak Todo commands.
+- On the `Live` page, hold `BOOT` to send speech to the current send target (`inject`, `Codex`, or `Claude`).
+- Short-press `BOOT` on the `Todo` page to open the quick action menu for marking done or deleting the selected item.
+- Hold `UP` to open the current page menu. Use `Go Live` / `Go Todo` to switch pages.
+- Double-click `UP` to quickly switch between the `Todo` and `Live` pages.
+- The page menu also includes `Reconnect host` and `Restart device`; restart is blocked while offline Todo changes are waiting to sync.
+
+The Todo list is stored locally in the user config directory as `todo-list.json`.
+Todo page recording always dispatches on BOOT release. It intentionally bypasses
+the global `confirm_on_device` transcript confirmation flow, so you do not need to
+press `UP` after speaking a Todo command.
+
+Supported Todo voice commands on the Todo page:
+
+- `查看计划`
+- `添加计划 买牛奶`
+- `删除计划 2`
+- `修改计划 2 改成 发版本`
+- `完成计划 2`
+- `取消完成计划 2`
+
+Todo intent parsing is local-rule-first. If you enable `TODO_INTENT_PROVIDER=deepseek`,
+unknown or more natural phrases such as `帮我记一下明天买牛奶` are sent to DeepSeek
+only to produce a structured Todo command. The model does not run Codex/Claude and
+does not execute CRUD directly. If the utterance is incomplete, the bridge asks a
+follow-up question on the device, for example `计划内容是什么？`. Unanswered
+follow-ups auto-cancel after `TODO_FOLLOWUP_TIMEOUT_MS`.
+
+Console shortcuts:
+
+- `/mode normal`
+- `/mode todo`
+- `/todo list`
+- `/todo add <text>`
+- `/todo update <index> <text>`
+- `/todo delete <index>`
+- `/todo toggle <index>`
+
 #### Configuration Priority
 
 Configuration is loaded in this order, lowest to highest priority:
@@ -178,6 +221,8 @@ This means a local `.env` in your current project overrides the saved user-level
   Run `vibe config` and set `TRANSCRIPT_DELIVERY_MODE=confirm_on_device`, then use `vibe doctor` to check whether a local `.env` is overriding it.
 - The text is injected, but Enter is not pressed automatically:
   Run `vibe config` and set `TEXT_INJECTION_MODE=type_and_enter`, then use `vibe doctor` to confirm the active value.
+- The board does not reconnect after restarting the host service:
+  Make sure the board firmware is also updated, not only the npm package. If the reconnect prompt appears, choose `Retry host` or `Offline Todo`; if no action is taken, the board falls back to Offline Todo. If the host IP or `LAN_DISCOVERY_HOST_ID` changed, clear pairing by holding `UP + DN` and re-enter Wi-Fi setup.
 - You want different settings per project:
   Keep your default keys in `config.env`, then add a project-local `.env` only when needed.
 
@@ -251,11 +296,16 @@ To re-enter config mode later: hold **UP + DOWN** until the screen clears.
 
 | Button | Connection state | Action |
 |--------|-----------------|--------|
-| Hold BOOT | Connected | Record a speech segment |
+| Hold UP | Idle on Todo / Live page | Open the current page menu |
+| BOOT short press | Idle on Todo page | Open quick actions: mark done or delete selected |
+| Hold BOOT | Connected on Todo page | Record a Todo command |
+| Hold BOOT | Connected on Live page | Record a live coding speech segment |
 | BOOT (release) | Awaiting confirm | Append another segment to pending transcript |
-| BOOT (press) | Disconnected | Force immediate reconnect attempt |
 | UP click | Awaiting confirm | Send accumulated transcript to CLI |
 | DN click | Awaiting confirm | Undo last segment (cancel all if only one left) |
+| UP / DN click | Idle on Todo page | Move Todo selection |
+| UP / DN click | Page menu open | Move menu selection |
+| UP double click | Idle on Todo / Live page | Toggle Todo / Live page |
 | Hold UP + DN | Any | Re-enter Wi-Fi setup mode |
 
 Screen footer shows `BOOT Add · UP Send · DN Undo` when a transcript is pending.
@@ -296,6 +346,17 @@ Screen footer shows `BOOT Add · UP Send · DN Undo` when a transcript is pendin
 | `TRANSCRIPT_DELIVERY_MODE` | `confirm_on_device` | `immediate` or `confirm_on_device` |
 | `TEXT_INJECTION_MODE` | `type_and_enter` | `type_only` or `type_and_enter` |
 
+#### Todo Intent
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TODO_INTENT_PROVIDER` | `rules` | `rules` or `deepseek` |
+| `TODO_INTENT_API_KEY` | — | DeepSeek API key for Todo semantic parsing |
+| `TODO_INTENT_MODEL` | `deepseek-chat` | DeepSeek chat model |
+| `TODO_INTENT_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible DeepSeek base URL |
+| `TODO_INTENT_TIMEOUT_MS` | `8000` | Todo intent request timeout |
+| `TODO_FOLLOWUP_TIMEOUT_MS` | `30000` | Auto-cancel timeout for incomplete Todo follow-ups |
+
 #### CLI Session
 
 | Variable | Default | Description |
@@ -328,6 +389,15 @@ node scripts/mock-client.mjs         # simulate a device connection
 ```
 
 Debug workflow (source mode): `MOCK_TRANSCRIPT=hello world DRY_RUN_TEXT_INJECTION=1 node src/server.mjs`
+
+Todo mode smoke test example:
+
+```powershell
+node scripts/console.mjs
+/mode todo
+/todo add buy milk
+/todo list
+```
 
 ---
 
@@ -396,6 +466,7 @@ Debug workflow (source mode): `MOCK_TRANSCRIPT=hello world DRY_RUN_TEXT_INJECTIO
 - 通过剪贴板（Ctrl+V）注入 Windows 文本
 - 托管 `codex exec --json` 会话
 - 托管 `claude -p --output-format stream-json` 会话
+- **Todo List 页面**：本地持久化待办，按当前页面决定语音进入 Todo 还是 Live coding
 - 将 CLI 状态、提示/回复摘要、日志末行、配额快照实时投影到电子墨水屏
 - **多段语音累积** — 按住 BOOT 持续追加语音片段，UP 发送，DN 撤销上一段
 - 设备端确认流程：先显示转写内容，主动操作后才发送
@@ -491,6 +562,46 @@ vibe doctor
 | `vibe config` | 重新运行交互式配置/修复向导 |
 | `vibe doctor` | 检查配置、密钥、CLI 和端口状态 |
 
+#### Todo 页面
+
+设备按当前页面决定语音去向：
+
+- 在 `Todo` 页，按住 `BOOT` 说话会进入 Todo 命令解析。
+- 在 `Live` 页，按住 `BOOT` 说话会发给当前发送目标（`inject` / `Codex` / `Claude`）。
+- 在 `Todo` 页，短按 `BOOT` 打开完成/删除当前待办的快捷菜单。
+- 按住 `UP` 打开当前页面菜单，通过 `Go Live` / `Go Todo` 切换页面。
+- 双击 `UP` 可以在 `Todo` / `Live` 页面之间快速切换。
+- 页面菜单也包含 `Reconnect host` 和 `Restart device`；如果有离线 Todo 变更待同步，会阻止重启。
+
+Todo 列表保存在用户配置目录下的 `todo-list.json`。
+在 Todo 页，录音会在松开 BOOT 后直接发送并执行，刻意绕过全局
+`confirm_on_device` 转写确认流程，所以说完 Todo 命令后不需要再按 `UP` 发送。
+
+Todo 页支持的语音命令：
+
+- `查看计划`
+- `添加计划 买牛奶`
+- `删除计划 2`
+- `修改计划 2 改成 发版本`
+- `完成计划 2`
+- `取消完成计划 2`
+
+Todo 意图解析会先走本地规则。如果启用 `TODO_INTENT_PROVIDER=deepseek`，
+像 `帮我记一下明天买牛奶` 这样的自然说法会发送给 DeepSeek，只用于转成结构化
+Todo 命令；它不会启动 Codex/Claude，也不会直接执行 CRUD。用户说得不完整时，
+桥接服务会在设备上追问，例如 `计划内容是什么？`。如果超过
+`TODO_FOLLOWUP_TIMEOUT_MS` 没有回答，追问会自动取消。
+
+控制台快捷命令：
+
+- `/mode normal`
+- `/mode todo`
+- `/todo list`
+- `/todo add <text>`
+- `/todo update <index> <text>`
+- `/todo delete <index>`
+- `/todo toggle <index>`
+
 #### 配置优先级
 
 配置按以下顺序加载，后者覆盖前者：
@@ -512,6 +623,8 @@ vibe doctor
   运行 `vibe config`，把 `TRANSCRIPT_DELIVERY_MODE` 设为 `confirm_on_device`，再用 `vibe doctor` 看是不是被当前目录下的 `.env` 覆盖了。
 - 文本已经注入了，但没有自动按回车：
   运行 `vibe config`，把 `TEXT_INJECTION_MODE` 设为 `type_and_enter`，再用 `vibe doctor` 确认当前生效值。
+- 重启主机服务后板子没有自动连回：
+  确认板子固件也更新了，不能只更新 npm 包。如果屏幕出现重连菜单，选择 `Retry host` 或 `Offline Todo`；如果不操作，板子会自动回到离线 Todo。如果主机 IP 或 `LAN_DISCOVERY_HOST_ID` 变过，按住 `UP + DN` 清除配对并重新配网。
 - 想按项目使用不同配置：
   默认密钥放在用户级 `config.env` 里，只有少数项目再单独放本地 `.env`。
 
@@ -585,11 +698,16 @@ LAN_SHARED_SECRET=你的密钥
 
 | 按键 | 连接状态 | 动作 |
 |------|----------|------|
-| 按住 BOOT | 已连接 | 录制一段语音 |
+| 按住 UP | Todo / Live 页空闲态 | 打开当前页面菜单 |
+| 短按 BOOT | Todo 页空闲态 | 打开完成/删除当前待办的快捷菜单 |
+| 按住 BOOT | Todo 页已连接 | 录制一条 Todo 命令 |
+| 按住 BOOT | Live 页已连接 | 录制一段 live coding 语音 |
 | BOOT（松开） | 等待确认 | 继续追加一段语音到当前转写 |
-| BOOT（按下） | 已断连 | 强制立即重新连接 |
 | UP 单击 | 等待确认 | 发送已累积的全部转写内容给 CLI |
 | DN 单击 | 等待确认 | 撤销最后一段（只剩一段时取消全部） |
+| UP / DN 单击 | Todo 页空闲态 | 移动待办选中项 |
+| UP / DN 单击 | 页面菜单打开时 | 移动菜单选中项 |
+| UP 双击 | Todo / Live 页空闲态 | 快速切换 Todo / Live 页面 |
 | 按住 UP + DN | 任意 | 重新进入 Wi-Fi 配网模式 |
 
 有待发送内容时屏幕底部显示：`BOOT Add · UP Send · DN Undo`
@@ -630,6 +748,17 @@ LAN_SHARED_SECRET=你的密钥
 | `TRANSCRIPT_DELIVERY_MODE` | `confirm_on_device` | `immediate` 或 `confirm_on_device` |
 | `TEXT_INJECTION_MODE` | `type_and_enter` | `type_only` 或 `type_and_enter` |
 
+#### Todo 意图解析
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `TODO_INTENT_PROVIDER` | `rules` | `rules` 或 `deepseek` |
+| `TODO_INTENT_API_KEY` | — | Todo 语义解析使用的 DeepSeek API Key |
+| `TODO_INTENT_MODEL` | `deepseek-chat` | DeepSeek chat 模型 |
+| `TODO_INTENT_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible DeepSeek base URL |
+| `TODO_INTENT_TIMEOUT_MS` | `8000` | Todo 意图解析超时时间 |
+| `TODO_FOLLOWUP_TIMEOUT_MS` | `30000` | 不完整 Todo 追问的自动取消时间 |
+
 #### CLI 会话
 
 | 变量 | 默认值 | 说明 |
@@ -662,6 +791,15 @@ node scripts/mock-client.mjs         # 模拟设备连接
 ```
 
 调试工作流（源码模式）：`MOCK_TRANSCRIPT=你好世界 DRY_RUN_TEXT_INJECTION=1 node src/server.mjs`
+
+Todo 模式冒烟示例：
+
+```powershell
+node scripts/console.mjs
+/mode todo
+/todo add 买牛奶
+/todo list
+```
 
 ---
 

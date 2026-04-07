@@ -12,6 +12,7 @@
 
 static const char *TAG = "EspTcp";
 static constexpr int kConnectTimeoutMs = 1500;
+static constexpr int kSendTimeoutMs = 1000;
 
 EspTcp::EspTcp() {
     event_group_ = xEventGroupCreate();
@@ -63,6 +64,11 @@ bool EspTcp::Connect(const std::string& host, int port) {
         freeaddrinfo(server);
         return false;
     }
+
+    timeval send_timeout = {};
+    send_timeout.tv_sec = kSendTimeoutMs / 1000;
+    send_timeout.tv_usec = (kSendTimeoutMs % 1000) * 1000;
+    setsockopt(tcp_fd_, SOL_SOCKET, SO_SNDTIMEO, &send_timeout, sizeof(send_timeout));
 
     const int original_flags = fcntl(tcp_fd_, F_GETFL, 0);
     if (original_flags >= 0) {

@@ -42,6 +42,15 @@ function resolveSttLabel(config) {
   return { label: "none — set OPENAI_API_KEY or VOLCENGINE_APP_KEY + VOLCENGINE_ACCESS_KEY", valid: false };
 }
 
+function resolveTodoIntentLabel(config) {
+  if (config.todoIntentProvider !== "deepseek") {
+    return { label: "rules", valid: true };
+  }
+  return config.todoIntentApiKey
+    ? { label: `deepseek · ${config.todoIntentModel}`, valid: true }
+    : { label: "deepseek — TODO_INTENT_API_KEY missing", valid: false };
+}
+
 export async function runDoctor(config) {
   console.log("\nvibecoding-voice doctor\n");
 
@@ -60,6 +69,13 @@ export async function runDoctor(config) {
   } else {
     fail(`STT: ${stt.label}`);
     hasError = true;
+  }
+
+  const todoIntent = resolveTodoIntentLabel(config);
+  if (todoIntent.valid) {
+    ok(`Todo intent: ${todoIntent.label}`);
+  } else {
+    warn(`Todo intent: ${todoIntent.label}`);
   }
 
   // Claude Code CLI

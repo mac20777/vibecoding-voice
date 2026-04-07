@@ -209,6 +209,56 @@ async function ensureRunningServerTarget(expectedTarget) {
   }
 }
 
+async function syncRunningServerCliCwd(target, cwd) {
+  if (!(target === "codex_exec" || target === "claude_code")) {
+    return;
+  }
+
+  const ws = await connectControlSocket();
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        ws.close();
+        reject(new Error("Timed out while updating CLI working directory."));
+      }, 3000);
+
+      ws.on("message", (data) => {
+        try {
+          const message = JSON.parse(data.toString("utf8"));
+          if (message.type === "cli_cwd_updated") {
+            clearTimeout(timer);
+            resolve(message);
+            ws.close();
+            return;
+          }
+          if (message.type === "warning") {
+            clearTimeout(timer);
+            reject(new Error(message.warning || "CLI working directory update failed."));
+            ws.close();
+            return;
+          }
+          if (message.type === "error") {
+            clearTimeout(timer);
+            reject(new Error(message.error || "Unknown server error"));
+            ws.close();
+          }
+        } catch (error) {
+          clearTimeout(timer);
+          reject(error);
+          ws.close();
+        }
+      });
+
+      ws.send(JSON.stringify({ type: "hello", deviceId: "vibe-cli", boardType: "cli" }));
+      ws.send(JSON.stringify({ type: "set_cli_cwd", sendTarget: target, cwd }));
+    });
+  } finally {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.close();
+    }
+  }
+}
+
 async function waitForServer(maxMs = 6000) {
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
@@ -229,9 +279,15 @@ if (alreadyRunning) {
   const running = await queryRunningServer();
   if (running.sendTarget !== sendTarget) {
     await ensureRunningServerTarget(sendTarget);
-    process.stdout.write(`Server already running — switched target to [${arg}]\n`);
+    if (sendTarget === "codex_exec" || sendTarget === "claude_code") {
+      await syncRunningServerCliCwd(sendTarget, INVOKE_CWD);
+    }
+    process.stdout.write(`Server already running — switched target to [${arg}] in ${INVOKE_CWD}\n`);
   } else {
-    process.stdout.write(`Server already running — connecting as [${arg}]\n`);
+    if (sendTarget === "codex_exec" || sendTarget === "claude_code") {
+      await syncRunningServerCliCwd(sendTarget, INVOKE_CWD);
+    }
+    process.stdout.write(`Server already running — connecting as [${arg}] in ${INVOKE_CWD}\n`);
   }
 } else {
   try {

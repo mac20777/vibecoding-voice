@@ -73,6 +73,10 @@ function printWizardIntro(config) {
     config.transcriptDeliveryMode === "immediate" ? "immediate" : "confirm_on_device";
   const injectionMode =
     config.textInjectionMode === "type_only" ? "type_only" : "type_and_enter";
+  const todoIntent =
+    config.todoIntentProvider === "deepseek"
+      ? `deepseek · ${config.todoIntentModel || "deepseek-chat"}`
+      : "rules";
   const overridingFiles = (config.loadedConfigFiles || []).filter((filePath) => filePath !== config.userConfigPath);
 
   output.write("\nVibe setup\n\n");
@@ -80,9 +84,10 @@ function printWizardIntro(config) {
   output.write(`Current STT provider: ${provider}\n`);
   output.write(`Current transcript delivery: ${deliveryMode}\n`);
   output.write(`Current text injection mode: ${injectionMode}\n`);
+  output.write(`Current Todo intent parser: ${todoIntent}\n`);
   output.write("This wizard configures the required STT settings for first use.\n");
   output.write("Required: STT provider + matching API keys\n");
-  output.write("Optional: transcript delivery mode, text injection mode, LAN_SHARED_SECRET (only if your board uses LAN auth)\n");
+  output.write("Optional: transcript delivery mode, text injection mode, DeepSeek Todo parser, LAN_SHARED_SECRET (only if your board uses LAN auth)\n");
   output.write('Run "vibe config" again anytime to change these values.\n\n');
 
   if (overridingFiles.length > 0) {
@@ -231,6 +236,11 @@ async function askTextInjectionMode(rl, currentMode) {
   }
 }
 
+async function askTodoIntentMode(rl, currentProvider) {
+  const defaultYes = currentProvider === "deepseek";
+  return await askYesNo(rl, "Enable DeepSeek Todo semantic parser?", defaultYes);
+}
+
 export async function runConfigWizard() {
   if (!input.isTTY || !output.isTTY) {
     throw new Error('Interactive setup requires a TTY. Run "vibe config" in a terminal.');
@@ -242,6 +252,7 @@ export async function runConfigWizard() {
     currentConfig.transcriptDeliveryMode === "immediate" ? "immediate" : "confirm_on_device";
   const currentTextInjectionMode =
     currentConfig.textInjectionMode === "type_only" ? "type_only" : "type_and_enter";
+  const currentTodoIntentProvider = currentConfig.todoIntentProvider === "deepseek" ? "deepseek" : "rules";
 
   printWizardIntro(currentConfig);
 
@@ -283,6 +294,24 @@ export async function runConfigWizard() {
     updates.TRANSCRIPT_DELIVERY_MODE = await askTranscriptDeliveryMode(rl, currentDeliveryMode);
     updates.TEXT_INJECTION_MODE = await askTextInjectionMode(rl, currentTextInjectionMode);
 
+    if (await askTodoIntentMode(rl, currentTodoIntentProvider)) {
+      updates.TODO_INTENT_PROVIDER = "deepseek";
+      updates.TODO_INTENT_API_KEY = await askSecret(rl, mutedOutput, "TODO_INTENT_API_KEY (DeepSeek)", {
+        defaultValue: currentConfig.todoIntentApiKey
+      });
+      updates.TODO_INTENT_MODEL = await askText(rl, "TODO_INTENT_MODEL", {
+        defaultValue: currentConfig.todoIntentModel || "deepseek-chat"
+      });
+      updates.TODO_INTENT_BASE_URL = await askText(rl, "TODO_INTENT_BASE_URL", {
+        defaultValue: currentConfig.todoIntentBaseUrl || "https://api.deepseek.com"
+      });
+    } else {
+      updates.TODO_INTENT_PROVIDER = "rules";
+    }
+    updates.TODO_FOLLOWUP_TIMEOUT_MS = await askText(rl, "TODO_FOLLOWUP_TIMEOUT_MS", {
+      defaultValue: String(currentConfig.todoFollowupTimeoutMs || 30000)
+    });
+
     updates.LAN_SHARED_SECRET = await askSecret(rl, mutedOutput, "LAN_SHARED_SECRET", {
       defaultValue: currentConfig.lanSharedSecret,
       optional: true,
@@ -303,6 +332,13 @@ export async function runConfigWizard() {
     }
     output.write(`  TRANSCRIPT_DELIVERY_MODE=${updates.TRANSCRIPT_DELIVERY_MODE}\n`);
     output.write(`  TEXT_INJECTION_MODE=${updates.TEXT_INJECTION_MODE}\n`);
+    output.write(`  TODO_INTENT_PROVIDER=${updates.TODO_INTENT_PROVIDER}\n`);
+    if (updates.TODO_INTENT_PROVIDER === "deepseek") {
+      output.write(`  TODO_INTENT_API_KEY=${redactValue(updates.TODO_INTENT_API_KEY)}\n`);
+      output.write(`  TODO_INTENT_MODEL=${updates.TODO_INTENT_MODEL}\n`);
+      output.write(`  TODO_INTENT_BASE_URL=${updates.TODO_INTENT_BASE_URL}\n`);
+    }
+    output.write(`  TODO_FOLLOWUP_TIMEOUT_MS=${updates.TODO_FOLLOWUP_TIMEOUT_MS}\n`);
     output.write(`  LAN_SHARED_SECRET=${redactValue(updates.LAN_SHARED_SECRET)}\n\n`);
 
     const shouldSave = await askYesNo(rl, `Save these values to ${currentConfig.userConfigPath}?`, true);

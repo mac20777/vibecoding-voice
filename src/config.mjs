@@ -144,6 +144,14 @@ function normalizeTextInjectionMode(value) {
   return normalized === "type_only" ? "type_only" : "type_and_enter";
 }
 
+function normalizeTodoIntentProvider(value, apiKey) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "deepseek" || normalized === "rules") {
+    return normalized;
+  }
+  return apiKey ? "deepseek" : "rules";
+}
+
 export function isCliAvailable(command) {
   if (!command) {
     return false;
@@ -285,6 +293,7 @@ export function loadConfig(options = {}) {
   const { sendTarget, sendTargetAuto } = sendTargetEnv
     ? { sendTarget: sendTargetEnv, sendTargetAuto: false }
     : autoDetectSendTarget(claudeCommand, codexCommand);
+  const todoIntentApiKey = process.env.TODO_INTENT_API_KEY || process.env.DEEPSEEK_API_KEY || "";
 
   return {
     bindHost: process.env.LAN_VOICE_BIND || "0.0.0.0",
@@ -306,6 +315,13 @@ export function loadConfig(options = {}) {
     textInjectionMode: normalizeTextInjectionMode(
       process.env.TEXT_INJECTION_MODE || "type_and_enter"
     ),
+    todoIntentProvider: normalizeTodoIntentProvider(process.env.TODO_INTENT_PROVIDER, todoIntentApiKey),
+    todoIntentApiKey,
+    todoIntentModel: process.env.TODO_INTENT_MODEL || "deepseek-chat",
+    todoIntentBaseUrl: process.env.TODO_INTENT_BASE_URL || "https://api.deepseek.com",
+    todoIntentTimeoutMs: Number(process.env.TODO_INTENT_TIMEOUT_MS || "8000"),
+    todoFollowupTimeoutMs: Number(process.env.TODO_FOLLOWUP_TIMEOUT_MS || "30000"),
+    deepseekApiKey: process.env.DEEPSEEK_API_KEY || "",
     dryRunTextInjection: process.env.DRY_RUN_TEXT_INJECTION === "1",
     codexCommand,
     codexCwd: resolveCodexCwd(),

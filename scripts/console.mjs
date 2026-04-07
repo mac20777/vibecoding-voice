@@ -57,6 +57,7 @@ let lastLogLines = [];
 
 const state = {
   phase: "",
+  mode: "normal",
   statusLine: "",
   quota5h: null,
   quotaWk: null,
@@ -64,6 +65,8 @@ const state = {
   thread: "",
   latestUserText: "",
   latestAssistantText: "",
+  todoItems: [],
+  todoSelectedIndex: -1,
 };
 
 // ── readline ─────────────────────────────────────────────────────────────────
@@ -92,9 +95,84 @@ function printHeader() {
   const col = phaseColor(ph);
   const quota = formatQuota(state.quota5h, state.quotaWk);
   const repo = state.repo ? `${C.dim}[${state.repo}]${C.reset} ` : "";
+  const mode = state.mode ? `${C.gray}{${state.mode}}${C.reset} ` : "";
   const status = state.statusLine ? ` ${C.dim}${state.statusLine}${C.reset}` : "";
   const quotaStr = quota ? `  ${quota}` : "";
-  print(`${repo}${col}[${ph}]${C.reset}${status}${quotaStr}`);
+  print(`${repo}${col}[${ph}]${C.reset} ${mode}${status}${quotaStr}`);
+}
+
+function printTodoList() {
+  if (!Array.isArray(state.todoItems) || state.todoItems.length === 0) {
+    print(`  ${C.dim}TODO:${C.reset} (empty)`);
+    return;
+  }
+
+  printSep();
+  print(`  ${C.cyan}TODO${C.reset}`);
+  const visible = state.todoItems.slice(0, 8);
+  for (const [index, item] of visible.entries()) {
+    const selected = state.todoSelectedIndex === index ? ">" : " ";
+    const done = item.completed ? "[x]" : "[ ]";
+    print(`  ${selected} ${index + 1}. ${done} ${item.title}`);
+  }
+  if (state.todoItems.length > visible.length) {
+    print(`  ${C.dim}... ${state.todoItems.length - visible.length} more${C.reset}`);
+  }
+}
+
+function parseSlashCommand(text) {
+  if (!text.startsWith("/")) {
+    return null;
+  }
+
+  if (text === "/todo" || text === "/todo list") {
+    return { payload: { type: "todo_command", action: "list" } };
+  }
+
+  if (text === "/mode normal" || text === "/mode todo") {
+    return { payload: { type: "set_mode", mode: text.slice("/mode ".length) } };
+  }
+
+  const addMatch = text.match(/^\/todo\s+add\s+(.+)$/);
+  if (addMatch) {
+    return { payload: { type: "todo_command", action: "create", text: addMatch[1].trim() } };
+  }
+
+  const updateMatch = text.match(/^\/todo\s+update\s+(\d+)\s+(.+)$/);
+  if (updateMatch) {
+    return {
+      payload: {
+        type: "todo_command",
+        action: "update",
+        index: Number.parseInt(updateMatch[1], 10),
+        text: updateMatch[2].trim()
+      }
+    };
+  }
+
+  const deleteMatch = text.match(/^\/todo\s+delete\s+(\d+)$/);
+  if (deleteMatch) {
+    return {
+      payload: {
+        type: "todo_command",
+        action: "delete",
+        index: Number.parseInt(deleteMatch[1], 10)
+      }
+    };
+  }
+
+  const toggleMatch = text.match(/^\/todo\s+toggle(?:\s+(\d+))?$/);
+  if (toggleMatch) {
+    return {
+      payload: {
+        type: "todo_command",
+        action: "toggle",
+        ...(toggleMatch[1] ? { index: Number.parseInt(toggleMatch[1], 10) } : {})
+      }
+    };
+  }
+
+  return { error: "Unknown slash command. Try /mode todo or /todo add <text>." };
 }
 
 // ── WebSocket ────────────────────────────────────────────────────────────────
@@ -133,6 +211,15 @@ function connect() {
         break;
       }
 
+      case "mode_state": {
+        const prevMode = state.mode;
+        state.mode = msg.mode || state.mode;
+        if (state.mode !== prevMode) {
+          printHeader();
+        }
+        break;
+      }
+
       case "cli_summary": {
         const prevUser = state.latestUserText;
         const prevAI   = state.latestAssistantText;
@@ -163,6 +250,19 @@ function connect() {
 
       case "transcript_final":
         if (msg.text) print(`  ${C.dim}transcript:${C.reset} ${msg.text}`);
+        break;
+
+      case "todo_state":
+        state.todoItems = Array.isArray(msg.items) ? msg.items : [];
+        state.todoSelectedIndex = Number.isInteger(msg.selectedIndex) ? msg.selectedIndex : -1;
+        if (msg.lastActionText) {
+          print(`  ${C.dim}todo:${C.reset} ${msg.lastActionText}`);
+        }
+        printTodoList();
+        break;
+
+      case "todo_result":
+        print(`${msg.ok ? C.green : C.yellow}[todo]${C.reset} ${msg.message || msg.action || ""}`);
         break;
 
       case "status":
@@ -219,7 +319,14 @@ rl.on("line", (line) => {
     return;
   }
 
-  ws.send(JSON.stringify({ type: "prompt", text }));
+  const command = parseSlashCommand(text);
+  if (command?.error) {
+    print(`${C.yellow}${command.error}${C.reset}`);
+    rl.prompt();
+    return;
+  }
+
+  ws.send(JSON.stringify(command?.payload || { type: "prompt", text }));
   rl.prompt();
 });
 
@@ -234,6 +341,7 @@ export function startConsole(label = "") {
   const tag = label ? ` [${label}]` : "";
   process.stdout.write(`vibecoding-voice console${tag} — ${WS_URL}\n`);
   process.stdout.write(`Type a prompt and press Enter to send. Ctrl+C to exit.\n\n`);
+  process.stdout.write(`Slash commands: /mode normal | /mode todo | /todo list | /todo add <text>\n\n`);
   rl.prompt();
   connect();
 }

@@ -28,3 +28,11 @@ export function getUserConfigDir() {
 export function getUserConfigPath() {
   return path.join(getUserConfigDir(), "config.env");
 }
+
+export function getUserDataPath(filename) {
+  return path.join(getUserConfigDir(), filename);
+}
+
+export function getUserTodoListPath() {
+  return getUserDataPath("todo-list.json");
+}

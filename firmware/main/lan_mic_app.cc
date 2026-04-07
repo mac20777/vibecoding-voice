@@ -56,6 +56,7 @@ constexpr char kVolumeKey[] = "volume";
 constexpr char kLastServerUriKey[] = "last_srv_uri";
 constexpr char kPairedHostIdKey[] = "pair_host_id";
 constexpr char kPairedHostNameKey[] = "pair_host_nm";
+constexpr char kPendingTodoOpsKey[] = "todo_ops";
 constexpr EventBits_t kWifiConnectedBit = BIT0;
 constexpr int kFrameDurationMs = 20;
 constexpr int kSampleRate = 16000;
@@ -66,7 +67,12 @@ constexpr int kDiscoveryTimeoutMs = 600;
 constexpr int kDiscoveryRetryDelayMs = 150;
 constexpr int64_t kReconnectIntervalMinMs = 2000;
 constexpr int64_t kReconnectIntervalMaxMs = 60000;
-constexpr int64_t kPongTimeoutMs = 45000;
+constexpr int64_t kClientPingIntervalMs = 10000;
+constexpr int64_t kPongTimeoutMs = 15000;
+constexpr int64_t kServerSilenceTimeoutMs = 45000;
+constexpr int64_t kConnectAttemptWatchdogMs = 20000;
+constexpr int64_t kReconnectPromptTimeoutMs = 15000;
+constexpr int64_t kTodoBootHoldMs = 600;
 constexpr uint32_t kConnectTaskStackSize = 6 * 1024;
 constexpr UBaseType_t kConnectTaskPriority = 2;
 // If no server connection is established within this window, enter deep sleep
@@ -215,6 +221,9 @@ bool LanMicApp::Initialize() {
     }
 
     ConfigureButtons();
+    // The e-paper status bar already shows device state; keep the board LED
+    // off so power/app LED blinking does not look like an error or recording.
+    ZectrixSetFactoryLedOverride(true, false);
 
     LoadPersistedNetworkState();
     codec_->Start();
@@ -238,7 +247,9 @@ bool LanMicApp::Initialize() {
 #endif
     audio_frame_buffer_.resize(kFrameSamples);
     cli_log_lines_.clear();
-    hint_text_ = "Hold BOOT to talk\nHold UP+DOWN for Wi-Fi";
+    active_page_ = Page::Todo;
+    voice_mode_ = VoiceMode::Todo;
+    hint_text_ = "Hold UP menu\nHold BOOT for Todo";
     phase_ = Phase::Idle;
     network_state_ = NetworkState::Offline;
     RefreshBatteryStatus(true);
@@ -275,6 +286,12 @@ bool LanMicApp::Initialize() {
                 hint_text_ = "Check Wi-Fi\nHold UP+DOWN for setup";
                 server_uri_.clear();
                 DisconnectWebSocket();
+                if (active_page_ == Page::Todo) {
+                    offline_todo_mode_ = true;
+                    todo_last_action_text_ = "Offline Todo";
+                } else {
+                    active_page_ = Page::Summary;
+                }
                 UpdateDisplay();
                 break;
             case NetworkEvent::WifiConfigModeEnter:
@@ -289,7 +306,7 @@ bool LanMicApp::Initialize() {
             case NetworkEvent::WifiConfigModeExit:
                 network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
                 status_text_ = "Leaving setup mode";
-                hint_text_ = "Hold BOOT to talk\nHold UP+DOWN for Wi-Fi";
+                hint_text_ = "Hold UP menu\nHold BOOT to talk";
                 UpdateDisplay();
                 break;
             default:
@@ -316,6 +333,7 @@ void LanMicApp::LoadPersistedNetworkState() {
     if (!cached_server_uri_.empty()) {
         ESP_LOGI(kTag, "Loaded cached server URI: %s", cached_server_uri_.c_str());
     }
+    LoadPendingTodoOps();
 }
 
 void LanMicApp::SaveCachedServerUri(const std::string& server_uri) {
@@ -391,6 +409,14 @@ void LanMicApp::ConfigureButtons() {
         ESP_LOGI(kTag, "DOWN long press");
         down_long_pressed_.store(true);
     });
+    up_button_.OnDoubleClick([this]() {
+        ESP_LOGI(kTag, "UP double click");
+        up_double_clicked_.store(true);
+    });
+    down_button_.OnDoubleClick([this]() {
+        ESP_LOGI(kTag, "DOWN double click");
+        down_double_clicked_.store(true);
+    });
 }
 
 bool LanMicApp::IsWifiConnected() const {
@@ -415,11 +441,14 @@ void LanMicApp::StartConnectAttemptAsync() {
 
     connect_attempt_completed_.store(false, std::memory_order_release);
     connect_cancel_requested_.store(false, std::memory_order_release);
+    connect_attempt_started_ms_.store(esp_timer_get_time() / 1000, std::memory_order_release);
+    reconnect_stuck_prompt_ = false;
 
     if (xTaskCreate([](void* arg) {
             auto* self = static_cast<LanMicApp*>(arg);
             self->RunConnectAttemptTask();
             self->connect_task_handle_ = nullptr;
+            self->connect_attempt_started_ms_.store(0, std::memory_order_release);
             self->connect_attempt_running_.store(false, std::memory_order_release);
             self->connect_attempt_completed_.store(true, std::memory_order_release);
             vTaskDelete(nullptr);
@@ -430,6 +459,7 @@ void LanMicApp::StartConnectAttemptAsync() {
         kConnectTaskPriority,
         &connect_task_handle_) != pdPASS) {
         connect_task_handle_ = nullptr;
+        connect_attempt_started_ms_.store(0, std::memory_order_release);
         connect_attempt_running_.store(false, std::memory_order_release);
         connect_attempt_completed_.store(true, std::memory_order_release);
         status_text_ = "Reconnect error";
@@ -454,19 +484,29 @@ bool LanMicApp::EnsureWebSocketConnected() {
     const char* target_uri = nullptr;
     const char* target_source = "none";
     std::string fallback_server_uri;
+#if CONFIG_LAN_DISCOVERY_ENABLED
     if (!server_uri_.empty()) {
         target_uri = server_uri_.c_str();
         target_source = "discovery";
-    } else if (!cached_server_uri_.empty()) {
-        target_uri = cached_server_uri_.c_str();
-        target_source = "cache";
     } else {
         DiscoverServerUri();
         if (!server_uri_.empty()) {
             target_uri = server_uri_.c_str();
             target_source = "discovery";
+        } else if (!cached_server_uri_.empty()) {
+            target_uri = cached_server_uri_.c_str();
+            target_source = "cache";
         }
     }
+#else
+    if (!server_uri_.empty()) {
+        target_uri = server_uri_.c_str();
+        target_source = "configured";
+    } else if (!cached_server_uri_.empty()) {
+        target_uri = cached_server_uri_.c_str();
+        target_source = "cache";
+    }
+#endif
 
     if (target_uri == nullptr) {
         fallback_server_uri = GetFallbackServerUri();
@@ -495,11 +535,13 @@ bool LanMicApp::EnsureWebSocketConnected() {
     ws_ = network->CreateWebSocket(0);
     ws_->OnConnected([this, target_uri_text]() {
         ESP_LOGI(kTag, "WebSocket connected");
+        board_.SetPowerSaveLevel(PowerSaveLevel::BALANCED);
         SaveCachedServerUri(target_uri_text);
         network_state_ = NetworkState::Server;
         status_text_ = "Connected";
         hint_text_ = "";  // BuildPromptBody() will show "Hold BOOT to talk"
         phase_ = Phase::Idle;
+        ShowIdleTodoPage();
         UpdateDisplay();
         if (display_ != nullptr) {
             display_->RequestUrgentFullRefresh();
@@ -515,6 +557,7 @@ bool LanMicApp::EnsureWebSocketConnected() {
         status_text_ = "Server error";
         hint_text_ = "Will retry automatically";
         phase_ = Phase::Error;
+        active_page_ = Page::Summary;
         UpdateDisplay();
     });
     ws_->OnData([this](const char* data, size_t len, bool binary) {
@@ -527,9 +570,11 @@ bool LanMicApp::EnsureWebSocketConnected() {
         ESP_LOGW(kTag, "WebSocket connect failed: %s", target_uri);
         ws_.reset();
         hello_sent_ = false;
-        if (std::strcmp(target_source, "cache") == 0) {
-            ESP_LOGW(kTag, "Cache connect failed, clearing in-memory cache and retrying discovery next round");
-            cached_server_uri_.clear();
+        if (std::strcmp(target_source, "discovery") == 0) {
+            ESP_LOGW(kTag, "Discovered URI failed, forcing discovery next round");
+            server_uri_.clear();
+        } else if (std::strcmp(target_source, "cache") == 0) {
+            ESP_LOGW(kTag, "Cache connect failed; will retry discovery before reusing cache");
         }
         status_text_ = "Connect failed";
         hint_text_ = target_uri;
@@ -886,6 +931,81 @@ bool LanMicApp::SendAction(const char* action_type) {
     return SendJson(message);
 }
 
+bool LanMicApp::SendSetMode(const char* mode) {
+    char message[128];
+    snprintf(message,
+             sizeof(message),
+             "{\"type\":\"set_mode\",\"mode\":\"%s\"}",
+             mode);
+    return SendJson(message);
+}
+
+bool LanMicApp::SendTodoCommand(const char* action, int index, int completed, const char* id) {
+    char message[384];
+    char id_part[96] = "";
+    if (id != nullptr && id[0] != '\0') {
+        snprintf(id_part, sizeof(id_part), ",\"id\":\"%s\"", id);
+    }
+    if (index > 0 && completed >= 0) {
+        snprintf(message,
+                 sizeof(message),
+                 "{\"type\":\"todo_command\",\"action\":\"%s\",\"index\":%d,\"completed\":%s%s}",
+                 action,
+                 index,
+                 completed ? "true" : "false",
+                 id_part);
+    } else if (index > 0) {
+        snprintf(message,
+                 sizeof(message),
+                 "{\"type\":\"todo_command\",\"action\":\"%s\",\"index\":%d%s}",
+                 action,
+                 index,
+                 id_part);
+    } else if (completed >= 0) {
+        snprintf(message,
+                 sizeof(message),
+                 "{\"type\":\"todo_command\",\"action\":\"%s\",\"completed\":%s%s}",
+                 action,
+                 completed ? "true" : "false",
+                 id_part);
+    } else {
+        snprintf(message,
+                 sizeof(message),
+                 "{\"type\":\"todo_command\",\"action\":\"%s\"%s}",
+                 action,
+                 id_part);
+    }
+    return SendJson(message);
+}
+
+LanMicApp::VoiceMode LanMicApp::DesiredVoiceModeForPage(Page page) const {
+    return page == Page::Todo ? VoiceMode::Todo : VoiceMode::Normal;
+}
+
+bool LanMicApp::SyncVoiceModeToPage(Page page) {
+    const VoiceMode desired = DesiredVoiceModeForPage(page);
+    if (!IsServerConnected()) {
+        voice_mode_ = desired;
+        return false;
+    }
+    if (voice_mode_ == desired) {
+        return true;
+    }
+    if (!SendSetMode(desired == VoiceMode::Todo ? "todo" : "normal")) {
+        return false;
+    }
+    voice_mode_ = desired;
+    return true;
+}
+
+bool LanMicApp::SyncVoiceModeToActivePage() {
+    return SyncVoiceModeToPage(active_page_);
+}
+
+LanMicApp::Page LanMicApp::PageForCurrentVoiceMode() const {
+    return voice_mode_ == VoiceMode::Todo ? Page::Todo : Page::Summary;
+}
+
 bool LanMicApp::StreamAudioFrame() {
     if (ws_ == nullptr || !ws_->IsConnected()) {
         return false;
@@ -958,6 +1078,9 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
 
     if (strcmp(type, "hello_ack") == 0) {
         status_text_ = "Ready";
+        offline_todo_mode_ = false;
+        reconnect_stuck_prompt_ = false;
+        todo_menu_open_ = false;
         if (!has_pending_transcript_) {
             phase_ = Phase::Idle;
         }
@@ -966,6 +1089,9 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         PlayBeep(900, 100);
     } else if (strcmp(type, "server_ready") == 0) {
         status_text_ = "Ready";
+        offline_todo_mode_ = false;
+        reconnect_stuck_prompt_ = false;
+        todo_menu_open_ = false;
         if (!has_pending_transcript_) {
             phase_ = Phase::Idle;
         }
@@ -977,6 +1103,72 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
                 repo_name_ = GetToolLabel();
             }
         }
+        const char* mode = GetJsonString(root, "mode");
+        if (mode != nullptr) {
+            voice_mode_ = strcmp(mode, "todo") == 0 ? VoiceMode::Todo : VoiceMode::Normal;
+        }
+        if (pending_normal_after_reconnect_) {
+            pending_normal_after_reconnect_ = false;
+            active_page_ = Page::Summary;
+        }
+        SyncVoiceModeToActivePage();
+    } else if (strcmp(type, "mode_state") == 0) {
+        const char* mode = GetJsonString(root, "mode");
+        if (mode != nullptr) {
+            voice_mode_ = strcmp(mode, "todo") == 0 ? VoiceMode::Todo : VoiceMode::Normal;
+            if (phase_ == Phase::Idle && !has_pending_transcript_) {
+                SyncVoiceModeToActivePage();
+            }
+        }
+    } else if (strcmp(type, "todo_state") == 0) {
+        cJSON* items = cJSON_GetObjectItemCaseSensitive(root, "items");
+        cJSON* selected_index = cJSON_GetObjectItemCaseSensitive(root, "selectedIndex");
+        const char* last_action = GetJsonString(root, "lastActionText");
+        todo_items_.clear();
+        if (cJSON_IsArray(items)) {
+            cJSON* item = nullptr;
+            cJSON_ArrayForEach(item, items) {
+                const char* id = GetJsonString(item, "id");
+                const char* title = GetJsonString(item, "title");
+                if (title == nullptr) {
+                    continue;
+                }
+                todo_items_.push_back({
+                    id != nullptr ? id : "",
+                    title,
+                    GetJsonBool(item, "completed", false)
+                });
+            }
+        }
+        if (cJSON_IsNumber(selected_index)) {
+            todo_selected_index_ = selected_index->valueint;
+        } else {
+            todo_selected_index_ = todo_items_.empty() ? -1 : 0;
+        }
+        if (todo_items_.empty()) {
+            todo_selected_index_ = -1;
+        } else {
+            todo_selected_index_ = std::clamp(
+                todo_selected_index_,
+                0,
+                static_cast<int>(todo_items_.size()) - 1);
+        }
+        if (last_action != nullptr) {
+            todo_last_action_text_ = last_action;
+        }
+        offline_todo_mode_ = false;
+        reconnect_stuck_prompt_ = false;
+        FlushPendingTodoOps();
+    } else if (strcmp(type, "todo_result") == 0) {
+        const char* message = GetJsonString(root, "message");
+        const bool ok = GetJsonBool(root, "ok", false);
+        phase_ = Phase::Idle;
+        status_text_ = ok ? "Todo" : "Todo err";
+        hint_text_ = message != nullptr ? message : "";
+        if (message != nullptr) {
+            todo_last_action_text_ = message;
+        }
+        active_page_ = Page::Todo;
     } else if (strcmp(type, "status") == 0) {
         const char* status = GetJsonString(root, "status");
         const char* text_value = GetJsonString(root, "text");
@@ -984,9 +1176,11 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
             if (strcmp(status, "recording") == 0) {
                 phase_ = Phase::Recording;
                 status_text_ = "Recording";
+                active_page_ = PageForCurrentVoiceMode();
             } else if (strcmp(status, "transcribing") == 0) {
                 phase_ = Phase::Transcribing;
                 status_text_ = "Transcribing";
+                active_page_ = PageForCurrentVoiceMode();
                 PlayBeep(660, 80);   // 停止录音/转录中：短低音
             } else if (strcmp(status, "awaiting_action") == 0) {
                 phase_ = Phase::AwaitingAction;
@@ -995,14 +1189,16 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
                 active_page_ = Page::Summary;
                 summary_scroll_offset_ = 0;
             } else if (strcmp(status, "typed") == 0) {
-                phase_ = Phase::Running;
-                status_text_ = "Sent";
+                const bool text_injector = send_target_ == "text_injector";
+                phase_ = text_injector ? Phase::Idle : Phase::Running;
+                status_text_ = text_injector ? "Injected" : "Sent";
                 has_pending_transcript_ = false;
                 active_page_ = Page::Summary;
             } else if (strcmp(status, "undo_ok") == 0) {
                 phase_ = Phase::Idle;
                 status_text_ = "Canceled";
                 has_pending_transcript_ = false;
+                ShowIdleTodoPage();
             } else if (strcmp(status, "transcript_empty") == 0 || strcmp(status, "empty_segment") == 0) {
                 if (text_value != nullptr && text_value[0] != '\0') {
                     phase_ = Phase::AwaitingAction;
@@ -1016,13 +1212,16 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
                     hint_text_ = "Try again";
                     has_pending_transcript_ = false;
                     transcript_text_.clear();
+                    ShowIdleTodoPage();
                 }
             } else if (strcmp(status, "no_pending") == 0) {
                 phase_ = Phase::Idle;
                 status_text_ = "Nothing pending";
+                ShowIdleTodoPage();
             } else if (strcmp(status, "cli_busy") == 0) {
                 phase_ = Phase::Running;
                 status_text_ = std::string(GetToolLabel()) + " busy";
+                active_page_ = Page::Summary;
             } else {
                 status_text_ = status;
             }
@@ -1037,14 +1236,19 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         }
         has_pending_transcript_ = GetJsonBool(root, "requiresAction", false);
         phase_ = has_pending_transcript_ ? Phase::AwaitingAction : Phase::Idle;
-        status_text_ = has_pending_transcript_ ? "Ready to send" : "Transcript ready";
-        active_page_ = Page::Summary;
+        if (has_pending_transcript_) {
+            status_text_ = "Ready to send";
+        } else {
+            status_text_ = voice_mode_ == VoiceMode::Todo ? "Todo input" : "Transcript ready";
+        }
+        active_page_ = PageForCurrentVoiceMode();
         summary_scroll_offset_ = 0;
     } else if (strcmp(type, "transcript_cleared") == 0) {
         transcript_text_.clear();
         has_pending_transcript_ = false;
         phase_ = Phase::Idle;
         status_text_ = "Cleared";
+        ShowIdleTodoPage();
     } else if (strcmp(type, "cli_session_state") == 0) {
         const char* phase = GetJsonString(root, "phase");
         const char* status_line = GetJsonString(root, "statusLine");
@@ -1056,11 +1260,14 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
             cli_phase_text_ = phase;
             if (strcmp(phase, "running") == 0) {
                 phase_ = Phase::Running;
+                active_page_ = Page::Summary;
             } else if (strcmp(phase, "error") == 0) {
                 phase_ = Phase::Error;
+                active_page_ = Page::Summary;
                 PlayBeep(300, 300);  // 出错：低沉长音
             } else if (!has_pending_transcript_) {
                 phase_ = Phase::Idle;
+                ShowIdleTodoPage();
                 if (was_running) {
                     // AI 回复完成：上升双音
                     PlayBeep(800, 80);
@@ -1100,7 +1307,9 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         if (repo_name != nullptr) {
             repo_name_ = repo_name;
         }
-        active_page_ = Page::Summary;
+        if (phase_ == Phase::Running) {
+            active_page_ = Page::Summary;
+        }
     } else if (strcmp(type, "cli_log_tail") == 0) {
         cJSON* lines = cJSON_GetObjectItemCaseSensitive(root, "lines");
         if (cJSON_IsArray(lines)) {
@@ -1174,12 +1383,513 @@ void LanMicApp::HandleScroll(int direction) {
     }
 }
 
+void LanMicApp::MoveTodoSelection(int direction) {
+    if (direction == 0 || todo_items_.empty()) {
+        return;
+    }
+
+    const int max_index = static_cast<int>(todo_items_.size()) - 1;
+    const int current = todo_selected_index_ < 0 ? 0 : std::clamp(todo_selected_index_, 0, max_index);
+    const int next = todo_selected_index_ < 0
+        ? 0
+        : std::clamp(current + direction, 0, max_index);
+    if (next == todo_selected_index_) {
+        return;
+    }
+
+    todo_selected_index_ = next;
+    todo_last_action_text_ = "当前计划 " + std::to_string(todo_selected_index_ + 1);
+    if (IsServerConnected()) {
+        SendTodoCommand(direction < 0 ? "select_prev" : "select_next");
+    }
+    UpdateDisplay();
+}
+
+void LanMicApp::ToggleSelectedTodo() {
+    if (todo_items_.empty() ||
+        todo_selected_index_ < 0 ||
+        todo_selected_index_ >= static_cast<int>(todo_items_.size())) {
+        status_text_ = "No todo";
+        hint_text_ = "Add a plan first";
+        UpdateDisplay();
+        return;
+    }
+
+    const int item_index = todo_selected_index_ + 1;
+    const bool next_completed = !todo_items_[todo_selected_index_].completed;
+    const TodoItem item = todo_items_[todo_selected_index_];
+    todo_items_[todo_selected_index_].completed = next_completed;
+    todo_last_action_text_ = next_completed
+        ? "已完成计划 " + std::to_string(item_index)
+        : "已恢复计划 " + std::to_string(item_index);
+
+    if (IsServerConnected()) {
+        SendTodoCommand("toggle", item_index, next_completed ? 1 : 0, item.id.c_str());
+    } else {
+        QueueOfflineTodoToggle(item, next_completed);
+        todo_last_action_text_ += " (待同步)";
+    }
+    UpdateDisplay();
+}
+
+void LanMicApp::DeleteSelectedTodo() {
+    if (todo_items_.empty() ||
+        todo_selected_index_ < 0 ||
+        todo_selected_index_ >= static_cast<int>(todo_items_.size())) {
+        status_text_ = "No todo";
+        hint_text_ = "Add a plan first";
+        UpdateDisplay();
+        return;
+    }
+
+    const int item_index = todo_selected_index_ + 1;
+    const TodoItem item = todo_items_[todo_selected_index_];
+    todo_items_.erase(todo_items_.begin() + todo_selected_index_);
+    if (todo_items_.empty()) {
+        todo_selected_index_ = -1;
+    } else {
+        todo_selected_index_ = std::min(
+            todo_selected_index_,
+            static_cast<int>(todo_items_.size()) - 1);
+    }
+
+    todo_last_action_text_ = "已删除计划 " + std::to_string(item_index);
+    if (IsServerConnected()) {
+        SendTodoCommand("delete", item_index, -1, item.id.c_str());
+    } else {
+        QueueOfflineTodoDelete(item);
+        todo_last_action_text_ += " (待同步)";
+    }
+    UpdateDisplay();
+}
+
+void LanMicApp::QueueOfflineTodoToggle(const TodoItem& item, bool completed) {
+    if (item.id.empty()) {
+        return;
+    }
+    for (const auto& op : pending_todo_ops_) {
+        if (op.id == item.id && op.type == PendingTodoOpType::Delete) {
+            return;
+        }
+    }
+    pending_todo_ops_.erase(
+        std::remove_if(
+            pending_todo_ops_.begin(),
+            pending_todo_ops_.end(),
+            [&item](const PendingTodoOp& op) {
+                return op.id == item.id && op.type == PendingTodoOpType::Toggle;
+            }),
+        pending_todo_ops_.end());
+    pending_todo_ops_.push_back({PendingTodoOpType::Toggle, item.id, completed});
+    SavePendingTodoOps();
+}
+
+void LanMicApp::QueueOfflineTodoDelete(const TodoItem& item) {
+    if (item.id.empty()) {
+        return;
+    }
+    pending_todo_ops_.erase(
+        std::remove_if(
+            pending_todo_ops_.begin(),
+            pending_todo_ops_.end(),
+            [&item](const PendingTodoOp& op) {
+                return op.id == item.id;
+            }),
+        pending_todo_ops_.end());
+    pending_todo_ops_.push_back({PendingTodoOpType::Delete, item.id, false});
+    SavePendingTodoOps();
+}
+
+void LanMicApp::FlushPendingTodoOps() {
+    if (!IsServerConnected() || pending_todo_ops_.empty()) {
+        return;
+    }
+
+    size_t sent = 0;
+    for (const auto& op : pending_todo_ops_) {
+        const bool ok = op.type == PendingTodoOpType::Toggle
+            ? SendTodoCommand("toggle", 0, op.completed ? 1 : 0, op.id.c_str())
+            : SendTodoCommand("delete", 0, -1, op.id.c_str());
+        if (!ok) {
+            break;
+        }
+        ++sent;
+    }
+
+    if (sent > 0) {
+        pending_todo_ops_.erase(pending_todo_ops_.begin(), pending_todo_ops_.begin() + sent);
+        SavePendingTodoOps();
+        todo_last_action_text_ = pending_todo_ops_.empty()
+            ? "离线更改已同步"
+            : "部分离线更改待同步";
+    }
+}
+
+void LanMicApp::LoadPendingTodoOps() {
+    Settings nvs(kLanMicNamespace);
+    const std::string serialized = nvs.GetString(kPendingTodoOpsKey, "");
+    if (serialized.empty()) {
+        return;
+    }
+
+    cJSON* root = cJSON_Parse(serialized.c_str());
+    if (!cJSON_IsArray(root)) {
+        if (root != nullptr) {
+            cJSON_Delete(root);
+        }
+        ESP_LOGW(kTag, "Ignoring corrupt pending todo ops");
+        Settings writable(kLanMicNamespace, true);
+        writable.EraseKey(kPendingTodoOpsKey);
+        return;
+    }
+
+    pending_todo_ops_.clear();
+    cJSON* item = nullptr;
+    cJSON_ArrayForEach(item, root) {
+        const char* type = GetJsonString(item, "type");
+        const char* id = GetJsonString(item, "id");
+        if (type == nullptr || id == nullptr || id[0] == '\0') {
+            continue;
+        }
+        PendingTodoOp op;
+        if (std::strcmp(type, "toggle") == 0) {
+            op.type = PendingTodoOpType::Toggle;
+            op.completed = GetJsonBool(item, "completed", false);
+        } else if (std::strcmp(type, "delete") == 0) {
+            op.type = PendingTodoOpType::Delete;
+            op.completed = false;
+        } else {
+            continue;
+        }
+        op.id = id;
+        pending_todo_ops_.push_back(op);
+    }
+    cJSON_Delete(root);
+
+    if (!pending_todo_ops_.empty()) {
+        ESP_LOGI(kTag, "Loaded %u pending todo ops",
+                 static_cast<unsigned>(pending_todo_ops_.size()));
+    }
+}
+
+void LanMicApp::SavePendingTodoOps() {
+    Settings nvs(kLanMicNamespace, true);
+    if (pending_todo_ops_.empty()) {
+        nvs.EraseKey(kPendingTodoOpsKey);
+        return;
+    }
+
+    cJSON* root = cJSON_CreateArray();
+    for (const auto& op : pending_todo_ops_) {
+        if (op.id.empty()) {
+            continue;
+        }
+        cJSON* item = cJSON_CreateObject();
+        cJSON_AddStringToObject(
+            item,
+            "type",
+            op.type == PendingTodoOpType::Toggle ? "toggle" : "delete");
+        cJSON_AddStringToObject(item, "id", op.id.c_str());
+        if (op.type == PendingTodoOpType::Toggle) {
+            cJSON_AddBoolToObject(item, "completed", op.completed);
+        }
+        cJSON_AddItemToArray(root, item);
+    }
+
+    char* text = cJSON_PrintUnformatted(root);
+    if (text != nullptr) {
+        nvs.SetString(kPendingTodoOpsKey, text);
+        cJSON_free(text);
+    }
+    cJSON_Delete(root);
+}
+
+void LanMicApp::OpenTodoMenu(TodoMenuKind kind) {
+    if (has_pending_transcript_ || phase_ == Phase::Recording || phase_ == Phase::Transcribing) {
+        return;
+    }
+    todo_menu_kind_ = kind;
+    todo_menu_selected_item_ = 0;
+    todo_menu_open_ = true;
+    active_page_ = kind == TodoMenuKind::Live ? Page::Summary : Page::Todo;
+    UpdateDisplay();
+}
+
+void LanMicApp::CloseTodoMenu() {
+    todo_menu_open_ = false;
+    todo_menu_kind_ = TodoMenuKind::Todo;
+    todo_menu_selected_item_ = 0;
+    UpdateDisplay();
+}
+
+int LanMicApp::GetTodoMenuItemCount() const {
+    if (todo_menu_kind_ == TodoMenuKind::ReconnectStuck) {
+        return 4;
+    }
+    if (todo_menu_kind_ == TodoMenuKind::TodoAction) {
+        return 3;
+    }
+    if (todo_menu_kind_ == TodoMenuKind::Live) {
+        return 5;
+    }
+    return 6;
+}
+
+std::string LanMicApp::GetTodoMenuItemLabel(int item) const {
+    if (todo_menu_kind_ == TodoMenuKind::ReconnectStuck) {
+        switch (item) {
+            case 0:
+                return "Retry host";
+            case 1:
+                return "Offline Todo";
+            case 2:
+                return "Restart device";
+            case 3:
+                return "Back";
+            default:
+                return "";
+        }
+    }
+
+    if (todo_menu_kind_ == TodoMenuKind::Live) {
+        switch (item) {
+            case 0:
+                return "Go Todo";
+            case 1:
+                return "Reconnect host";
+            case 2:
+                return "Restart device";
+            case 3:
+                return "Settings";
+            case 4:
+                return "Back";
+            default:
+                return "";
+        }
+    }
+
+    if (todo_menu_kind_ == TodoMenuKind::TodoAction) {
+        const bool has_item =
+            !todo_items_.empty() &&
+            todo_selected_index_ >= 0 &&
+            todo_selected_index_ < static_cast<int>(todo_items_.size());
+        const bool is_done = has_item && todo_items_[todo_selected_index_].completed;
+        switch (item) {
+            case 0:
+                return is_done ? "Mark not done" : "Mark done";
+            case 1:
+                return "Delete selected";
+            case 2:
+                return "Back";
+            default:
+                return "";
+        }
+    }
+
+    const bool has_item =
+        !todo_items_.empty() &&
+        todo_selected_index_ >= 0 &&
+        todo_selected_index_ < static_cast<int>(todo_items_.size());
+    const bool is_done = has_item && todo_items_[todo_selected_index_].completed;
+    switch (item) {
+        case 0:
+            return is_done ? "Mark not done" : "Mark done";
+        case 1:
+            return "Delete selected";
+        case 2:
+            return "Go Live";
+        case 3:
+            return "Reconnect host";
+        case 4:
+            return "Restart device";
+        case 5:
+            return "Back";
+        default:
+            return "";
+    }
+}
+
+void LanMicApp::HandleTodoMenuInput(bool up_click, bool down_click, bool boot_press) {
+    if (up_click && todo_menu_selected_item_ > 0) {
+        --todo_menu_selected_item_;
+        UpdateDisplay();
+    }
+    if (down_click && todo_menu_selected_item_ < GetTodoMenuItemCount() - 1) {
+        ++todo_menu_selected_item_;
+        UpdateDisplay();
+    }
+    if (boot_press) {
+        ExecuteTodoMenuItem(todo_menu_selected_item_);
+    }
+}
+
+void LanMicApp::ExecuteTodoMenuItem(int item) {
+    auto restart_device = [this]() {
+        if (!pending_todo_ops_.empty()) {
+            status_text_ = "Pending sync";
+            hint_text_ = "Reconnect before restart";
+            CloseTodoMenu();
+            return;
+        }
+        status_text_ = "Restarting";
+        hint_text_ = "Reconnecting host";
+        UpdateDisplay();
+        vTaskDelay(pdMS_TO_TICKS(300));
+        esp_restart();
+    };
+
+    if (todo_menu_kind_ == TodoMenuKind::ReconnectStuck) {
+        switch (item) {
+            case 0:
+                if (connect_attempt_running_.load(std::memory_order_acquire)) {
+                    status_text_ = "Reconnect stuck";
+                    hint_text_ = "Choose Offline or Restart";
+                    UpdateDisplay();
+                } else {
+                    CloseTodoMenu();
+                    RequestReconnect("Retrying host...");
+                }
+                return;
+            case 1:
+                EnterOfflineTodoMode("Offline Todo");
+                return;
+            case 2:
+                restart_device();
+                return;
+            case 3:
+            default:
+                CloseTodoMenu();
+                return;
+        }
+    }
+
+    if (todo_menu_kind_ == TodoMenuKind::Live) {
+        switch (item) {
+            case 0:
+                CloseTodoMenu();
+                SwitchPage(Page::Todo);
+                return;
+            case 1:
+                CloseTodoMenu();
+                RequestReconnect("Refreshing host...");
+                return;
+            case 2:
+                restart_device();
+                return;
+            case 3:
+                CloseTodoMenu();
+                EnterSettings();
+                return;
+            case 4:
+            default:
+                CloseTodoMenu();
+                return;
+        }
+    }
+
+    if (todo_menu_kind_ == TodoMenuKind::TodoAction) {
+        switch (item) {
+            case 0:
+                ToggleSelectedTodo();
+                CloseTodoMenu();
+                return;
+            case 1:
+                DeleteSelectedTodo();
+                CloseTodoMenu();
+                return;
+            case 2:
+            default:
+                CloseTodoMenu();
+                return;
+        }
+    }
+
+    const bool online = IsServerConnected();
+    switch (item) {
+        case 0:
+            ToggleSelectedTodo();
+            CloseTodoMenu();
+            return;
+        case 1:
+            DeleteSelectedTodo();
+            CloseTodoMenu();
+            return;
+        case 2:
+            CloseTodoMenu();
+            SwitchPage(Page::Summary);
+            if (!online) {
+                pending_normal_after_reconnect_ = true;
+                RequestReconnect("Reconnecting live...");
+            }
+            return;
+        case 3:
+            CloseTodoMenu();
+            RequestReconnect(online ? "Refreshing host..." : "Retrying host...");
+            return;
+        case 4:
+            restart_device();
+            return;
+        case 5:
+        default:
+            CloseTodoMenu();
+            return;
+    }
+}
+
+void LanMicApp::EnterOfflineTodoMode(const std::string& message) {
+    DisconnectWebSocket();
+    board_.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+    offline_todo_mode_ = true;
+    reconnect_stuck_prompt_ = connect_attempt_running_.load(std::memory_order_acquire);
+    todo_menu_open_ = false;
+    active_page_ = Page::Todo;
+    network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
+    phase_ = Phase::Idle;
+    status_text_ = "Offline Todo";
+    hint_text_ = "";
+    todo_last_action_text_ = message;
+    UpdateDisplay();
+}
+
+void LanMicApp::RequestReconnect(const std::string& message) {
+    board_.SetPowerSaveLevel(PowerSaveLevel::BALANCED);
+    if (!IsWifiConnected()) {
+        network_state_ = NetworkState::Offline;
+        status_text_ = "No WiFi";
+        hint_text_ = "Open settings";
+        UpdateDisplay();
+        return;
+    }
+    if (connect_attempt_running_.load(std::memory_order_acquire)) {
+        status_text_ = "Reconnecting";
+        hint_text_ = "Waiting; restart if stuck";
+        UpdateDisplay();
+        return;
+    }
+
+    if (IsServerConnected()) {
+        DisconnectWebSocket();
+    }
+    offline_todo_mode_ = false;
+    network_state_ = NetworkState::Wifi;
+    status_text_ = "Connecting";
+    hint_text_ = message;
+    phase_ = Phase::Idle;
+    StartConnectAttemptAsync();
+    UpdateDisplay();
+}
+
 void LanMicApp::SwitchPage(Page page) {
     if (has_pending_transcript_ || active_page_ == page) {
         return;
     }
     active_page_ = page;
+    offline_todo_mode_ = page == Page::Todo ? offline_todo_mode_ : false;
+    todo_menu_open_ = false;
     settings_editing_volume_ = false;
+    if (page == Page::Todo || page == Page::Summary) {
+        SyncVoiceModeToPage(page);
+    }
     UpdateDisplay();
 }
 
@@ -1189,6 +1899,7 @@ void LanMicApp::EnterSettings() {
     }
     if (active_page_ != Page::Settings) {
         active_page_ = Page::Settings;
+        todo_menu_open_ = false;
         settings_selected_item_ = 0;
         settings_editing_volume_ = false;
         UpdateDisplay();
@@ -1268,6 +1979,9 @@ void LanMicApp::ExecuteSettingsItem(int item) {
 }
 
 const char* LanMicApp::GetNetworkLabel() const {
+    if (offline_todo_mode_ && network_state_ != NetworkState::Server) {
+        return "Offline";
+    }
     switch (network_state_) {
         case NetworkState::Server:
             return "Online";
@@ -1291,6 +2005,10 @@ const char* LanMicApp::GetToolLabel() const {
     return "Codex";
 }
 
+const char* LanMicApp::GetModeLabel() const {
+    return (active_page_ == Page::Todo || offline_todo_mode_) ? "Mode: Todo" : "Mode: Live";
+}
+
 std::string LanMicApp::GetPhaseLabel() const {
     switch (phase_) {
         case Phase::Recording:
@@ -1309,6 +2027,21 @@ std::string LanMicApp::GetPhaseLabel() const {
     }
 }
 
+bool LanMicApp::ShouldShowIdleTodoPage() const {
+    return offline_todo_mode_ &&
+           phase_ == Phase::Idle &&
+           !has_pending_transcript_ &&
+           active_page_ != Page::Log &&
+           active_page_ != Page::Settings &&
+           !todo_menu_open_;
+}
+
+void LanMicApp::ShowIdleTodoPage() {
+    if (ShouldShowIdleTodoPage()) {
+        active_page_ = Page::Todo;
+    }
+}
+
 std::string LanMicApp::GetFooterText() const {
     if (has_pending_transcript_) {
         return "BOOT Add | UP Send | DN Undo";
@@ -1319,12 +2052,20 @@ std::string LanMicApp::GetFooterText() const {
     if (network_state_ == NetworkState::Config) {
         return "Join AP then open 192.168.4.1";
     }
+    if (todo_menu_open_) {
+        return "UP/DN Menu | BOOT OK";
+    }
     if (active_page_ == Page::Settings) {
         return settings_editing_volume_ ? "UP/DN ±10 | BOOT Save"
                                         : "UP/DN Nav | BOOT OK | HoldUP Back";
     }
     if (active_page_ == Page::Summary) {
-        return "BOOT Talk | Hold DN Log | U+D WiFi";
+        return "Hold UP Menu | Hold Live";
+    }
+    if (active_page_ == Page::Todo) {
+        return IsServerConnected()
+            ? "Hold UP Menu | Hold Todo"
+            : "Hold UP Menu | UP/DN Pick";
     }
     return "UP/DN Scroll | Hold UP | HoldDN Set";
 }
@@ -1336,10 +2077,15 @@ std::string LanMicApp::BuildPromptBody() const {
     if (!hint_text_.empty()) {
         return hint_text_;
     }
+    if (offline_todo_mode_) {
+        return "Offline Todo cache";
+    }
     // Default hint based on connection state
     switch (network_state_) {
         case NetworkState::Server:
-            return "Hold BOOT to talk";
+            return active_page_ == Page::Todo
+                ? "Todo voice mode\nHold UP for menu"
+                : "Live coding mode\nHold UP for menu";
         case NetworkState::Wifi:
             return "Finding server...";
         case NetworkState::Config:
@@ -1382,17 +2128,19 @@ std::vector<std::string> LanMicApp::SliceLines(const std::vector<std::string>& l
 void LanMicApp::UpdateLed() {
     switch (phase_) {
         case Phase::Recording:
+            ZectrixSetFactoryLedOverride(true, true);   // blink only while actively recording
+            break;
         case Phase::Error:
-            ZectrixSetFactoryLedOverride(true, true);   // fast blink: active / error
+            ZectrixSetFactoryLedOverride(true, false);  // keep LED off; error is shown on e-paper
             break;
         case Phase::Transcribing:
         case Phase::Running:
         case Phase::AwaitingAction:
-            ZectrixSetFactoryLedOverride(true, false);  // solid on: processing
+            ZectrixSetFactoryLedOverride(true, false);  // keep LED off; status is shown on e-paper
             break;
         case Phase::Idle:
         default:
-            ZectrixSetFactoryLedOverride(false, false); // release override: charging handles LED naturally
+            ZectrixSetFactoryLedOverride(true, false);  // suppress distracting charge blink
             break;
     }
 }
@@ -1469,6 +2217,8 @@ void LanMicApp::DrawBatteryIcon(int x, int y, int level, bool charging) {
 }
 
 void LanMicApp::UpdateDisplay() {
+    UpdateLed();
+
     if (display_ == nullptr) {
         return;
     }
@@ -1495,49 +2245,123 @@ void LanMicApp::UpdateDisplay() {
     }
 
     texts.push_back({GetNetworkLabel(), 28, 9, 16});
+    texts.push_back({(active_page_ == Page::Todo || offline_todo_mode_) ? "TODO" : "LIVE", 96, 9, 16});
     texts.push_back({GetPhaseLabel(), 166, 9, 16});
     if (!quota_status_text.empty()) {
         texts.push_back({quota_status_text, 250, 9, 16});
     }
     texts.push_back({battery_text, 346, 9, 16});
-    const char* page_label = active_page_ == Page::Summary ? "Summary"
+    const char* page_label = active_page_ == Page::Summary ? "Live"
+                           : active_page_ == Page::Todo    ? "Todo"
                            : active_page_ == Page::Log     ? "Log"
                            :                                 "Settings";
     texts.push_back({single_line(repo_name_.empty() ? "Codex" : repo_name_, 18), 12, kContentHeaderY, 16});
     texts.push_back({page_label, 316, kContentHeaderY, 16});
 
     if (active_page_ == Page::Summary) {
-        // Derive a readable status: phase takes priority, else connection state
-        std::string status_display;
-        if (phase_ == Phase::Recording || phase_ == Phase::Transcribing ||
-            phase_ == Phase::AwaitingAction || phase_ == Phase::Running || phase_ == Phase::Error) {
-            status_display = status_text_;
-        } else if (network_state_ != NetworkState::Server) {
-            status_display = GetNetworkLabel();
+        if (todo_menu_open_ && todo_menu_kind_ == TodoMenuKind::Live) {
+            texts.push_back({"Live Menu", 12, kPromptTitleY, 16});
+            texts.push_back({single_line(GetModeLabel(), 16), 228, kPromptTitleY, 16});
+            std::vector<std::string> rows;
+            const int count = GetTodoMenuItemCount();
+            for (int index = 0; index < count; ++index) {
+                std::string row = (index == todo_menu_selected_item_) ? "> " : "  ";
+                row += GetTodoMenuItemLabel(index);
+                rows.push_back(single_line(row, kBodyCharsPerLine));
+            }
+            int y = kPromptBodyY;
+            for (const auto& row : rows) {
+                texts.push_back({row, 12, y, 16});
+                y += kLineHeight;
+            }
         } else {
-            status_display = status_text_.empty() ? "Ready" : status_text_;
+            // Derive a readable status: phase takes priority, else connection state
+            std::string status_display;
+            if (phase_ == Phase::Recording || phase_ == Phase::Transcribing ||
+                phase_ == Phase::AwaitingAction || phase_ == Phase::Running || phase_ == Phase::Error) {
+                status_display = status_text_;
+            } else if (network_state_ != NetworkState::Server) {
+                status_display = GetNetworkLabel();
+            } else {
+                status_display = GetModeLabel();
+            }
+            texts.push_back({"Prompt", 12, kPromptTitleY, 16});
+            texts.push_back({single_line(status_display, 16), 228, kPromptTitleY, 16});
+
+            const auto prompt_lines = SliceLines(WrapText(BuildPromptBody(), kBodyCharsPerLine), 0, kPromptVisibleLines);
+            int y = kPromptBodyY;
+            for (const auto& line : prompt_lines) {
+                texts.push_back({line, 12, y, 16});
+                y += kLineHeight;
+            }
+
+            texts.push_back({"Reply", 12, kReplyTitleY, 16});
+            texts.push_back({single_line(cli_status_text_.empty() ? std::string(GetToolLabel()) + " idle" : cli_status_text_, 16), 228, kReplyTitleY, 16});
+
+            const auto reply_lines = WrapText(BuildReplyBody(), kBodyCharsPerLine);
+            const int summary_offset = std::clamp(
+                summary_scroll_offset_,
+                0,
+                std::max(0, static_cast<int>(reply_lines.size()) - static_cast<int>(kReplyVisibleLines)));
+            const auto assistant_lines = SliceLines(reply_lines, summary_offset, kReplyVisibleLines);
+            y = kReplyBodyY;
+            for (const auto& line : assistant_lines) {
+                texts.push_back({line, 12, y, 16});
+                y += kLineHeight;
+            }
         }
-        texts.push_back({"Prompt", 12, kPromptTitleY, 16});
-        texts.push_back({single_line(status_display, 16), 228, kPromptTitleY, 16});
+    } else if (active_page_ == Page::Todo) {
+        texts.push_back({todo_menu_open_ ? "Todo Menu" : "Todo", 12, kLogTitleY, 16});
+        std::string todo_status = todo_last_action_text_.empty() ? GetModeLabel() : todo_last_action_text_;
+        if (!pending_todo_ops_.empty()) {
+            todo_status = "Pending sync " + std::to_string(pending_todo_ops_.size());
+        }
+        texts.push_back({single_line(todo_status, 16), 228, kLogTitleY, 16});
 
-        const auto prompt_lines = SliceLines(WrapText(BuildPromptBody(), kBodyCharsPerLine), 0, kPromptVisibleLines);
-        int y = kPromptBodyY;
-        for (const auto& line : prompt_lines) {
-            texts.push_back({line, 12, y, 16});
-            y += kLineHeight;
+        std::vector<std::string> rows;
+        if (todo_menu_open_) {
+            if (todo_menu_kind_ == TodoMenuKind::ReconnectStuck) {
+                rows.push_back("Reconnect stuck");
+            } else if (todo_menu_kind_ == TodoMenuKind::TodoAction) {
+                rows.push_back("Todo actions");
+            } else if (!IsServerConnected()) {
+                rows.push_back("Offline Todo");
+            } else {
+                rows.push_back(GetModeLabel());
+            }
+            const int count = GetTodoMenuItemCount();
+            for (int index = 0; index < count; ++index) {
+                std::string row = (index == todo_menu_selected_item_) ? "> " : "  ";
+                row += GetTodoMenuItemLabel(index);
+                rows.push_back(single_line(row, kBodyCharsPerLine));
+            }
+        } else if (todo_items_.empty()) {
+            rows.push_back("No plans yet");
+            rows.push_back(IsServerConnected() ? "Hold UP for menu" : "Offline cache empty");
+            rows.push_back(GetModeLabel());
+        } else {
+            const int visible_lines = static_cast<int>(kLogVisibleLines);
+            const int max_start = std::max(0, static_cast<int>(todo_items_.size()) - visible_lines);
+            const int start_index = std::clamp(
+                todo_selected_index_ < 0 ? 0 : todo_selected_index_ - (visible_lines / 2),
+                0,
+                max_start);
+            const int end_index = std::min(
+                static_cast<int>(todo_items_.size()),
+                start_index + visible_lines);
+            for (int index = start_index; index < end_index; ++index) {
+                const auto& item = todo_items_[index];
+                std::string row = (index == todo_selected_index_) ? ">" : " ";
+                row += std::to_string(index + 1);
+                row += ".";
+                row += item.completed ? "[x] " : "[ ] ";
+                row += item.title;
+                rows.push_back(single_line(row, kBodyCharsPerLine));
+            }
         }
 
-        texts.push_back({"Reply", 12, kReplyTitleY, 16});
-        texts.push_back({single_line(cli_status_text_.empty() ? std::string(GetToolLabel()) + " idle" : cli_status_text_, 16), 228, kReplyTitleY, 16});
-
-        const auto reply_lines = WrapText(BuildReplyBody(), kBodyCharsPerLine);
-        const int summary_offset = std::clamp(
-            summary_scroll_offset_,
-            0,
-            std::max(0, static_cast<int>(reply_lines.size()) - static_cast<int>(kReplyVisibleLines)));
-        const auto assistant_lines = SliceLines(reply_lines, summary_offset, kReplyVisibleLines);
-        y = kReplyBodyY;
-        for (const auto& line : assistant_lines) {
+        int y = kLogBodyY;
+        for (const auto& line : rows) {
             texts.push_back({line, 12, y, 16});
             y += kLineHeight;
         }
@@ -1614,9 +2438,15 @@ void LanMicApp::Run() {
     }
 
     bool last_pressed = false;
+    int64_t boot_pressed_since_ms = 0;
+    bool todo_hold_started = false;
     int64_t last_reconnect_ms = 0;
     int64_t reconnect_interval_ms = kReconnectIntervalMinMs;
     int64_t last_battery_poll_ms = 0;
+    int64_t last_ws_ping_ms = 0;
+    int64_t awaiting_pong_since_ms = 0;
+    int64_t awaiting_pong_baseline_ms = 0;
+    int64_t reconnect_prompt_started_ms = 0;
     // Tracks when the current "disconnected stretch" started.
     // Initialised to now so a cold boot with no server still gets a full grace
     // period before sleeping, but reset on every disconnect so a board that had
@@ -1627,14 +2457,40 @@ void LanMicApp::Run() {
     while (true) {
         const int64_t now_ms = esp_timer_get_time() / 1000;
         if (connect_attempt_completed_.exchange(false, std::memory_order_acq_rel)) {
+            reconnect_stuck_prompt_ = false;
             if (IsServerConnected()) {
                 reconnect_interval_ms = kReconnectIntervalMinMs;
                 disconnected_since_ms = now_ms;
+                last_ws_ping_ms = 0;
+                awaiting_pong_since_ms = 0;
+                awaiting_pong_baseline_ms = 0;
             } else if (server_uri_.empty() && cached_server_uri_.empty() && GetFallbackServerUri().empty()) {
                 reconnect_interval_ms = kReconnectIntervalMinMs;
             } else {
                 reconnect_interval_ms = std::min(reconnect_interval_ms * 2, kReconnectIntervalMaxMs);
             }
+        }
+        const int64_t connect_attempt_started_ms =
+            connect_attempt_started_ms_.load(std::memory_order_acquire);
+        if (connect_attempt_running_.load(std::memory_order_acquire) &&
+            connect_attempt_started_ms > 0 &&
+            (now_ms - connect_attempt_started_ms) >= kConnectAttemptWatchdogMs &&
+            !reconnect_stuck_prompt_) {
+            ESP_LOGE(kTag,
+                     "Connect attempt watchdog fired: started_ms=%lld now_ms=%lld",
+                     static_cast<long long>(connect_attempt_started_ms),
+                     static_cast<long long>(now_ms));
+            reconnect_stuck_prompt_ = true;
+            offline_todo_mode_ = true;
+            todo_menu_kind_ = TodoMenuKind::ReconnectStuck;
+            todo_menu_selected_item_ = 0;
+            todo_menu_open_ = true;
+            reconnect_prompt_started_ms = now_ms;
+            status_text_ = "Reconnect stuck";
+            hint_text_ = "Choose action";
+            phase_ = Phase::Error;
+            active_page_ = Page::Todo;
+            UpdateDisplay();
         }
         if (ws_disconnected_pending_.exchange(false)) {
             hello_sent_ = false;
@@ -1642,9 +2498,19 @@ void LanMicApp::Run() {
             status_text_ = "Disconnected";
             hint_text_ = "Will retry automatically";
             phase_ = Phase::Idle;
+            if (active_page_ == Page::Todo || offline_todo_mode_) {
+                offline_todo_mode_ = true;
+                todo_last_action_text_ = "Offline Todo";
+                active_page_ = Page::Todo;
+            } else {
+                active_page_ = Page::Summary;
+            }
             disconnected_since_ms = now_ms;
             reconnect_interval_ms = kReconnectIntervalMinMs;
             last_reconnect_ms = 0;
+            last_ws_ping_ms = 0;
+            awaiting_pong_since_ms = 0;
+            awaiting_pong_baseline_ms = 0;
             UpdateDisplay();
         }
         if ((now_ms - last_battery_poll_ms) >= kBatteryPollIntervalMs) {
@@ -1656,8 +2522,12 @@ void LanMicApp::Run() {
         if (up_long_pressed_.exchange(false)) {
             if (IsNavButtonPressed(TODO_DOWN_BUTTON_GPIO)) {
                 EnterWifiSetupMode();
+            } else if (active_page_ == Page::Todo || offline_todo_mode_) {
+                OpenTodoMenu(TodoMenuKind::Todo);
+            } else if (active_page_ == Page::Summary) {
+                OpenTodoMenu(TodoMenuKind::Live);
             } else {
-                SwitchPage(Page::Summary);  // exits Settings too
+                SwitchPage(Page::Todo);
             }
         }
         if (down_long_pressed_.exchange(false)) {
@@ -1666,14 +2536,26 @@ void LanMicApp::Run() {
             } else if (active_page_ == Page::Log) {
                 EnterSettings();
             } else if (active_page_ == Page::Settings) {
-                SwitchPage(Page::Summary);
+                SwitchPage(Page::Todo);
             } else {
                 SwitchPage(Page::Log);
             }
         }
 
-        const bool up_click   = up_clicked_.exchange(false);
-        const bool down_click = down_clicked_.exchange(false);
+        const bool up_double_click = up_double_clicked_.exchange(false);
+        const bool down_double_click = down_double_clicked_.exchange(false);
+        const bool up_click = up_clicked_.exchange(false) || (todo_menu_open_ && up_double_click);
+        const bool down_click = down_clicked_.exchange(false) || down_double_click;
+
+        if (up_double_click &&
+            !todo_menu_open_ &&
+            !has_pending_transcript_ &&
+            (active_page_ == Page::Todo || active_page_ == Page::Summary) &&
+            (phase_ == Phase::Idle || phase_ == Phase::Error)) {
+            SwitchPage(active_page_ == Page::Todo ? Page::Summary : Page::Todo);
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
 
         if (active_page_ == Page::Settings) {
             const bool pressed_now = IsPttPressed();
@@ -1685,22 +2567,92 @@ void LanMicApp::Run() {
             continue;
         }
 
+        if (todo_menu_open_) {
+            if (todo_menu_kind_ == TodoMenuKind::ReconnectStuck &&
+                reconnect_prompt_started_ms > 0 &&
+                (now_ms - reconnect_prompt_started_ms) >= kReconnectPromptTimeoutMs) {
+                reconnect_prompt_started_ms = 0;
+                EnterOfflineTodoMode("Offline Todo");
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
+            const bool pressed_now = IsPttPressed();
+            const bool boot_press  = pressed_now && !last_pressed;
+            if (boot_press) last_pressed = true;
+            if (!pressed_now) last_pressed = false;
+            HandleTodoMenuInput(up_click, down_click, boot_press);
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+
         if (!IsWifiConnected()) {
+            if (!offline_todo_mode_ &&
+                !todo_menu_open_ &&
+                !has_pending_transcript_ &&
+                phase_ == Phase::Idle &&
+                (now_ms - disconnected_since_ms) >= kReconnectPromptTimeoutMs) {
+                EnterOfflineTodoMode("Offline Todo");
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
+            if (offline_todo_mode_ && active_page_ == Page::Todo) {
+                if (up_click) {
+                    MoveTodoSelection(-1);
+                }
+                if (down_click) {
+                    MoveTodoSelection(1);
+                }
+                const bool pressed_now = IsPttPressed();
+                if (pressed_now && !last_pressed) {
+                    last_pressed = true;
+                    boot_pressed_since_ms = now_ms;
+                    todo_hold_started = false;
+                } else if (!pressed_now && last_pressed) {
+                    if (!todo_hold_started && boot_pressed_since_ms > 0) {
+                        OpenTodoMenu(TodoMenuKind::TodoAction);
+                    }
+                    boot_pressed_since_ms = 0;
+                    todo_hold_started = false;
+                    last_pressed = false;
+                }
+            }
             vTaskDelay(pdMS_TO_TICKS(200));
             continue;
         }
 
         if (!IsServerConnected() &&
             !connect_attempt_running_.load(std::memory_order_acquire) &&
+            !offline_todo_mode_ &&
             (now_ms - last_reconnect_ms) >= reconnect_interval_ms) {
             last_reconnect_ms = now_ms;
             StartConnectAttemptAsync();
+        }
+
+        if (IsWifiConnected() &&
+            !IsServerConnected() &&
+            !connect_attempt_running_.load(std::memory_order_acquire) &&
+            !offline_todo_mode_ &&
+            !todo_menu_open_ &&
+            !has_pending_transcript_ &&
+            phase_ == Phase::Idle &&
+            (now_ms - disconnected_since_ms) >= kReconnectPromptTimeoutMs) {
+            reconnect_stuck_prompt_ = true;
+            offline_todo_mode_ = true;
+            todo_menu_kind_ = TodoMenuKind::ReconnectStuck;
+            todo_menu_selected_item_ = 0;
+            todo_menu_open_ = true;
+            reconnect_prompt_started_ms = now_ms;
+            status_text_ = "No server";
+            hint_text_ = "Choose action";
+            active_page_ = Page::Todo;
+            UpdateDisplay();
         }
 
         // Time-based sleep: if no connection has been established within
         // kNoConnectionSleepMs, enter deep sleep to save battery.
         if (!IsServerConnected() &&
             !connect_attempt_running_.load(std::memory_order_acquire) &&
+            !offline_todo_mode_ &&
             (now_ms - disconnected_since_ms) >= kNoConnectionSleepMs) {
             DisconnectWebSocket();
             status_text_ = "No server";
@@ -1714,17 +2666,82 @@ void LanMicApp::Run() {
         }
 
         if (IsServerConnected()) {
+            if (awaiting_pong_since_ms == 0 && (now_ms - last_ws_ping_ms) >= kClientPingIntervalMs) {
+                const int64_t pong_baseline_ms = ws_->GetLastPongMs();
+                last_ws_ping_ms = now_ms;
+                if (!ws_->Ping()) {
+                    ESP_LOGW(kTag, "WebSocket ping send failed; reconnecting");
+                    const bool should_stay_offline_todo =
+                        active_page_ == Page::Todo || offline_todo_mode_;
+                    DisconnectWebSocket();
+                    network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
+                    status_text_ = "Server timeout";
+                    hint_text_ = should_stay_offline_todo ? "Offline Todo" : "Retrying host...";
+                    phase_ = Phase::Idle;
+                    if (should_stay_offline_todo) {
+                        EnterOfflineTodoMode("Offline Todo");
+                    } else {
+                        active_page_ = Page::Summary;
+                    }
+                    disconnected_since_ms = now_ms;
+                    reconnect_interval_ms = kReconnectIntervalMinMs;
+                    last_reconnect_ms = now_ms;
+                    last_ws_ping_ms = 0;
+                    awaiting_pong_since_ms = 0;
+                    awaiting_pong_baseline_ms = 0;
+                    if (!should_stay_offline_todo) {
+                        StartConnectAttemptAsync();
+                    }
+                    UpdateDisplay();
+                    vTaskDelay(pdMS_TO_TICKS(50));
+                    continue;
+                }
+                awaiting_pong_since_ms = now_ms;
+                awaiting_pong_baseline_ms = pong_baseline_ms;
+            }
             const int64_t last_pong_ms = ws_->GetLastPongMs();
-            if (last_pong_ms > 0 && (now_ms - last_pong_ms) >= kPongTimeoutMs) {
+            if (awaiting_pong_since_ms > 0 && last_pong_ms > awaiting_pong_baseline_ms) {
+                awaiting_pong_since_ms = 0;
+                awaiting_pong_baseline_ms = 0;
+            }
+            const bool client_ping_timed_out =
+                awaiting_pong_since_ms > 0 && (now_ms - awaiting_pong_since_ms) >= kPongTimeoutMs;
+            const bool server_silent_too_long =
+                awaiting_pong_since_ms == 0 &&
+                last_pong_ms > 0 &&
+                (now_ms - last_pong_ms) >= kServerSilenceTimeoutMs;
+            if (client_ping_timed_out || server_silent_too_long) {
                 ESP_LOGW(kTag,
-                         "WebSocket heartbeat timed out: last_pong_ms=%lld now_ms=%lld",
+                         "WebSocket heartbeat timed out: reason=%s last_pong_ms=%lld baseline_ms=%lld ping_ms=%lld now_ms=%lld",
+                         client_ping_timed_out ? "client_ping" : "server_silence",
                          static_cast<long long>(last_pong_ms),
+                         static_cast<long long>(awaiting_pong_baseline_ms),
+                         static_cast<long long>(awaiting_pong_since_ms),
                          static_cast<long long>(now_ms));
+                const bool should_stay_offline_todo =
+                    active_page_ == Page::Todo || offline_todo_mode_;
                 status_text_ = "Server timeout";
-                hint_text_ = "Restarting...";
+                hint_text_ = should_stay_offline_todo ? "Offline Todo" : "Retrying host...";
+                phase_ = Phase::Idle;
+                if (should_stay_offline_todo) {
+                    EnterOfflineTodoMode("Offline Todo");
+                } else {
+                    DisconnectWebSocket();
+                    active_page_ = Page::Summary;
+                }
+                network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
+                disconnected_since_ms = now_ms;
+                reconnect_interval_ms = kReconnectIntervalMinMs;
+                last_reconnect_ms = now_ms;
+                last_ws_ping_ms = 0;
+                awaiting_pong_since_ms = 0;
+                awaiting_pong_baseline_ms = 0;
+                if (!should_stay_offline_todo) {
+                    StartConnectAttemptAsync();
+                }
                 UpdateDisplay();
                 vTaskDelay(pdMS_TO_TICKS(50));
-                esp_restart();
+                continue;
             }
         }
 
@@ -1741,6 +2758,8 @@ void LanMicApp::Run() {
                     hint_text_ = "Retrying host...";
                     UpdateDisplay();
                 }
+            } else if (active_page_ == Page::Todo) {
+                MoveTodoSelection(-1);
             } else {
                 HandleScroll(-1);
             }
@@ -1758,6 +2777,8 @@ void LanMicApp::Run() {
                     hint_text_ = "Retrying host...";
                     UpdateDisplay();
                 }
+            } else if (active_page_ == Page::Todo) {
+                MoveTodoSelection(1);
             } else {
                 HandleScroll(1);
             }
@@ -1769,6 +2790,19 @@ void LanMicApp::Run() {
                      IsServerConnected() ? 1 : 0,
                      connect_attempt_running_.load(std::memory_order_acquire) ? 1 : 0,
                      static_cast<int>(phase_));
+            boot_pressed_since_ms = now_ms;
+            todo_hold_started = false;
+            const bool can_open_page_menu =
+                phase_ == Phase::Idle || phase_ == Phase::Error;
+            const bool defer_page_press =
+                (active_page_ == Page::Todo || active_page_ == Page::Summary) &&
+                !has_pending_transcript_ &&
+                can_open_page_menu;
+            if (defer_page_press) {
+                last_pressed = true;
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
             if (!IsServerConnected()) {
                 disconnected_since_ms = now_ms;
                 reconnect_interval_ms = kReconnectIntervalMinMs;
@@ -1779,6 +2813,7 @@ void LanMicApp::Run() {
                 phase_ = Phase::Idle;
                 UpdateDisplay();
             } else {
+                SyncVoiceModeToActivePage();
                 ESP_LOGI(kTag, "PTT start");
                 SendPttStart();
                 phase_ = Phase::Recording;
@@ -1793,6 +2828,33 @@ void LanMicApp::Run() {
             last_pressed = true;
         }
 
+        if (pressed &&
+            last_pressed &&
+            (active_page_ == Page::Todo || active_page_ == Page::Summary) &&
+            !todo_hold_started &&
+            boot_pressed_since_ms > 0 &&
+            !has_pending_transcript_ &&
+            (phase_ == Phase::Idle || phase_ == Phase::Error) &&
+            IsServerConnected() &&
+            (now_ms - boot_pressed_since_ms) >= kTodoBootHoldMs) {
+            if (!SyncVoiceModeToActivePage()) {
+                status_text_ = "Mode error";
+                hint_text_ = "Try again";
+                UpdateDisplay();
+                vTaskDelay(pdMS_TO_TICKS(20));
+                continue;
+            }
+            todo_hold_started = true;
+            ESP_LOGI(kTag, "PTT start from page hold");
+            SendPttStart();
+            phase_ = Phase::Recording;
+            status_text_ = "Recording";
+            hint_text_ = "Release BOOT to send";
+            FlushPrerollFrames();
+            StreamAudioFrame();
+            UpdateDisplay();
+        }
+
         if (!pressed && last_pressed) {
             ESP_LOGI(kTag, "BOOT release phase=%d", static_cast<int>(phase_));
             if (phase_ == Phase::Recording) {
@@ -1801,7 +2863,14 @@ void LanMicApp::Run() {
                 phase_ = Phase::Transcribing;
                 status_text_ = "Transcribing";
                 UpdateDisplay();
+            } else if (active_page_ == Page::Todo &&
+                       !todo_hold_started &&
+                       boot_pressed_since_ms > 0 &&
+                       !has_pending_transcript_) {
+                OpenTodoMenu(TodoMenuKind::TodoAction);
             }
+            boot_pressed_since_ms = 0;
+            todo_hold_started = false;
             last_pressed = false;
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
