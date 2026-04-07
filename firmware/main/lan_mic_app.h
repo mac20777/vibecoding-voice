@@ -193,6 +193,8 @@ private:
     void QueueOfflineTodoToggle(const TodoItem& item, bool completed);
     void QueueOfflineTodoDelete(const TodoItem& item);
     void FlushPendingTodoOps();
+    void LoadCachedTodoState();
+    void SaveCachedTodoState();
     void LoadPendingTodoOps();
     void SavePendingTodoOps();
     void SwitchPage(Page page);

@@ -57,6 +57,7 @@ constexpr char kLastServerUriKey[] = "last_srv_uri";
 constexpr char kPairedHostIdKey[] = "pair_host_id";
 constexpr char kPairedHostNameKey[] = "pair_host_nm";
 constexpr char kPendingTodoOpsKey[] = "todo_ops";
+constexpr char kCachedTodoStateKey[] = "todo_cache";
 constexpr EventBits_t kWifiConnectedBit = BIT0;
 constexpr int kFrameDurationMs = 20;
 constexpr int kSampleRate = 16000;
@@ -97,6 +98,7 @@ constexpr int kLogBodyY = 96;
 constexpr int kFooterTextY = 276;
 constexpr int kLineHeight = 18;
 constexpr int kBatteryPollIntervalMs = 15000;
+constexpr size_t kCachedTodoStateMaxBytes = 3500;
 constexpr uint8_t kWifiIcon12x12[] = {
     0x00, 0x00,
     0x03, 0xC0,
@@ -333,6 +335,7 @@ void LanMicApp::LoadPersistedNetworkState() {
     if (!cached_server_uri_.empty()) {
         ESP_LOGI(kTag, "Loaded cached server URI: %s", cached_server_uri_.c_str());
     }
+    LoadCachedTodoState();
     LoadPendingTodoOps();
 }
 
@@ -1156,6 +1159,7 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         if (last_action != nullptr) {
             todo_last_action_text_ = last_action;
         }
+        SaveCachedTodoState();
         offline_todo_mode_ = false;
         reconnect_stuck_prompt_ = false;
         FlushPendingTodoOps();
@@ -1429,6 +1433,7 @@ void LanMicApp::ToggleSelectedTodo() {
         QueueOfflineTodoToggle(item, next_completed);
         todo_last_action_text_ += " (待同步)";
     }
+    SaveCachedTodoState();
     UpdateDisplay();
 }
 
@@ -1460,6 +1465,7 @@ void LanMicApp::DeleteSelectedTodo() {
         QueueOfflineTodoDelete(item);
         todo_last_action_text_ += " (待同步)";
     }
+    SaveCachedTodoState();
     UpdateDisplay();
 }
 
@@ -1523,6 +1529,107 @@ void LanMicApp::FlushPendingTodoOps() {
             ? "离线更改已同步"
             : "部分离线更改待同步";
     }
+}
+
+void LanMicApp::LoadCachedTodoState() {
+    Settings nvs(kLanMicNamespace);
+    const std::string serialized = nvs.GetString(kCachedTodoStateKey, "");
+    if (serialized.empty()) {
+        return;
+    }
+
+    cJSON* root = cJSON_Parse(serialized.c_str());
+    if (!cJSON_IsObject(root)) {
+        if (root != nullptr) {
+            cJSON_Delete(root);
+        }
+        ESP_LOGW(kTag, "Ignoring corrupt cached todo state");
+        Settings writable(kLanMicNamespace, true);
+        writable.EraseKey(kCachedTodoStateKey);
+        return;
+    }
+
+    cJSON* items = cJSON_GetObjectItemCaseSensitive(root, "items");
+    cJSON* selected_index = cJSON_GetObjectItemCaseSensitive(root, "selectedIndex");
+    const char* last_action = GetJsonString(root, "lastActionText");
+
+    std::vector<TodoItem> cached_items;
+    if (cJSON_IsArray(items)) {
+        cJSON* item = nullptr;
+        cJSON_ArrayForEach(item, items) {
+            const char* id = GetJsonString(item, "id");
+            const char* title = GetJsonString(item, "title");
+            if (title == nullptr || title[0] == '\0') {
+                continue;
+            }
+            cached_items.push_back({
+                id != nullptr ? id : "",
+                title,
+                GetJsonBool(item, "completed", false)
+            });
+        }
+    }
+
+    todo_items_ = std::move(cached_items);
+    if (cJSON_IsNumber(selected_index)) {
+        todo_selected_index_ = selected_index->valueint;
+    } else {
+        todo_selected_index_ = todo_items_.empty() ? -1 : 0;
+    }
+    if (todo_items_.empty()) {
+        todo_selected_index_ = -1;
+    } else {
+        todo_selected_index_ = std::clamp(
+            todo_selected_index_,
+            0,
+            static_cast<int>(todo_items_.size()) - 1);
+    }
+    if (last_action != nullptr && last_action[0] != '\0') {
+        todo_last_action_text_ = last_action;
+    } else if (!todo_items_.empty()) {
+        todo_last_action_text_ = "Cached Todo";
+    }
+
+    ESP_LOGI(kTag, "Loaded %u cached todo items",
+             static_cast<unsigned>(todo_items_.size()));
+    cJSON_Delete(root);
+}
+
+void LanMicApp::SaveCachedTodoState() {
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "selectedIndex", todo_selected_index_);
+    if (!todo_last_action_text_.empty()) {
+        cJSON_AddStringToObject(root, "lastActionText", todo_last_action_text_.c_str());
+    }
+
+    cJSON* items = cJSON_CreateArray();
+    for (const auto& todo : todo_items_) {
+        if (todo.title.empty()) {
+            continue;
+        }
+        cJSON* item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "id", todo.id.c_str());
+        cJSON_AddStringToObject(item, "title", todo.title.c_str());
+        cJSON_AddBoolToObject(item, "completed", todo.completed);
+        cJSON_AddItemToArray(items, item);
+    }
+    cJSON_AddItemToObject(root, "items", items);
+
+    char* text = cJSON_PrintUnformatted(root);
+    if (text != nullptr) {
+        const size_t length = std::strlen(text);
+        Settings nvs(kLanMicNamespace, true);
+        if (length <= kCachedTodoStateMaxBytes) {
+            nvs.SetString(kCachedTodoStateKey, text);
+        } else {
+            ESP_LOGW(kTag,
+                     "Cached todo state too large (%u bytes), not saving",
+                     static_cast<unsigned>(length));
+            nvs.EraseKey(kCachedTodoStateKey);
+        }
+        cJSON_free(text);
+    }
+    cJSON_Delete(root);
 }
 
 void LanMicApp::LoadPendingTodoOps() {
