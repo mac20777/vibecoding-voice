@@ -306,10 +306,9 @@ bool LanMicApp::Initialize() {
                 UpdateDisplay();
                 break;
             case NetworkEvent::WifiConfigModeExit:
-                network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
-                status_text_ = "Leaving setup mode";
-                hint_text_ = "Hold UP menu\nHold BOOT to talk";
-                UpdateDisplay();
+                ESP_LOGI(kTag, "WiFi config mode exited");
+                network_state_ = NetworkState::Offline;
+                RequestWifiReconfigureByReboot("Restarting...", "Applying Wi-Fi setup");
                 break;
             default:
                 break;
@@ -385,6 +384,44 @@ void LanMicApp::ClearPersistedHost() {
     server_uri_.clear();
 
     ESP_LOGI(kTag, "Cleared cached host pairing and server URI");
+}
+
+void LanMicApp::RequestWifiReconfigureByReboot(const char* status_text, const char* hint_text) {
+    bool expected = false;
+    if (!wifi_reconfigure_restart_pending_.compare_exchange_strong(expected,
+                                                                   true,
+                                                                   std::memory_order_acq_rel,
+                                                                   std::memory_order_acquire)) {
+        return;
+    }
+
+    ESP_LOGI(kTag, "Request reconfigure WiFi by reboot");
+    connect_cancel_requested_.store(true, std::memory_order_release);
+    ws_disconnected_pending_.store(false, std::memory_order_release);
+    hello_sent_ = false;
+
+    status_text_ = status_text != nullptr ? status_text : "Restarting...";
+    hint_text_ = hint_text != nullptr ? hint_text : "Reconfiguring Wi-Fi";
+    active_page_ = Page::Summary;
+    summary_scroll_offset_ = 0;
+    UpdateDisplay();
+
+    if (xTaskCreate([](void* arg) {
+            auto* self = static_cast<LanMicApp*>(arg);
+            vTaskDelay(pdMS_TO_TICKS(600));
+            esp_restart();
+            self->wifi_reconfigure_restart_pending_.store(false, std::memory_order_release);
+            vTaskDelete(nullptr);
+        },
+        "wifi_reboot",
+        3072,
+        this,
+        5,
+        nullptr) != pdPASS) {
+        wifi_reconfigure_restart_pending_.store(false, std::memory_order_release);
+        vTaskDelay(pdMS_TO_TICKS(200));
+        esp_restart();
+    }
 }
 
 void LanMicApp::ConfigureButtons() {
@@ -821,7 +858,7 @@ std::string LanMicApp::GetDiscoveryHintText() const {
 }
 
 void LanMicApp::EnterWifiSetupMode() {
-    ESP_LOGW(kTag, "Clearing saved Wi-Fi and entering config mode");
+    ESP_LOGW(kTag, "Clearing saved Wi-Fi and scheduling reboot into config mode");
     ClearPersistedHost();
     DisconnectWebSocket();
     xEventGroupClearBits(wifi_event_group_, kWifiConnectedBit);
@@ -837,7 +874,7 @@ void LanMicApp::EnterWifiSetupMode() {
     UpdateDisplay();
 
     SsidManager::GetInstance().Clear();
-    WifiManager::GetInstance().StartConfigAp();
+    RequestWifiReconfigureByReboot("Restarting...", "Rebooting into Wi-Fi setup");
 }
 
 void LanMicApp::DisconnectWebSocket() {
