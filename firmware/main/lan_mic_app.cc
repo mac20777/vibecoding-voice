@@ -264,6 +264,32 @@ bool LanMicApp::Initialize() {
                 network_state_ = NetworkState::Wifi;
                 status_text_ = "Wi-Fi connected";
                 server_uri_.clear();
+
+                // Clear all cached network data on WiFi connect to avoid using stale info from different networks
+                {
+                    bool cache_cleared = false;
+                    if (!cached_server_uri_.empty()) {
+                        ESP_LOGI(kTag, "Clearing cached server URI due to WiFi connected");
+                        cached_server_uri_.clear();
+                        cache_cleared = true;
+                    }
+                    if (!paired_host_id_.empty() || !paired_host_name_.empty()) {
+                        ESP_LOGI(kTag, "Clearing paired host info due to WiFi connected (was: %s)", 
+                                 paired_host_name_.empty() ? paired_host_id_.c_str() : paired_host_name_.c_str());
+                        paired_host_id_.clear();
+                        paired_host_name_.clear();
+                        cache_cleared = true;
+                    }
+                    
+                    if (cache_cleared) {
+                        Settings nvs(kLanMicNamespace, true);
+                        nvs.EraseKey(kLastServerUriKey);
+                        nvs.EraseKey(kPairedHostIdKey);
+                        nvs.EraseKey(kPairedHostNameKey);
+                        ESP_LOGI(kTag, "Cleared all persisted network cache from NVS");
+                    }
+                }
+                
                 hint_text_ = CONFIG_LAN_DISCOVERY_ENABLED ? GetDiscoveryHintText() : "Connecting server...";
                 UpdateDisplay();
                 break;
@@ -551,6 +577,14 @@ bool LanMicApp::DiscoverServerUri() {
 
     // Skip re-discovery if we already have a URI from a previous successful discovery.
     if (!server_uri_.empty()) {
+        return true;
+    }
+
+    // If we have a paired host but no cached URI, try fallback first before expensive discovery
+    std::string fallback = GetFallbackServerUri();
+    if (!fallback.empty() && !cached_server_uri_.empty()) {
+        ESP_LOGI(kTag, "Using cached server URI as fallback: %s", cached_server_uri_.c_str());
+        server_uri_ = cached_server_uri_;
         return true;
     }
 
