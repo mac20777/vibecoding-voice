@@ -52,19 +52,37 @@ function invokeCwd() {
   return String(process.env.VIBE_INVOKE_CWD || "").trim() || process.cwd();
 }
 
+function resolveDesktopModeOption(desktopMode) {
+  if (desktopMode !== undefined) {
+    return Boolean(desktopMode);
+  }
+
+  return process.env.VIBE_DESKTOP === "1";
+}
+
 export function listConfigFileCandidates() {
+  return listConfigFileCandidatesForMode();
+}
+
+export function listConfigFileCandidatesForMode({ desktopMode } = {}) {
+  desktopMode = resolveDesktopModeOption(desktopMode);
   const userConfigPath = getUserConfigPath();
   const projectConfigPath = path.join(projectRoot, ".env");
   const cwdConfigPath = path.join(invokeCwd(), ".env");
 
+  if (desktopMode) {
+    return uniqPaths([userConfigPath]);
+  }
+
   return uniqPaths([userConfigPath, projectConfigPath, cwdConfigPath]);
 }
 
-export function loadConfigFiles({ quietMissing = false } = {}) {
+export function loadConfigFiles({ quietMissing = false, desktopMode } = {}) {
+  desktopMode = resolveDesktopModeOption(desktopMode);
   const mergedValues = {};
   const loadedConfigFiles = [];
 
-  for (const filePath of listConfigFileCandidates()) {
+  for (const filePath of listConfigFileCandidatesForMode({ desktopMode })) {
     const values = readEnvFile(filePath);
     if (!values) {
       continue;
@@ -180,6 +198,19 @@ function autoDetectSendTarget(claudeCommand, codexCommand) {
   return { sendTarget: "text_injector", sendTargetAuto: true };
 }
 
+export function resolveSendTarget(sendTargetEnv, { desktopMode = false, claudeCommand, codexCommand } = {}) {
+  const explicitSendTarget = String(sendTargetEnv || "").trim();
+  if (explicitSendTarget) {
+    return { sendTarget: explicitSendTarget, sendTargetAuto: false };
+  }
+
+  if (desktopMode) {
+    return { sendTarget: "text_injector", sendTargetAuto: false };
+  }
+
+  return autoDetectSendTarget(claudeCommand, codexCommand);
+}
+
 export function detectConfiguredSttProvider(config) {
   const explicit = String(config.sttProvider || "").trim().toLowerCase();
   if (explicit) {
@@ -284,15 +315,20 @@ export function redactValue(value) {
 }
 
 export function loadConfig(options = {}) {
-  const { loadedConfigFiles, userConfigPath, cwdConfigPath, projectConfigPath } = loadConfigFiles(options);
+  const desktopMode = resolveDesktopModeOption(options.desktopMode);
+  const { loadedConfigFiles, userConfigPath, cwdConfigPath, projectConfigPath } = loadConfigFiles({
+    ...options,
+    desktopMode
+  });
 
   const claudeCommand = resolveClaudeCommand();
   const codexCommand = resolveCodexCommand();
 
-  const sendTargetEnv = String(process.env.SEND_TARGET || "").trim();
-  const { sendTarget, sendTargetAuto } = sendTargetEnv
-    ? { sendTarget: sendTargetEnv, sendTargetAuto: false }
-    : autoDetectSendTarget(claudeCommand, codexCommand);
+  const { sendTarget, sendTargetAuto } = resolveSendTarget(process.env.SEND_TARGET, {
+    desktopMode,
+    claudeCommand,
+    codexCommand
+  });
   const todoIntentApiKey = process.env.TODO_INTENT_API_KEY || process.env.DEEPSEEK_API_KEY || "";
 
   return {

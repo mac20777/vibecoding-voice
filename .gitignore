@@ -9,3 +9,4 @@ tmp/
 .DS_Store
 npm-debug.log*
 .npm-cache/
+dist-desktop/

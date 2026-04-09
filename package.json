@@ -1,10 +1,12 @@
 {
   "name": "@mac20777/vibecoding-voice",
-  "version": "0.2.3",
+  "version": "0.2.9",
   "private": false,
   "description": "ESP32 LAN voice coding bridge with inject, Codex, and Claude modes; inject is the recommended default.",
   "type": "module",
+  "main": "desktop/main.cjs",
   "files": [
+    "desktop",
     "src",
     "scripts",
     "README.md",
@@ -31,7 +33,9 @@
     "doctor": "node src/server.mjs --doctor",
     "test": "node --test",
     "console": "node scripts/console.mjs",
-    "vibe": "node scripts/vibe.mjs"
+    "vibe": "node scripts/vibe.mjs",
+    "desktop:dev": "electron .",
+    "desktop:dist": "electron-builder --win nsis"
   },
   "engines": {
     "node": ">=20"
@@ -45,5 +49,40 @@
   ],
   "dependencies": {
     "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "electron": "^35.7.5",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.mac20777.vibecodingvoice",
+    "productName": "VibeCoding Voice",
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "files": [
+      "build-assets/**/*",
+      "desktop/**/*",
+      "src/**/*",
+      "scripts/**/*",
+      "package.json",
+      "node_modules/ws/**/*"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build-assets/app-icon.png",
+      "signAndEditExecutable": false,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "perMachine": false
+    }
   }
 }

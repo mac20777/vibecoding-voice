@@ -1,19 +1,51 @@
+import fs from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 
 import { projectRoot } from "./paths.mjs";
 
-function runPowerShellFile(filePath, args) {
+function encodePowerShellCommand(command) {
+  return Buffer.from(command, "utf16le").toString("base64");
+}
+
+function escapePowerShellSingleQuoted(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+function buildPowerShellInvocation(scriptContent, namedArgs = {}) {
+  const renderedArgs = Object.entries(namedArgs)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .map(([name, value]) => `-${name} '${escapePowerShellSingleQuoted(value)}'`)
+    .join(" ");
+
+  return `$ProgressPreference = 'SilentlyContinue'\n& {\n${scriptContent.trim()}\n}${renderedArgs ? ` ${renderedArgs}` : ""}`;
+}
+
+function runPowerShellScript(scriptContent, namedArgs) {
   return new Promise((resolve, reject) => {
+    const command = buildPowerShellInvocation(scriptContent, namedArgs);
     const child = spawn(
       "powershell.exe",
-      ["-NoProfile", "-Sta", "-ExecutionPolicy", "Bypass", "-File", filePath, ...args],
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Sta",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-EncodedCommand",
+        encodePowerShellCommand(command)
+      ],
       {
         stdio: ["ignore", "pipe", "pipe"]
       }
     );
 
+    let stdout = "";
     let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
     });
@@ -24,7 +56,7 @@ function runPowerShellFile(filePath, args) {
         resolve();
         return;
       }
-      reject(new Error(stderr.trim() || `PowerShell exited with code ${code}`));
+      reject(new Error(stderr.trim() || stdout.trim() || `PowerShell exited with code ${code}`));
     });
   });
 }
@@ -45,7 +77,11 @@ export async function injectText(text, mode, options = {}) {
   }
 
   const scriptPath = path.join(projectRoot, "scripts", "inject-text.ps1");
+  const scriptContent = fs.readFileSync(scriptPath, "utf8");
   const textBase64 = Buffer.from(trimmed, "utf8").toString("base64");
 
-  await runPowerShellFile(scriptPath, ["-TextBase64", textBase64, "-Mode", mode]);
+  await runPowerShellScript(scriptContent, {
+    TextBase64: textBase64,
+    Mode: mode
+  });
 }

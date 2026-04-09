@@ -99,6 +99,31 @@ From source (development):
 npm install
 ```
 
+#### Desktop App (Windows)
+
+If you want a normal desktop app instead of a terminal window, this repo now includes an Electron wrapper with:
+
+- system tray icon
+- start on login
+- hidden launch to tray
+- a local settings window for `config.env`
+- packaged Windows installer output
+
+From source:
+
+```powershell
+npm install
+npm run desktop:dev
+```
+
+Build a Windows installer:
+
+```powershell
+npm run desktop:dist
+```
+
+The packaged app keeps the bridge running in the background, so non-technical users do not need to touch `vibe`, PowerShell, or a command prompt.
+
 **2. Configure**
 
 ```powershell
@@ -504,6 +529,31 @@ npm install -g @mac20777/vibecoding-voice
 ```powershell
 npm install
 ```
+
+#### Windows 桌面版
+
+如果你不想让普通用户面对命令行，现在仓库里已经带了一个 Electron 桌面壳，支持：
+
+- 托盘图标
+- 开机自启
+- 登录后隐藏启动到托盘
+- 本地设置窗口，直接编辑 `config.env`
+- 打包成 Windows 安装包
+
+源码运行：
+
+```powershell
+npm install
+npm run desktop:dev
+```
+
+构建 Windows 安装包：
+
+```powershell
+npm run desktop:dist
+```
+
+这样用户看到的是常规桌面软件，而不是 PowerShell 或命令行窗口。
 
 **2. 配置**
 
