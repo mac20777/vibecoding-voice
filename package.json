@@ -1,8 +1,8 @@
 {
   "name": "@mac20777/vibecoding-voice",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "private": false,
-  "description": "ESP32 LAN voice coding bridge with inject, Codex, and Claude modes; inject is the recommended default.",
+  "description": "Voice-driven AI coding bridge and Windows desktop app for ESP32 e-paper devices with Inject, Codex, and Claude modes.",
   "type": "module",
   "main": "desktop/main.cjs",
   "files": [

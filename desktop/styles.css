@@ -384,7 +384,7 @@ body {
 
 .section-card {
   display: grid;
-  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  grid-template-columns: 1fr;
   gap: 24px;
   padding: 22px;
   border: 1px solid rgba(138, 179, 200, 0.16);
@@ -410,12 +410,12 @@ body {
 }
 
 .section-fields-2 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .provider-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
   padding: 16px;
   border: 1px solid rgba(138, 179, 200, 0.14);
@@ -431,7 +431,9 @@ body {
 .field span {
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.45;
   color: #dce8e7;
+  overflow-wrap: anywhere;
 }
 
 .field-full {
@@ -548,8 +550,6 @@ select:focus {
   }
 
   .hero,
-  .config-layout,
-  .section-card,
   .grid,
   .provider-grid,
   .status-grid,
@@ -572,6 +572,12 @@ select:focus {
   .form-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+}
+
+@media (max-width: 1180px) {
+  .config-layout {
+    grid-template-columns: 1fr;
   }
 }
 

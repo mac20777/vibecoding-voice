@@ -10,10 +10,19 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 
 **Voice-driven AI coding via a wireless ESP32 e-paper device — no microphone, no keyboard interruption, just push-to-talk.**
 
+> Now includes a Windows desktop app with tray mode, start-on-login, a local settings UI, and packaged installers, so non-technical users can use it without touching a terminal.
+
 `vibecoding-voice` is a two-part open-source project:
 
 1. **Host bridge** (this repo) — a Node.js server that runs on your PC. It receives push-to-talk audio from an ESP32 device over WebSocket, transcribes it, and either injects the text into the active Windows input field or drives a Codex / Claude Code CLI session.
 2. **ESP32 firmware** (`firmware/`) — runs on supported e-paper boards such as Zectrix S3 and Waveshare S3, and is intended to grow into a fully DIY ESP32-S3 hardware path as well. It handles Wi-Fi, push-to-talk recording, device-side confirmation UI, and renders live CLI output on the e-ink screen.
+
+### Why this project is useful
+
+- Talk to Codex, Claude Code, or any active Windows input box through a dedicated ESP32 push-to-talk device
+- Choose between a developer-friendly CLI flow and a normal Windows desktop app for non-technical users
+- Keep the host bridge running in the background with tray controls, mode switching, and saved local settings
+- Project AI progress, transcript confirmation, and device pairing state back onto the e-paper screen
 
 ### Three working modes
 
@@ -60,6 +69,8 @@ Both boards use ESP32-S3 with onboard MEMS mic and push-button.
 - 16 kHz mono PCM audio ingest over WebSocket
 - STT via Volcengine Flash ASR or OpenAI Whisper
 - Windows text injection via clipboard (Ctrl+V)
+- Windows desktop app with tray icon, start on login, hidden launch, close-to-tray behavior, and packaged installer output
+- Local desktop settings UI with grouped tabs for mode, speech provider, workspace, and advanced options
 - Managed `codex exec --json` session bridge
 - Managed `claude -p --output-format stream-json` session bridge
 - **Todo List page** with local persistence and page-based voice CRUD for simple plans
@@ -106,7 +117,10 @@ If you want a normal desktop app instead of a terminal window, this repo now inc
 - system tray icon
 - start on login
 - hidden launch to tray
+- close-to-tray background behavior
 - a local settings window for `config.env`
+- grouped settings tabs for basic use, speech provider, workspace, and advanced options
+- live status and recent activity view
 - packaged Windows installer output
 
 From source:
@@ -442,10 +456,19 @@ node scripts/console.mjs
 
 **用无线 ESP32 电子墨水设备实现语音驱动的 AI 编程——无需抢占麦克风，无需中断键盘，按键说话即可。**
 
+> 现在已经带有 Windows 桌面版：支持托盘、自启动、本地设置界面和安装包，普通用户不用碰命令行也能直接用。
+
 `vibecoding-voice` 是一个由两部分组成的开源项目：
 
 1. **主机桥接服务**（本仓库）— 运行在你电脑上的 Node.js 服务器。它通过 WebSocket 从 ESP32 设备接收按键说话（PTT）音频，调用语音识别将其转写，然后注入 Windows 当前输入框，或者驱动 Codex / Claude Code CLI 会话。
 2. **ESP32 固件**（`firmware/` 目录）— 可运行在 Zectrix S3、Waveshare S3 这类已支持的电子墨水屏开发板上，后续也会补一个完全 DIY 的 ESP32-S3 硬件方案。负责 Wi-Fi 连接、按键录音、设备端确认界面，并将 CLI 实时输出渲染到电子墨水屏上。
+
+### 这个项目现在能解决什么问题
+
+- 用一个独立的 ESP32 按键语音设备，把指令发给 Codex、Claude Code，或者直接发到 Windows 当前输入框
+- 同时兼容开发者工作流和普通用户工作流：既可以用 CLI，也可以用桌面版
+- 主机桥接服务可以常驻后台，通过托盘、模式切换和本地设置页来管理
+- 设备端不仅能说话输入，还能在电子墨水屏上看到 AI 执行进度、转写确认和连接状态
 
 ### 三种工作模式
 
@@ -491,6 +514,8 @@ node scripts/console.mjs
 - 通过 WebSocket 接收 16kHz 单声道 PCM 音频
 - 语音识别支持火山引擎闪速 ASR 或 OpenAI Whisper
 - 通过剪贴板（Ctrl+V）注入 Windows 文本
+- 带 Windows 桌面版：支持托盘图标、开机自启、隐藏启动、关闭后驻留托盘和安装包
+- 带本地设置界面：按“基础 / 识别 / 工作区 / 高级”分组管理配置
 - 托管 `codex exec --json` 会话
 - 托管 `claude -p --output-format stream-json` 会话
 - **Todo List 页面**：本地持久化待办，按当前页面决定语音进入 Todo 还是 Live coding
@@ -537,7 +562,10 @@ npm install
 - 托盘图标
 - 开机自启
 - 登录后隐藏启动到托盘
+- 关闭窗口后最小化到托盘
 - 本地设置窗口，直接编辑 `config.env`
+- 按标签页分组的设置中心
+- 最近活动和服务状态面板
 - 打包成 Windows 安装包
 
 源码运行：
