@@ -380,6 +380,13 @@ export function loadConfig(options = {}) {
     volcengineLanguage: process.env.VOLCENGINE_LANGUAGE || "zh-CN",
     mockTranscript: process.env.MOCK_TRANSCRIPT || "",
     saveDebugWav: process.env.SAVE_DEBUG_WAV === "1",
+    // TTS configuration (Qwen TTS via DashScope)
+    ttsEnabled: process.env.TTS_ENABLED === "1",
+    dashscopeApiKey: process.env.DASHSCOPE_API_KEY || "",
+    ttsVoice: process.env.TTS_VOICE || "cherry",  // Cherry voice
+    ttsFormat: process.env.TTS_FORMAT || "pcm",   // PCM16 for device
+    ttsSpeed: process.env.TTS_SPEED ? Number(process.env.TTS_SPEED) : undefined,
+    ttsVolume: process.env.TTS_VOLUME ? Number(process.env.TTS_VOLUME) : undefined,
     loadedConfigFiles,
     userConfigPath,
     cwdConfigPath,

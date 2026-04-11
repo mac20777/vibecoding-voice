@@ -81,6 +81,15 @@ private:
         std::string title;
         bool completed = false;
     };
+    // Chat message structure for conversation history display
+    enum class ChatRole {
+        User,    // User's input message (right-aligned)
+        Assistant // AI's response (left-aligned)
+    };
+    struct ChatMessage {
+        ChatRole role;
+        std::string text;
+    };
     enum class PendingTodoOpType {
         Toggle,
         Delete
@@ -116,6 +125,9 @@ private:
     std::string cli_status_text_;
     std::string cli_phase_text_;
     std::string latest_assistant_text_;
+    // Conversation history for chat UI display (max 10 messages to save memory)
+    std::vector<ChatMessage> chat_history_;
+    static constexpr size_t kMaxChatHistorySize = 10;
     std::string repo_name_;
     std::string server_uri_;
     std::vector<std::string> cli_log_lines_;
@@ -180,6 +192,8 @@ private:
     void CapturePrerollFrame();
     bool FlushPrerollFrames();
     void HandleServerMessage(const char* data, size_t len);
+    void HandleTtsAudio(const char* data, size_t len);
+    void PlayTtsAudio(const int16_t* pcm_data, size_t samples);
     void RefreshBatteryStatus(bool force_update = false);
     void HandleScroll(int direction);
     void MoveTodoSelection(int direction);

@@ -249,9 +249,9 @@ bool LanMicApp::Initialize() {
 #endif
     audio_frame_buffer_.resize(kFrameSamples);
     cli_log_lines_.clear();
-    active_page_ = Page::Todo;
-    voice_mode_ = VoiceMode::Todo;
-    hint_text_ = "Hold UP menu\nHold BOOT for Todo";
+    active_page_ = Page::Summary;  // Default to AI chat page (大模型对话)
+    voice_mode_ = VoiceMode::Normal;  // Live mode for AI chat
+    hint_text_ = "Hold BOOT to talk\nUP/DN for pages";
     phase_ = Phase::Idle;
     network_state_ = NetworkState::Offline;
     RefreshBatteryStatus(true);
@@ -620,6 +620,8 @@ bool LanMicApp::EnsureWebSocketConnected() {
     ws_->OnData([this](const char* data, size_t len, bool binary) {
         if (!binary && data != nullptr && len > 0) {
             HandleServerMessage(data, len);
+        } else if (binary && data != nullptr && len > 0) {
+            HandleTtsAudio(data, len);
         }
     });
 
@@ -1374,6 +1376,27 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
             latest_assistant_text_ = latest_assistant;
             summary_scroll_offset_ = 0;
         }
+        // Update chat history when conversation completes
+        if (done && latest_user != nullptr && strlen(latest_user) > 0) {
+            // Add user message if not duplicate
+            if (chat_history_.empty() ||
+                chat_history_.back().role != ChatRole::User ||
+                chat_history_.back().text != latest_user) {
+                chat_history_.push_back({ChatRole::User, latest_user});
+            }
+        }
+        if (done && latest_assistant != nullptr && strlen(latest_assistant) > 0) {
+            // Add assistant message if not duplicate
+            if (chat_history_.empty() ||
+                chat_history_.back().role != ChatRole::Assistant ||
+                chat_history_.back().text != latest_assistant) {
+                chat_history_.push_back({ChatRole::Assistant, latest_assistant});
+            }
+            // Trim history if exceeds max size
+            while (chat_history_.size() > kMaxChatHistorySize) {
+                chat_history_.erase(chat_history_.begin());
+            }
+        }
         if (status_line != nullptr) {
             cli_status_text_ = status_line;
         }
@@ -1421,6 +1444,95 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
 
     cJSON_Delete(root);
     UpdateDisplay();
+}
+
+void LanMicApp::HandleTtsAudio(const char* data, size_t len) {
+    if (len < 3) {
+        ESP_LOGW(kTag, "TTS audio packet too small: %zu bytes", len);
+        return;
+    }
+
+    // Binary format: 2 bytes header length (BE), JSON header, PCM16 audio data
+    const uint16_t header_len = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
+    if (len < static_cast<size_t>(2 + header_len)) {
+        ESP_LOGW(kTag, "TTS audio packet header truncated: %zu < %u", len, 2 + header_len);
+        return;
+    }
+
+    // Parse JSON header
+    cJSON* root = cJSON_ParseWithLength(data + 2, header_len);
+    if (root == nullptr) {
+        ESP_LOGW(kTag, "Failed to parse TTS audio header JSON");
+        return;
+    }
+
+    const char* type = GetJsonString(root, "type");
+    if (type == nullptr || strcmp(type, "tts_audio") != 0) {
+        ESP_LOGW(kTag, "Unexpected TTS message type: %s", type ? type : "null");
+        cJSON_Delete(root);
+        return;
+    }
+
+    const char* format = GetJsonString(root, "format");
+    cJSON* sample_rate_json = cJSON_GetObjectItemCaseSensitive(root, "sampleRate");
+
+    if (format == nullptr || strcmp(format, "pcm16") != 0) {
+        ESP_LOGW(kTag, "Unsupported TTS format: %s", format ? format : "null");
+        cJSON_Delete(root);
+        return;
+    }
+
+    const int sample_rate = cJSON_IsNumber(sample_rate_json) ? sample_rate_json->valueint : 16000;
+    cJSON_Delete(root);
+
+    // Extract PCM16 audio data
+    const size_t audio_offset = 2 + header_len;
+    const size_t audio_len = len - audio_offset;
+    if (audio_len < 2) {
+        ESP_LOGW(kTag, "TTS audio data empty");
+        return;
+    }
+
+    // Audio should be 16kHz mono PCM16 (signed 16-bit LE)
+    if (sample_rate != 16000) {
+        ESP_LOGW(kTag, "TTS sample rate %d not supported (expected 16000)", sample_rate);
+        return;
+    }
+
+    const int16_t* pcm_data = reinterpret_cast<const int16_t*>(data + audio_offset);
+    const size_t samples = audio_len / sizeof(int16_t);
+
+    ESP_LOGI(kTag, "TTS audio received: %zu samples (%zu bytes)", samples, audio_len);
+
+    // Play the audio
+    PlayTtsAudio(pcm_data, samples);
+}
+
+void LanMicApp::PlayTtsAudio(const int16_t* pcm_data, size_t samples) {
+    if (codec_ == nullptr || pcm_data == nullptr || samples == 0) {
+        return;
+    }
+
+    // Enable audio output
+    codec_->EnableOutput(true);
+    codec_->SetOutputVolume(volume_);
+
+    ESP_LOGI(kTag, "Playing TTS audio: %zu samples at volume %d", samples, volume_);
+
+    // Use codec's OutputData method to play audio
+    // Process in chunks to avoid large memory allocations
+    constexpr size_t kChunkSize = 1024;
+    size_t offset = 0;
+
+    while (offset < samples) {
+        const size_t chunk_samples = std::min(kChunkSize, samples - offset);
+        std::vector<int16_t> chunk_data(pcm_data + offset, pcm_data + offset + chunk_samples);
+        codec_->OutputData(chunk_data);
+        offset += chunk_samples;
+        vTaskDelay(pdMS_TO_TICKS(10));  // Small delay to allow DMA to process
+    }
+
+    ESP_LOGI(kTag, "TTS playback complete");
 }
 
 void LanMicApp::RefreshBatteryStatus(bool force_update) {
@@ -2194,15 +2306,15 @@ const char* LanMicApp::GetModeLabel() const {
 std::string LanMicApp::GetPhaseLabel() const {
     switch (phase_) {
         case Phase::Recording:
-            return "● REC";
+            return "录制中...";
         case Phase::Transcribing:
-            return "... STT";
+            return "...识别中...";
         case Phase::AwaitingAction:
-            return "? Send?";
+            return "? 发送?";
         case Phase::Running:
             return "▶ AI";
         case Phase::Error:
-            return "! ERR";
+            return "! 错误";
         case Phase::Idle:
         default:
             return "";
@@ -2225,6 +2337,10 @@ void LanMicApp::ShowIdleTodoPage() {
 }
 
 std::string LanMicApp::GetFooterText() const {
+    // Hide footer on Summary (AI chat) page for cleaner chat UI
+    if (active_page_ == Page::Summary && !has_pending_transcript_ && phase_ != Phase::Recording && !todo_menu_open_) {
+        return "";
+    }
     if (has_pending_transcript_) {
         return "BOOT Add | UP Send | DN Undo";
     }
@@ -2240,9 +2356,6 @@ std::string LanMicApp::GetFooterText() const {
     if (active_page_ == Page::Settings) {
         return settings_editing_volume_ ? "UP/DN ±10 | BOOT Save"
                                         : "UP/DN Nav | BOOT OK | HoldUP Back";
-    }
-    if (active_page_ == Page::Summary) {
-        return "Hold UP Menu | Hold Live";
     }
     if (active_page_ == Page::Todo) {
         return IsServerConnected()
@@ -2427,7 +2540,10 @@ void LanMicApp::UpdateDisplay() {
     }
 
     texts.push_back({GetNetworkLabel(), 28, 9, 16});
-    texts.push_back({(active_page_ == Page::Todo || offline_todo_mode_) ? "TODO" : "LIVE", 96, 9, 16});
+    // Only show "TODO" label in Todo page, Summary (AI chat) page doesn need "LIVE" display
+    if (active_page_ == Page::Todo || offline_todo_mode_) {
+        texts.push_back({"TODO", 96, 9, 16});
+    }
     texts.push_back({GetPhaseLabel(), 166, 9, 16});
     if (!quota_status_text.empty()) {
         texts.push_back({quota_status_text, 250, 9, 16});
@@ -2457,38 +2573,83 @@ void LanMicApp::UpdateDisplay() {
                 y += kLineHeight;
             }
         } else {
-            // Derive a readable status: phase takes priority, else connection state
-            std::string status_display;
-            if (phase_ == Phase::Recording || phase_ == Phase::Transcribing ||
-                phase_ == Phase::AwaitingAction || phase_ == Phase::Running || phase_ == Phase::Error) {
-                status_display = status_text_;
-            } else if (network_state_ != NetworkState::Server) {
-                status_display = GetNetworkLabel();
-            } else {
-                status_display = GetModeLabel();
+            // Chat conversation mode: user messages right-aligned, AI messages left-aligned
+            // Calculate available lines for chat display (from kHeaderLineY+2 to bottom)
+            // kHeaderLineY = 62, content starts at ~72, ends at ~264 (footer hidden)
+            constexpr int kChatStartY = 72;  // Start after header line
+            constexpr int kChatEndY = 264;   // Before footer (footer hidden on Summary)
+            constexpr size_t kChatVisibleLines = (kChatEndY - kChatStartY) / kLineHeight;  // ~10 lines
+
+            // Build all lines from chat history
+            std::vector<std::pair<std::string, bool>> chat_lines;  // (text, is_user)
+
+            // Add history messages
+            for (const auto& msg : chat_history_) {
+                const auto wrapped = WrapUtf8Lines(msg.text, kBodyCharsPerLine - 2, 0);  // -2 for prefix
+                for (const auto& line : wrapped) {
+                    chat_lines.push_back({line, msg.role == ChatRole::User});
+                }
+                // Add separator line between messages (optional, saves space if skipped)
+                // chat_lines.push_back({"", false});  // empty separator
             }
-            texts.push_back({"Prompt", 12, kPromptTitleY, 16});
-            texts.push_back({single_line(status_display, 16), 228, kPromptTitleY, 16});
 
-            const auto prompt_lines = SliceLines(WrapText(BuildPromptBody(), kBodyCharsPerLine), 0, kPromptVisibleLines);
-            int y = kPromptBodyY;
-            for (const auto& line : prompt_lines) {
-                texts.push_back({line, 12, y, 16});
-                y += kLineHeight;
+            // Add current transient content if not in idle state
+            if (phase_ == Phase::Recording || phase_ == Phase::Transcribing) {
+                // Show status during recording/transcribing
+                std::string status_msg = GetPhaseLabel();
+                if (!transcript_text_.empty()) {
+                    status_msg = transcript_text_;  // Show partial transcript
+                }
+                const auto wrapped = WrapUtf8Lines(status_msg, kBodyCharsPerLine - 2, 0);
+                for (const auto& line : wrapped) {
+                    chat_lines.push_back({line, true});  // User input in progress
+                }
+            } else if (phase_ == Phase::Running && !latest_assistant_text_.empty()) {
+                // Show AI response in progress
+                const auto wrapped = WrapUtf8Lines(latest_assistant_text_, kBodyCharsPerLine - 2, 0);
+                for (const auto& line : wrapped) {
+                    chat_lines.push_back({line, false});  // AI response
+                }
+            } else if (has_pending_transcript_ && !transcript_text_.empty()) {
+                // Show pending transcript awaiting action
+                const auto wrapped = WrapUtf8Lines(transcript_text_, kBodyCharsPerLine - 2, 0);
+                for (const auto& line : wrapped) {
+                    chat_lines.push_back({line, true});  // User message pending
+                }
+            } else if (chat_history_.empty()) {
+                // No history yet, show hint
+                std::string hint = hint_text_.empty() ? "Hold BOOT to talk" : hint_text_;
+                const auto wrapped = WrapUtf8Lines(hint, kBodyCharsPerLine, kChatVisibleLines);
+                for (const auto& line : wrapped) {
+                    chat_lines.push_back({line, false});  // Hint is like system message
+                }
             }
 
-            texts.push_back({"Reply", 12, kReplyTitleY, 16});
-            texts.push_back({single_line(cli_status_text_.empty() ? std::string(GetToolLabel()) + " idle" : cli_status_text_, 16), 228, kReplyTitleY, 16});
+            // Auto-scroll to bottom (show latest messages)
+            const int total_lines = static_cast<int>(chat_lines.size());
+            const int max_offset = std::max(0, total_lines - static_cast<int>(kChatVisibleLines));
+            // Allow user scroll offset to override, but clamp to valid range
+            const int display_offset = std::clamp(summary_scroll_offset_, 0, max_offset);
+            summary_scroll_offset_ = display_offset;  // Store for next iteration
 
-            const auto reply_lines = WrapText(BuildReplyBody(), kBodyCharsPerLine);
-            const int summary_offset = std::clamp(
-                summary_scroll_offset_,
-                0,
-                std::max(0, static_cast<int>(reply_lines.size()) - static_cast<int>(kReplyVisibleLines)));
-            const auto assistant_lines = SliceLines(reply_lines, summary_offset, kReplyVisibleLines);
-            y = kReplyBodyY;
-            for (const auto& line : assistant_lines) {
-                texts.push_back({line, 12, y, 16});
+            // Render lines with alignment
+            int y = kChatStartY;
+            for (int i = display_offset; i < total_lines && y < kChatEndY; ++i) {
+                const auto& [line, is_user] = chat_lines[i];
+                std::string display_line;
+                int x_pos;
+                if (is_user) {
+                    // User message: prefix ">", right-aligned
+                    display_line = ">" + line;
+                    // Right-align: calculate x position based on line length
+                    // Each char ~8px (16px font), screen width 400, right margin ~10
+                    x_pos = std::max(12, static_cast<int>(400 - 10 - display_line.size() * 8));
+                } else {
+                    // AI/system message: prefix "<", left-aligned
+                    display_line = "<" + line;
+                    x_pos = 12;
+                }
+                texts.push_back({display_line, x_pos, y, 16});
                 y += kLineHeight;
             }
         }
@@ -2597,15 +2758,19 @@ void LanMicApp::UpdateDisplay() {
         }
     }
 
-    texts.push_back({GetFooterText(), 12, kFooterTextY, 16});
+    const std::string footer_text = GetFooterText();
+    if (!footer_text.empty()) {
+        texts.push_back({footer_text, 12, kFooterTextY, 16});
+    }
 
     display_->DrawTexts(texts, true);
     DrawHorizontalLine(kStatusBarBottomY);
     DrawHorizontalLine(kHeaderLineY);
-    if (active_page_ == Page::Summary) {
-        DrawHorizontalLine(kPromptDividerY);
+    // Summary page now uses full chat area, no prompt divider needed
+    // Only draw footer separator when footer is visible
+    if (!footer_text.empty()) {
+        DrawHorizontalLine(kFooterTopY);
     }
-    DrawHorizontalLine(kFooterTopY);
     DrawWifiIcon(10, 8);
     DrawBatteryIcon(382, 12, battery_known_ ? battery_level_ : 0, battery_charging_);
     display_->RequestUrgentRefresh();
@@ -2715,14 +2880,14 @@ void LanMicApp::Run() {
         if (down_long_pressed_.exchange(false)) {
             if (IsNavButtonPressed(TODO_UP_BUTTON_GPIO)) {
                 EnterWifiSetupMode();
-            } else if (active_page_ == Page::Log) {
-                EnterSettings();
-            } else if (active_page_ == Page::Settings) {
-                SwitchPage(Page::Todo);
+            } else if (active_page_ == Page::Summary) {
+                SwitchPage(Page::Todo);      // Summary → Todo
             } else if (active_page_ == Page::Todo) {
-                SwitchPage(Page::Summary);  // Todo → Live
-            } else {
-                SwitchPage(Page::Log);  // Live (Summary) → Log
+                SwitchPage(Page::Log);       // Todo → Log
+            } else if (active_page_ == Page::Log) {
+                EnterSettings();             // Log → Settings
+            } else if (active_page_ == Page::Settings) {
+                SwitchPage(Page::Summary);   // Settings → Summary
             }
         }
 

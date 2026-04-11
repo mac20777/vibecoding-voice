@@ -15,6 +15,7 @@ import { getUserTodoListPath } from "./paths.mjs";
 import { ClaudeSessionManager } from "./claude-session.mjs";
 import { CodexSessionManager } from "./codex-session.mjs";
 import { transcribePcm16Mono } from "./stt.mjs";
+import { synthesizeLongText } from "./tts.mjs";
 import { createTodoAssistant } from "./todo-assistant.mjs";
 import { createTodoService, VALID_VOICE_MODES } from "./todo-service.mjs";
 import { injectText } from "./text-injector.mjs";
@@ -431,8 +432,58 @@ function setCliState(patch) {
 }
 
 function setCliSummary(patch) {
+  const wasRunning = cliView.phase === "running";
+  const previousAssistantText = cliView.latestAssistantText;
   Object.assign(cliView, patch);
   broadcastCliSummary();
+
+  // Trigger TTS when AI reply completes (phase transitions to idle with new assistant text)
+  if (wasRunning && patch.phase === "idle" && patch.latestAssistantText &&
+      patch.latestAssistantText !== previousAssistantText && config.ttsEnabled) {
+    triggerTtsForReply(patch.latestAssistantText);
+  }
+}
+
+/**
+ * Synthesize TTS audio and broadcast to all connected clients
+ * @param {string} text - Text to synthesize
+ */
+async function triggerTtsForReply(text) {
+  if (!text || text.trim().length === 0 || !config.dashscopeApiKey) {
+    return;
+  }
+
+  log("[TTS] Synthesizing reply:", text.substring(0, 50) + "...");
+
+  try {
+    const audioBuffer = await synthesizeLongText(text, config);
+    if (audioBuffer && audioBuffer.length > 0) {
+      log("[TTS] Audio synthesized, size:", audioBuffer.length, "bytes");
+      // Broadcast audio to all connected WebSocket clients
+      broadcastBinary(audioBuffer, "tts_audio");
+    }
+  } catch (error) {
+    log("[TTS] Error:", error.message);
+  }
+}
+
+/**
+ * Broadcast binary audio data with a message type prefix
+ * @param {Buffer} buffer - Audio buffer
+ * @param {string} messageType - Message type identifier
+ */
+function broadcastBinary(buffer, messageType) {
+  // Send as binary with a small header containing the message type
+  const header = Buffer.from(JSON.stringify({ type: messageType, format: "pcm16", sampleRate: 16000 }));
+  const headerLen = Buffer.alloc(2);
+  headerLen.writeUInt16BE(header.length);
+  const message = Buffer.concat([headerLen, header, buffer]);
+
+  for (const ws of wss.clients) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(message);
+    }
+  }
 }
 
 function applyRateLimitSnapshot(snapshot) {
