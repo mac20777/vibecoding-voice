@@ -1310,7 +1310,7 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
                 status_text_ = "Ready to send";
                 has_pending_transcript_ = true;
                 active_page_ = Page::Summary;
-                summary_scroll_offset_ = 0;
+                // 不重置滚动位置，保持显示最新消息
             } else if (strcmp(status, "typed") == 0) {
                 const bool text_injector = send_target_ == "text_injector";
                 phase_ = text_injector ? Phase::Idle : Phase::Running;
@@ -1617,7 +1617,9 @@ void LanMicApp::PlayTtsAudio(const int16_t* pcm_data, size_t samples) {
 
     // Use codec's OutputData method to play audio
     // Process in chunks to avoid large memory allocations
-    constexpr size_t kChunkSize = 1024;
+    // Chunk size: 512 samples = 32ms at 16kHz, delay should match playback time
+    constexpr size_t kChunkSize = 512;
+    constexpr int kChunkDurationMs = 32;  // 512 samples / 16000 Hz * 1000
     size_t offset = 0;
 
     while (offset < samples) {
@@ -1625,8 +1627,12 @@ void LanMicApp::PlayTtsAudio(const int16_t* pcm_data, size_t samples) {
         std::vector<int16_t> chunk_data(pcm_data + offset, pcm_data + offset + chunk_samples);
         codec_->OutputData(chunk_data);
         offset += chunk_samples;
-        vTaskDelay(pdMS_TO_TICKS(10));  // Small delay to allow DMA to process
+        // Delay should be slightly longer than chunk duration to allow DMA to complete
+        vTaskDelay(pdMS_TO_TICKS(kChunkDurationMs + 5));
     }
+
+    // Wait for final playback to complete
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     ESP_LOGI(kTag, "TTS playback complete");
 }
@@ -3374,8 +3380,8 @@ void LanMicApp::UpdateDisplay() {
 
             // Add history messages
             for (const auto& msg : chat_history_) {
-                // 根据角色添加前缀标识
-                const std::string prefix = msg.role == ChatRole::User ? "我: " : "AI: ";
+                // 根据角色添加前缀标识（英文）
+                const std::string prefix = msg.role == ChatRole::User ? "User: " : "LLM: ";
                 const auto wrapped = WrapUtf8Lines(msg.text, kBodyCharsPerLine - prefix.size(), 0);
                 for (const auto& line : wrapped) {
                     chat_lines.push_back({prefix + line, msg.role == ChatRole::User});
@@ -3387,7 +3393,7 @@ void LanMicApp::UpdateDisplay() {
                 // 录音状态：右侧显示 "正在录音..." + 实时文本
                 std::string recording_text = "正在录音...";
                 if (!transcript_text_.empty()) {
-                    recording_text = "我: " + transcript_text_;
+                    recording_text = "User: " + transcript_text_;
                 }
                 const auto wrapped = WrapUtf8Lines(recording_text, kBodyCharsPerLine, 0);
                 for (const auto& line : wrapped) {
@@ -3397,7 +3403,7 @@ void LanMicApp::UpdateDisplay() {
                 // 识别状态：右侧显示识别中
                 std::string transcribing_text = "识别中...";
                 if (!transcript_text_.empty()) {
-                    transcribing_text = "我: " + transcript_text_;
+                    transcribing_text = "User: " + transcript_text_;
                 }
                 const auto wrapped = WrapUtf8Lines(transcribing_text, kBodyCharsPerLine, 0);
                 for (const auto& line : wrapped) {
@@ -3407,7 +3413,7 @@ void LanMicApp::UpdateDisplay() {
                 // AI 正在处理：左侧显示 "正在思考..." 或实时回复
                 std::string thinking_text = "正在思考...";
                 if (!latest_assistant_text_.empty()) {
-                    thinking_text = "AI: " + latest_assistant_text_;
+                    thinking_text = "LLM: " + latest_assistant_text_;
                 }
                 const auto wrapped = WrapUtf8Lines(thinking_text, kBodyCharsPerLine, 0);
                 for (const auto& line : wrapped) {
@@ -3415,7 +3421,7 @@ void LanMicApp::UpdateDisplay() {
                 }
             } else if (has_pending_transcript_ && !transcript_text_.empty()) {
                 // 待发送文本：右侧显示
-                const auto wrapped = WrapUtf8Lines("我: " + transcript_text_, kBodyCharsPerLine, 0);
+                const auto wrapped = WrapUtf8Lines("User: " + transcript_text_, kBodyCharsPerLine, 0);
                 for (const auto& line : wrapped) {
                     chat_lines.push_back({line, true});
                 }
