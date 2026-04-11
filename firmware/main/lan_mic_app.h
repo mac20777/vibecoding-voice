@@ -64,7 +64,8 @@ private:
         Summary,
         Todo,
         Log,
-        Settings
+        Settings,
+        Countdown   // 倒计时页面
     };
     enum class VoiceMode {
         Normal,
@@ -90,6 +91,18 @@ private:
         ChatRole role;
         std::string text;
     };
+    // 倒计时状态
+    struct CountdownState {
+        int duration_seconds = 0;       // 总时长（秒）
+        int remaining_seconds = 0;      // 剩余时间（秒）
+        std::string label;              // 事项标签（如"泡面"）
+        bool active = false;            // 是否正在进行
+        bool alarming = false;          // 是否正在提醒（归零后）
+        int alarm_count = 0;            // 提醒次数（最多5次）
+        int64_t started_at_ms = 0;      // 开始时间戳
+        int64_t last_alarm_at_ms = 0;   // 上次提醒时间戳
+    };
+    CountdownState countdown_state_;
     enum class PendingTodoOpType {
         Toggle,
         Delete
@@ -100,12 +113,15 @@ private:
         bool completed = false;
     };
 
-    // Settings page state
-    static constexpr int kSettingsItemCount = 4;
-    static constexpr int kSettingsItemVolume   = 0;
-    static constexpr int kSettingsItemWifi     = 1;
-    static constexpr int kSettingsItemRestart  = 2;
-    static constexpr int kSettingsItemPowerOff = 3;
+    // Settings page state - 扁平化菜单设计
+    // 网络管理: Wi-Fi状态, 服务状态
+    // 系统控制: 音量调节, 重启设备, 关机
+    static constexpr int kSettingsItemCount = 5;
+    static constexpr int kSettingsItemWifi     = 0;   // Wi-Fi 控制
+    static constexpr int kSettingsItemServer   = 1;   // 服务控制
+    static constexpr int kSettingsItemVolume   = 2;   // 音量调节
+    static constexpr int kSettingsItemRestart  = 3;   // 重启设备
+    static constexpr int kSettingsItemPowerOff = 4;   // 关机
     int settings_selected_item_ = 0;
     bool settings_editing_volume_ = false;
     int volume_ = 70;
@@ -211,6 +227,14 @@ private:
     void QueueOfflineTodoDelete(const TodoItem& item);
     void FlushPendingTodoOps();
     void LoadCachedTodoState();
+    // 倒计时功能
+    void TryExtractTimerJson(const char* text);
+    void StartCountdown(int duration_seconds, const std::string& label);
+    void StopCountdown();
+    void UpdateCountdown();
+    void TriggerCountdownAlarm();
+    void HandleCountdownInput(bool any_key);
+    std::string FormatCountdownTime(int seconds) const;
     void SaveCachedTodoState();
     void LoadPendingTodoOps();
     void SavePendingTodoOps();

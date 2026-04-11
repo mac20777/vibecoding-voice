@@ -99,30 +99,78 @@ constexpr int kFooterTextY = 276;
 constexpr int kLineHeight = 18;
 constexpr int kBatteryPollIntervalMs = 15000;
 constexpr size_t kCachedTodoStateMaxBytes = 3500;
-constexpr uint8_t kWifiIcon12x12[] = {
-    0x00, 0x00,
-    0x03, 0xC0,
-    0x0C, 0x30,
-    0x10, 0x08,
-    0x03, 0xC0,
-    0x04, 0x20,
-    0x08, 0x10,
-    0x01, 0x80,
-    0x02, 0x40,
-    0x00, 0x00,
-    0x00, 0x00,
-    0x00, 0x00,
+// WiFi 状态图标 (12x12) - 三种状态
+// 已连接: 实心波形
+constexpr uint8_t kWifiIconConnected12x12[] = {
+    0x00, 0x00,  // row 0
+    0x03, 0xC0,  // row 1: 顶部波形
+    0x0F, 0xF0,  // row 2: 填充
+    0x1F, 0xF8,  // row 3: 填充
+    0x3F, 0xFC,  // row 4: 填充
+    0x7F, 0xFE,  // row 5: 填充
+    0x3F, 0xFC,  // row 6: 填充
+    0x1F, 0xF8,  // row 7: 填充
+    0x0F, 0xF0,  // row 8: 填充
+    0x07, 0xE0,  // row 9: 底部实心点
+    0x07, 0xE0,  // row 10: 实心点
+    0x00, 0x00,  // row 11
 };
 
-constexpr uint8_t kBatteryIcon14x8[] = {
-    0xFF, 0xFC,
-    0x80, 0x04,
-    0x80, 0x04,
-    0x80, 0x04,
-    0x80, 0x04,
-    0x80, 0x04,
-    0x80, 0x04,
-    0xFF, 0xFC,
+// 未连接: 波形 + 叉号
+constexpr uint8_t kWifiIconDisconnected12x12[] = {
+    0x00, 0x00,  // row 0
+    0x03, 0xC0,  // row 1: 顶部波形（空心）
+    0x0C, 0x30,  // row 2: 空心
+    0x10, 0x08,  // row 3: 空心
+    0x03, 0xC0,  // row 4: 中间波形
+    0x04, 0x20,  // row 5: 空心
+    0x08, 0x10,  // row 6: 空心
+    0x01, 0x80,  // row 7: 底部小点
+    0x02, 0x40,  // row 8: 叉号左上
+    0x04, 0x20,  // row 9: 叉号中心
+    0x08, 0x10,  // row 10: 叉号右下
+    0x00, 0x00,  // row 11
+};
+
+// 连接中: 波形 + 问号（用于闪烁显示）
+constexpr uint8_t kWifiIconConnecting12x12[] = {
+    0x00, 0x00,  // row 0
+    0x03, 0xC0,  // row 1: 顶部波形
+    0x0C, 0x30,  // row 2: 空心
+    0x10, 0x08,  // row 3: 空心
+    0x03, 0xC0,  // row 4: 中间波形
+    0x0C, 0x30,  // row 5: 问号顶部圆弧
+    0x04, 0x20,  // row 6: 问号竖线
+    0x0C, 0x30,  // row 7: 问号底部
+    0x00, 0x00,  // row 8: 空格
+    0x08, 0x10,  // row 9: 问号点
+    0x00, 0x00,  // row 10
+    0x00, 0x00,  // row 11
+};
+
+// 竖向电池图标 (10x18) - 轮廓 + 动态填充
+// 设计: 顶部有充电指示头，主体为竖向柱状条
+constexpr uint8_t kBatteryIconV10x18_outline[] = {
+    // 顶部充电头 (3行)
+    0x30, 0x00,  // row 0:   ██         (充电头)
+    0x78, 0x00,  // row 1:  ████
+    0xFC, 0x00,  // row 2: ██████
+    // 电池主体轮廓 (14行)
+    0xFE, 0x00,  // row 3: ████████  (左边界)
+    0x82, 0x00,  // row 4: █      █
+    0x82, 0x00,  // row 5: █      █
+    0x82, 0x00,  // row 6: █      █
+    0x82, 0x00,  // row 7: █      █
+    0x82, 0x00,  // row 8: █      █
+    0x82, 0x00,  // row 9: █      █
+    0x82, 0x00,  // row 10: █      █
+    0x82, 0x00,  // row 11: █      █
+    0x82, 0x00,  // row 12: █      █
+    0x82, 0x00,  // row 13: █      █
+    0x82, 0x00,  // row 14: █      █
+    0xFE, 0x00,  // row 15: ████████  (底部封闭)
+    0xFE, 0x00,  // row 16: ████████
+    0xFE, 0x00,  // row 17: ████████
 };
 
 std::vector<std::string> WrapUtf8Lines(const std::string& text, size_t max_chars, size_t max_lines = 0) {
@@ -1411,6 +1459,10 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
             while (chat_history_.size() > kMaxChatHistorySize) {
                 chat_history_.erase(chat_history_.begin());
             }
+
+            // 防呆处理：尝试从 AI 回复中提取倒计时 JSON
+            // LLM 可能返回 ```json {"type":"timer"...} ``` 格式
+            TryExtractTimerJson(latest_assistant);
         }
         if (status_line != nullptr) {
             cli_status_text_ = status_line;
@@ -1455,6 +1507,34 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         const char* warning = GetJsonString(root, "warning");
         status_text_ = "Warning";
         hint_text_ = (warning != nullptr) ? warning : "";
+    } else if (strcmp(type, "timer") == 0) {
+        // 智能倒计时：解析 {"type": "timer", "duration": 300, "label": "泡面"}
+        cJSON* duration_json = cJSON_GetObjectItemCaseSensitive(root, "duration");
+        const char* label = GetJsonString(root, "label");
+
+        if (cJSON_IsNumber(duration_json) && duration_json->valueint > 0) {
+            countdown_state_.duration_seconds = duration_json->valueint;
+            countdown_state_.remaining_seconds = duration_json->valueint;
+            countdown_state_.label = label != nullptr ? label : "";
+            countdown_state_.active = true;
+            countdown_state_.alarming = false;
+            countdown_state_.alarm_count = 0;
+            countdown_state_.started_at_ms = esp_timer_get_time() / 1000;
+            countdown_state_.last_alarm_at_ms = 0;
+
+            // 切换到倒计时页面
+            active_page_ = Page::Countdown;
+            phase_ = Phase::Idle;
+            status_text_ = "倒计时";
+            hint_text_ = "按任意键停止";
+
+            ESP_LOGI(kTag, "Timer started: %d seconds, label: %s",
+                     countdown_state_.duration_seconds, countdown_state_.label.c_str());
+
+            // 开始倒计时提示音
+            PlayBeep(880, 100);
+            PlayBeep(1100, 150);
+        }
     }
 
     cJSON_Delete(root);
@@ -2224,6 +2304,172 @@ void LanMicApp::SaveVolume() {
     nvs.SetInt(kVolumeKey, volume_);
 }
 
+// ============================================================
+// 倒计时功能实现
+// ============================================================
+
+void LanMicApp::TryExtractTimerJson(const char* text) {
+    if (text == nullptr || strlen(text) == 0) {
+        return;
+    }
+
+    std::string str(text);
+
+    // 防呆处理：剥离 Markdown 标签
+    // 1. 移除 ```json 开头标签
+    size_t pos = str.find("```json");
+    if (pos != std::string::npos) {
+        str.erase(pos, 7);  // 删除 "```json"
+    }
+    // 2. 移除 ``` 结尾标签
+    pos = str.find("```");
+    while (pos != std::string::npos) {
+        str.erase(pos, 3);
+        pos = str.find("```", pos);
+    }
+
+    // 3. 搜索 {" 开始位置和 } 结束位置
+    size_t start = str.find("{\"");
+    if (start == std::string::npos) {
+        // 尝试不带引号的格式
+        start = str.find("{");
+        if (start == std::string::npos) {
+            return;
+        }
+    }
+
+    // 找到最后一个 } 作为结束位置
+    size_t end = str.rfind("}");
+    if (end == std::string::npos || end <= start) {
+        return;
+    }
+
+    // 截取有效 JSON 内容
+    std::string json_str = str.substr(start, end - start + 1);
+
+    ESP_LOGI(kTag, "Extracted timer JSON: %s", json_str.c_str());
+
+    // 解析 JSON
+    cJSON* root = cJSON_Parse(json_str.c_str());
+    if (root == nullptr) {
+        ESP_LOGW(kTag, "Failed to parse extracted timer JSON");
+        return;
+    }
+
+    // 检查是否为 timer 类型
+    const char* type = GetJsonString(root, "type");
+    if (type == nullptr || strcmp(type, "timer") != 0) {
+        cJSON_Delete(root);
+        return;
+    }
+
+    // 获取 duration 和 label
+    cJSON* duration_json = cJSON_GetObjectItemCaseSensitive(root, "duration");
+    const char* label = GetJsonString(root, "label");
+
+    if (cJSON_IsNumber(duration_json) && duration_json->valueint > 0) {
+        StartCountdown(duration_json->valueint, label != nullptr ? label : "");
+    }
+
+    cJSON_Delete(root);
+}
+
+void LanMicApp::StartCountdown(int duration_seconds, const std::string& label) {
+    countdown_state_.duration_seconds = duration_seconds;
+    countdown_state_.remaining_seconds = duration_seconds;
+    countdown_state_.label = label;
+    countdown_state_.active = true;
+    countdown_state_.alarming = false;
+    countdown_state_.alarm_count = 0;
+    countdown_state_.started_at_ms = esp_timer_get_time() / 1000;
+    countdown_state_.last_alarm_at_ms = 0;
+
+    // 切换到倒计时页面
+    active_page_ = Page::Countdown;
+    phase_ = Phase::Idle;
+    status_text_ = "倒计时";
+    hint_text_ = "按任意键停止";
+
+    ESP_LOGI(kTag, "Countdown started: %d seconds, label: '%s'",
+             duration_seconds, label.c_str());
+
+    // 开始提示音
+    PlayBeep(880, 100);
+    PlayBeep(1100, 150);
+
+    UpdateDisplay();
+}
+
+void LanMicApp::StopCountdown() {
+    countdown_state_.active = false;
+    countdown_state_.alarming = false;
+    countdown_state_.alarm_count = 0;
+
+    // 返回对话页面
+    active_page_ = Page::Summary;
+    status_text_ = "倒计时已停止";
+    hint_text_ = "";
+
+    ESP_LOGI(kTag, "Countdown stopped");
+
+    // 停止提示音
+    PlayBeep(400, 200);
+
+    UpdateDisplay();
+}
+
+void LanMicApp::UpdateCountdown() {
+    if (!countdown_state_.active || countdown_state_.alarming) {
+        return;
+    }
+
+    const int64_t now_ms = esp_timer_get_time() / 1000;
+    const int64_t elapsed_ms = now_ms - countdown_state_.started_at_ms;
+    const int elapsed_seconds = static_cast<int>(elapsed_ms / 1000);
+
+    countdown_state_.remaining_seconds =
+        countdown_state_.duration_seconds - elapsed_seconds;
+
+    // 归零时触发提醒
+    if (countdown_state_.remaining_seconds <= 0) {
+        countdown_state_.remaining_seconds = 0;
+        countdown_state_.alarming = true;
+        countdown_state_.last_alarm_at_ms = now_ms;
+        TriggerCountdownAlarm();
+    }
+}
+
+void LanMicApp::TriggerCountdownAlarm() {
+    ESP_LOGI(kTag, "Countdown alarm triggered, count: %d", countdown_state_.alarm_count);
+
+    // 播放提示音（叮/哔）
+    PlayBeep(1200, 150);
+    PlayBeep(1400, 200);
+    PlayBeep(1200, 150);
+
+    countdown_state_.alarm_count++;
+
+    // 更新显示
+    UpdateDisplay();
+}
+
+void LanMicApp::HandleCountdownInput(bool any_key) {
+    if (any_key) {
+        // 任意键停止提醒或倒计时
+        StopCountdown();
+    }
+}
+
+std::string LanMicApp::FormatCountdownTime(int seconds) const {
+    int mins = seconds / 60;
+    int secs = seconds % 60;
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%02d:%02d", mins, secs);
+    return std::string(buf);
+}
+
+// ============================================================
+
 void LanMicApp::Shutdown() {
     DisconnectWebSocket();
     status_text_ = "Power off...";
@@ -2266,20 +2512,51 @@ void LanMicApp::HandleSettingsInput(bool up_click, bool down_click, bool boot_pr
 
 void LanMicApp::ExecuteSettingsItem(int item) {
     switch (item) {
+        case kSettingsItemWifi:
+            // Wi-Fi 控制：进入 WiFi 配置模式或断开重连
+            if (IsWifiConnected()) {
+                // 已连接时断开 WiFi
+                status_text_ = "断开 Wi-Fi...";
+                UpdateDisplay();
+                DisconnectWebSocket();
+                // WiFi 断开逻辑由 board 处理
+            } else {
+                // 未连接时进入 WiFi 配置模式
+                EnterWifiSetupMode();
+            }
+            break;
+        case kSettingsItemServer:
+            // 服务控制：重新连接服务器
+            if (IsServerConnected()) {
+                // 已连接时断开
+                status_text_ = "断开服务...";
+                hint_text_ = "";
+                DisconnectWebSocket();
+                phase_ = Phase::Idle;
+            } else if (IsWifiConnected()) {
+                // WiFi 已连接但服务未连接：重连
+                RequestReconnect("重连服务...");
+            } else {
+                // 无 WiFi：提示先连接 WiFi
+                status_text_ = "无 Wi-Fi";
+                hint_text_ = "请先连接 Wi-Fi";
+            }
+            UpdateDisplay();
+            break;
         case kSettingsItemVolume:
+            // 音量调节：进入调节模式
             settings_editing_volume_ = true;
             UpdateDisplay();
             break;
-        case kSettingsItemWifi:
-            EnterWifiSetupMode();
-            break;
         case kSettingsItemRestart:
-            status_text_ = "Restarting...";
+            // 重启设备
+            status_text_ = "重启中...";
             UpdateDisplay();
             vTaskDelay(pdMS_TO_TICKS(500));
             esp_restart();
             break;
         case kSettingsItemPowerOff:
+            // 关机
             Shutdown();
             break;
         default:
@@ -2321,9 +2598,9 @@ const char* LanMicApp::GetModeLabel() const {
 std::string LanMicApp::GetPhaseLabel() const {
     switch (phase_) {
         case Phase::Recording:
-            return "录制中...";
+            return "录音...";
         case Phase::Transcribing:
-            return "...识别中...";
+            return "识别...";
         case Phase::AwaitingAction:
             return "? 发送?";
         case Phase::Running:
@@ -2352,32 +2629,35 @@ void LanMicApp::ShowIdleTodoPage() {
 }
 
 std::string LanMicApp::GetFooterText() const {
+    // 倒计时页面不显示底部 footer（已内置提示）
+    if (active_page_ == Page::Countdown) {
+        return "";
+    }
     // Hide footer on Summary (AI chat) page for cleaner chat UI
     if (active_page_ == Page::Summary && !has_pending_transcript_ && phase_ != Phase::Recording && !todo_menu_open_) {
         return "";
     }
     if (has_pending_transcript_) {
-        return "BOOT Add | UP Send | DN Undo";
+        return "BOOT 继续 | UP 发送 | DN 取消";
     }
     if (phase_ == Phase::Recording) {
-        return "Release BOOT to stop";
+        return "松开 BOOT 结束录音";
     }
     if (network_state_ == NetworkState::Config) {
-        return "Join AP then open 192.168.4.1";
+        return "连接 AP 后访问 192.168.4.1";
     }
     if (todo_menu_open_) {
-        return "UP/DN Menu | BOOT OK";
+        return "UP/DN 选择 | BOOT 确认";
     }
     if (active_page_ == Page::Settings) {
-        return settings_editing_volume_ ? "UP/DN ±10 | BOOT Save"
-                                        : "UP/DN Nav | BOOT OK | HoldUP Back";
+        return "";  // 设置页面已内置提示，不显示 footer
     }
     if (active_page_ == Page::Todo) {
         return IsServerConnected()
-            ? "Hold UP Menu | Hold Todo"
-            : "Hold UP Menu | UP/DN Pick";
+            ? "长按 UP 菜单 | 长按 Todo"
+            : "长按 UP 菜单 | UP/DN 选择";
     }
-    return "UP/DN Scroll | Hold UP | HoldDN Set";
+    return "UP/DN 滚动 | 长按 切换页";
 }
 
 std::string LanMicApp::BuildPromptBody() const {
@@ -2497,7 +2777,36 @@ void LanMicApp::DrawWifiIcon(int x, int y) {
     if (display_ == nullptr) {
         return;
     }
-    display_->WriteRaw1bpp(x, y, 12, 12, kWifiIcon12x12, sizeof(kWifiIcon12x12));
+    // 根据 WiFi 连接状态选择不同图标
+    const uint8_t* icon_data = nullptr;
+    size_t icon_len = 0;
+
+    // 判断 WiFi 是否已连接
+    const bool wifi_connected = IsWifiConnected();
+    const bool server_connected = IsServerConnected();
+
+    if (!wifi_connected) {
+        // WiFi 未连接：显示带叉图标
+        icon_data = kWifiIconDisconnected12x12;
+        icon_len = sizeof(kWifiIconDisconnected12x12);
+    } else if (wifi_connected && !server_connected) {
+        // WiFi 已连接但服务器未连接：显示连接中图标（闪烁效果）
+        const int64_t now_ms = esp_timer_get_time() / 1000;
+        const bool blink_on = (now_ms / 500) % 2 == 0;  // 每 500ms 交替
+        if (blink_on) {
+            icon_data = kWifiIconConnecting12x12;
+            icon_len = sizeof(kWifiIconConnecting12x12);
+        } else {
+            icon_data = kWifiIconDisconnected12x12;
+            icon_len = sizeof(kWifiIconDisconnected12x12);
+        }
+    } else {
+        // 服务器已连接：显示实心图标
+        icon_data = kWifiIconConnected12x12;
+        icon_len = sizeof(kWifiIconConnected12x12);
+    }
+
+    display_->WriteRaw1bpp(x, y, 12, 12, icon_data, icon_len);
 }
 
 void LanMicApp::DrawBatteryIcon(int x, int y, int level, bool charging) {
@@ -2505,25 +2814,40 @@ void LanMicApp::DrawBatteryIcon(int x, int y, int level, bool charging) {
         return;
     }
 
-    std::vector<uint8_t> buffer(kBatteryIcon14x8, kBatteryIcon14x8 + sizeof(kBatteryIcon14x8));
-    const int fill_columns = std::clamp((level * 10) / 100, 0, 10);
-    for (int row = 1; row <= 6; ++row) {
-        for (int col = 1; col <= fill_columns; ++col) {
-            const int bit_index = row * 16 + col;
-            buffer[bit_index >> 3] |= static_cast<uint8_t>(1U << (7 - (bit_index & 7)));
+    // 竖向电池图标 (10x18)
+    std::vector<uint8_t> buffer(kBatteryIconV10x18_outline,
+                                 kBatteryIconV10x18_outline + sizeof(kBatteryIconV10x18_outline));
+
+    // 计算填充高度 (电池主体从 row 3 到 row 14, 共 12 行可填充)
+    // level 0-100 映射到 0-12 行
+    const int fill_rows = std::clamp((level * 12) / 100, 0, 12);
+
+    // 从底部向上填充 (row 14 开始向上)
+    for (int i = 0; i < fill_rows; ++i) {
+        const int row = 14 - i;  // 从 row 14 向上
+        if (row >= 3 && row <= 14) {
+            // 填充内部区域 (bit 1-6, 即 x=1 到 x=6)
+            buffer[row] |= 0x7C;  // ██████ 内部填充 (bit 1-6)
         }
     }
+
+    // 充电状态：在填充区域显示闪电符号（覆盖部分填充）
     if (charging) {
-        for (int row = 2; row <= 5; ++row) {
-            const int bit_index = row * 16 + 5;
-            buffer[bit_index >> 3] |= static_cast<uint8_t>(1U << (7 - (bit_index & 7)));
-        }
-        for (int col = 4; col <= 6; ++col) {
-            const int bit_index = 4 * 16 + col;
-            buffer[bit_index >> 3] |= static_cast<uint8_t>(1U << (7 - (bit_index & 7)));
+        // 闪电符号在电池中央 (row 7-11)
+        buffer[7]  |= 0x10;  // 闪电顶部
+        buffer[8]  |= 0x38;  // 闪电中部上
+        buffer[9]  |= 0x1C;  // 闪电中部下
+        buffer[10] |= 0x08;  // 闪电底部
+    }
+
+    // 低电量警告 (<20%): 反白显示整个图标
+    if (level < 20 && !charging) {
+        for (size_t i = 0; i < buffer.size(); ++i) {
+            buffer[i] = ~buffer[i];  // 反白
         }
     }
-    display_->WriteRaw1bpp(x, y, 14, 8, buffer.data(), buffer.size());
+
+    display_->WriteRaw1bpp(x, y, 10, 18, buffer.data(), buffer.size());
 }
 
 void LanMicApp::UpdateDisplay() {
@@ -2554,22 +2878,43 @@ void LanMicApp::UpdateDisplay() {
         quota_status_text = "5H:" + q5 + " 7d:" + qw;
     }
 
+    // 状态栏布局优化
+    // WiFi 图标: x=10, y=6 (12x12)
+    // 网络状态文本: x=28, y=9
+    // Phase 标签: x=150, y=9
+    // 电池百分比: x=352, y=8 (格式: "85%")
+    // 电池图标: x=380, y=4 (竖向 10x18)
+
     texts.push_back({GetNetworkLabel(), 28, 9, 16});
-    // Only show "TODO" label in Todo page, Summary (AI chat) page doesn need "LIVE" display
-    if (active_page_ == Page::Todo || offline_todo_mode_) {
-        texts.push_back({"TODO", 96, 9, 16});
+
+    // 显示服务状态（在 WiFi 已连接但服务器未连接时显示）
+    if (IsWifiConnected() && !IsServerConnected() && !offline_todo_mode_) {
+        texts.push_back({"服务离线", 96, 9, 16});
     }
-    texts.push_back({GetPhaseLabel(), 166, 9, 16});
-    if (!quota_status_text.empty()) {
-        texts.push_back({quota_status_text, 250, 9, 16});
+
+    texts.push_back({GetPhaseLabel(), 150, 9, 16});
+
+    // 电池百分比显示（格式: "85%" 或 "--%"）
+    std::string battery_pct_text = battery_known_ ?
+        std::to_string(std::clamp(battery_level_, 0, 100)) + "%" : "--%";
+    // 低电量警告时加叹号
+    if (battery_known_ && battery_level_ < 20 && !battery_charging_) {
+        battery_pct_text = "!" + battery_pct_text;
     }
-    texts.push_back({battery_text, 346, 9, 16});
-    const char* page_label = active_page_ == Page::Summary ? "Live"
+    texts.push_back({battery_pct_text, 352, 8, 16});
+
+    const char* page_label = active_page_ == Page::Summary ? "对话"
                            : active_page_ == Page::Todo    ? "Todo"
-                           : active_page_ == Page::Log     ? "Log"
-                           :                                 "Settings";
-    texts.push_back({single_line(repo_name_.empty() ? "Codex" : repo_name_, 18), 12, kContentHeaderY, 16});
+                           : active_page_ == Page::Log     ? "日志"
+                           : active_page_ == Page::Countdown ? "倒计时"
+                           :                                 "设置";
+    texts.push_back({single_line(repo_name_.empty() ? "AI" : repo_name_, 18), 12, kContentHeaderY, 16});
     texts.push_back({page_label, 316, kContentHeaderY, 16});
+
+    // 倒计时页面不显示顶部标题行（使用全屏布局）
+    if (active_page_ != Page::Countdown) {
+        // 其他页面正常显示标题行
+    }
 
     if (active_page_ == Page::Summary) {
         if (todo_menu_open_ && todo_menu_kind_ == TodoMenuKind::Live) {
@@ -2588,83 +2933,97 @@ void LanMicApp::UpdateDisplay() {
                 y += kLineHeight;
             }
         } else {
-            // Chat conversation mode: user messages right-aligned, AI messages left-aligned
-            // Calculate available lines for chat display (from kHeaderLineY+2 to bottom)
-            // kHeaderLineY = 62, content starts at ~72, ends at ~264 (footer hidden)
+            // Chat conversation mode: 气泡布局
+            // 用户消息右侧对齐，AI消息左侧对齐
+            // 录音时右侧显示 "正在录音..."，等待回复时左侧显示 "正在思考..."
             constexpr int kChatStartY = 72;  // Start after header line
             constexpr int kChatEndY = 264;   // Before footer (footer hidden on Summary)
             constexpr size_t kChatVisibleLines = (kChatEndY - kChatStartY) / kLineHeight;  // ~10 lines
+            constexpr int kMarginX = 8;      // 左右边距
+            constexpr int kBubblePadding = 2; // 气泡内边距（视觉上通过缩进实现）
 
-            // Build all lines from chat history
+            // Build all lines from chat history with role markers
             std::vector<std::pair<std::string, bool>> chat_lines;  // (text, is_user)
 
             // Add history messages
             for (const auto& msg : chat_history_) {
-                const auto wrapped = WrapUtf8Lines(msg.text, kBodyCharsPerLine - 5, 0);  // -5 for "User: " or "LLM: " prefix
+                // 根据角色添加前缀标识
+                const std::string prefix = msg.role == ChatRole::User ? "我: " : "AI: ";
+                const auto wrapped = WrapUtf8Lines(msg.text, kBodyCharsPerLine - prefix.size(), 0);
                 for (const auto& line : wrapped) {
-                    chat_lines.push_back({line, msg.role == ChatRole::User});
+                    chat_lines.push_back({prefix + line, msg.role == ChatRole::User});
                 }
-                // Add separator line between messages (optional, saves space if skipped)
-                // chat_lines.push_back({"", false});  // empty separator
             }
 
-            // Add current transient content if not in idle state
-            if (phase_ == Phase::Recording || phase_ == Phase::Transcribing) {
-                // Show status during recording/transcribing
-                std::string status_msg = GetPhaseLabel();
+            // Add current transient content with status hints
+            if (phase_ == Phase::Recording) {
+                // 录音状态：右侧显示 "正在录音..." + 实时文本
+                std::string recording_text = "正在录音...";
                 if (!transcript_text_.empty()) {
-                    status_msg = transcript_text_;  // Show partial transcript
+                    recording_text = "我: " + transcript_text_;
                 }
-                const auto wrapped = WrapUtf8Lines(status_msg, kBodyCharsPerLine - 5, 0);  // -5 for "User: " prefix
+                const auto wrapped = WrapUtf8Lines(recording_text, kBodyCharsPerLine, 0);
                 for (const auto& line : wrapped) {
-                    chat_lines.push_back({line, true});  // User input in progress
+                    chat_lines.push_back({line, true});  // User side
                 }
-            } else if (phase_ == Phase::Running && !latest_assistant_text_.empty()) {
-                // Show AI response in progress
-                const auto wrapped = WrapUtf8Lines(latest_assistant_text_, kBodyCharsPerLine - 5, 0);  // -5 for "LLM: " prefix
+            } else if (phase_ == Phase::Transcribing) {
+                // 识别状态：右侧显示识别中
+                std::string transcribing_text = "识别中...";
+                if (!transcript_text_.empty()) {
+                    transcribing_text = "我: " + transcript_text_;
+                }
+                const auto wrapped = WrapUtf8Lines(transcribing_text, kBodyCharsPerLine, 0);
                 for (const auto& line : wrapped) {
-                    chat_lines.push_back({line, false});  // AI response
+                    chat_lines.push_back({line, true});  // User side
+                }
+            } else if (phase_ == Phase::Running) {
+                // AI 正在处理：左侧显示 "正在思考..." 或实时回复
+                std::string thinking_text = "正在思考...";
+                if (!latest_assistant_text_.empty()) {
+                    thinking_text = "AI: " + latest_assistant_text_;
+                }
+                const auto wrapped = WrapUtf8Lines(thinking_text, kBodyCharsPerLine, 0);
+                for (const auto& line : wrapped) {
+                    chat_lines.push_back({line, false});  // AI side
                 }
             } else if (has_pending_transcript_ && !transcript_text_.empty()) {
-                // Show pending transcript awaiting action
-                const auto wrapped = WrapUtf8Lines(transcript_text_, kBodyCharsPerLine - 5, 0);  // -5 for "User: " prefix
+                // 待发送文本：右侧显示
+                const auto wrapped = WrapUtf8Lines("我: " + transcript_text_, kBodyCharsPerLine, 0);
                 for (const auto& line : wrapped) {
-                    chat_lines.push_back({line, true});  // User message pending
+                    chat_lines.push_back({line, true});
                 }
-            } else if (chat_history_.empty()) {
-                // No history yet, show hint
-                std::string hint = hint_text_.empty() ? "Hold BOOT to talk" : hint_text_;
+            } else if (chat_history_.empty() && phase_ == Phase::Idle) {
+                // 无历史记录，显示提示
+                std::string hint = hint_text_.empty() ? "按 BOOT 键开始对话" : hint_text_;
                 const auto wrapped = WrapUtf8Lines(hint, kBodyCharsPerLine, kChatVisibleLines);
                 for (const auto& line : wrapped) {
-                    chat_lines.push_back({line, false});  // Hint is like system message
+                    chat_lines.push_back({line, false});  // System hint on left
                 }
             }
 
             // Auto-scroll to bottom (show latest messages)
             const int total_lines = static_cast<int>(chat_lines.size());
             const int max_offset = std::max(0, total_lines - static_cast<int>(kChatVisibleLines));
-            // Allow user scroll offset to override, but clamp to valid range
-            const int display_offset = std::clamp(summary_scroll_offset_, 0, max_offset);
+            // 新消息时自动滚动到底部（当处于底部位置时）
+            // 只有用户手动上滚时才保持当前位置
+            bool at_bottom = summary_scroll_offset_ >= max_offset - 1 || summary_scroll_offset_ < 0;
+            const int display_offset = at_bottom ? max_offset : std::clamp(summary_scroll_offset_, 0, max_offset);
             summary_scroll_offset_ = display_offset;  // Store for next iteration
 
-            // Render lines with alignment and role prefix
+            // Render lines with bubble-style alignment
             int y = kChatStartY;
             for (int i = display_offset; i < total_lines && y < kChatEndY; ++i) {
                 const auto& [line, is_user] = chat_lines[i];
-                std::string display_line;
                 int x_pos;
                 if (is_user) {
-                    // User message: prefix "User: ", right-aligned with slight indent
-                    display_line = "User: " + line;
-                    // Right-align: calculate x position based on line length
-                    // Each char ~8px (16px font), screen width 400, right margin ~8
-                    x_pos = std::max(8, static_cast<int>(400 - 8 - display_line.size() * 8));
+                    // 用户消息：右对齐（模拟右侧气泡）
+                    // 每字符约 8px 宽度 (16px 字体)
+                    x_pos = std::max(kMarginX, static_cast<int>(400 - kMarginX - line.size() * 8));
                 } else {
-                    // AI/system message: prefix "LLM: ", left-aligned
-                    display_line = "LLM: " + line;
-                    x_pos = 8;
+                    // AI/系统消息：左对齐（模拟左侧气泡）
+                    x_pos = kMarginX;
                 }
-                texts.push_back({display_line, x_pos, y, 16});
+                texts.push_back({line, x_pos, y, 16});
                 y += kLineHeight;
             }
         }
@@ -2746,30 +3105,114 @@ void LanMicApp::UpdateDisplay() {
             y += kLineHeight;
         }
     } else {
-        // Settings page
-        texts.push_back({"Settings", 12, kLogTitleY, 16});
-        if (settings_editing_volume_) {
-            texts.push_back({"UP/DN ±10 BOOT OK", 180, kLogTitleY, 14});
-        }
+        // Settings page - 扁平化汉化菜单
+        texts.push_back({"设置", 12, kLogTitleY, 16});
 
-        // Menu items
-        const std::string vol_label = "Volume: " + std::to_string(volume_) + "%";
-        const char* items[kSettingsItemCount] = {
-            vol_label.c_str(),
-            "Network Reset",
-            "Restart",
-            "Power Off"
-        };
+        // 构建菜单项（全汉化）
+        std::vector<std::string> items;
+
+        // Wi-Fi 状态控制
+        std::string wifi_label;
+        if (network_state_ == NetworkState::Offline) {
+            wifi_label = "Wi-Fi: 未连接";
+        } else if (network_state_ == NetworkState::Config) {
+            wifi_label = "Wi-Fi: 配置模式";
+        } else {
+            wifi_label = IsWifiConnected() ? "Wi-Fi: 已连接" : "Wi-Fi: 连接中";
+        }
+        items.push_back(wifi_label);
+
+        // 服务状态控制
+        std::string server_label;
+        if (!IsWifiConnected()) {
+            server_label = "服务: 无网络";
+        } else if (IsServerConnected()) {
+            server_label = "服务: 在线";
+        } else {
+            server_label = "服务: 离线";
+        }
+        items.push_back(server_label);
+
+        // 音量调节
+        std::string vol_label = "音量: " + std::to_string(volume_) + "%";
+        if (settings_editing_volume_) {
+            vol_label += " [调节中]";
+        }
+        items.push_back(vol_label);
+
+        // 重启设备
+        items.push_back("重启设备");
+
+        // 关机
+        items.push_back("关机");
 
         int y = kLogBodyY;
-        for (int i = 0; i < kSettingsItemCount; ++i) {
-            std::string row = (i == settings_selected_item_) ? "> " : "  ";
+        for (size_t i = 0; i < items.size(); ++i) {
+            std::string row = (static_cast<int>(i) == settings_selected_item_) ? "▶ " : "  ";
             row += items[i];
-            if (i == kSettingsItemVolume && settings_editing_volume_) {
-                row += " *";
-            }
             texts.push_back({row, 12, y, 16});
-            y += kLineHeight * 2;  // extra spacing for readability
+            y += kLineHeight + 4;  // 紧凑间距，提高可读性
+        }
+
+        // 底部操作提示
+        if (!settings_editing_volume_) {
+            texts.push_back({"UP/DN 选择  BOOT 执行", 12, kFooterTextY - 16, 14});
+        } else {
+            texts.push_back({"UP/DN ±10  BOOT 保存", 12, kFooterTextY - 16, 14});
+        }
+    } else {
+        // 倒计时页面 (Page::Countdown)
+        // 中央大号字体显示剩余时间，下方显示事项标签
+
+        // 剩余时间字符串（格式 MM:SS）
+        std::string time_str = FormatCountdownTime(countdown_state_.remaining_seconds);
+
+        // 标签文本
+        std::string label_text = countdown_state_.label.empty() ?
+            "倒计时" : countdown_state_.label;
+
+        // 提醒状态显示
+        std::string status_text;
+        if (countdown_state_.alarming) {
+            status_text = "时间到了！";
+            // 提醒时闪烁效果（时间文字反白）
+            time_str = "★" + time_str + "★";
+        } else {
+            status_text = "进行中...";
+        }
+
+        // 计算居中位置
+        // 400x300 屏幕，时间显示在中央偏上
+        constexpr int kTimeY = 100;      // 时间显示 Y 坐标
+        constexpr int kLabelY = 150;     // 标签显示 Y 坐标
+        constexpr int kStatusY = 180;    // 状态显示 Y 坐标
+        constexpr int kHintY = 240;      // 提示显示 Y 坐标
+
+        // 大号字体显示时间（24px）
+        // 居中：400px宽度，每个字符约12px宽（24px字体）
+        int time_x = (400 - time_str.size() * 12) / 2;
+        time_x = std::max(10, time_x);
+        texts.push_back({time_str, time_x, kTimeY, 24});
+
+        // 标签显示（16px）
+        int label_x = (400 - label_text.size() * 8) / 2;
+        label_x = std::max(10, label_x);
+        texts.push_back({label_text, label_x, kLabelY, 16});
+
+        // 状态显示
+        int status_x = (400 - status_text.size() * 8) / 2;
+        status_x = std::max(10, status_x);
+        texts.push_back({status_text, status_x, kStatusY, 16});
+
+        // 提示文本
+        std::string hint = countdown_state_.alarming ?
+            "按任意键停止提醒" : "按任意键取消";
+        texts.push_back({hint, 12, kHintY, 14});
+
+        // 提醒次数显示
+        if (countdown_state_.alarming) {
+            std::string alarm_info = "提醒 " + std::to_string(countdown_state_.alarm_count) + "/5 次";
+            texts.push_back({alarm_info, 280, kHintY, 14});
         }
     }
 
@@ -2780,14 +3223,17 @@ void LanMicApp::UpdateDisplay() {
 
     display_->DrawTexts(texts, true);
     DrawHorizontalLine(kStatusBarBottomY);
-    DrawHorizontalLine(kHeaderLineY);
+    // 倒计时页面使用全屏布局，不绘制标题分隔线
+    if (active_page_ != Page::Countdown) {
+        DrawHorizontalLine(kHeaderLineY);
+    }
     // Summary page now uses full chat area, no prompt divider needed
     // Only draw footer separator when footer is visible
-    if (!footer_text.empty()) {
+    if (!footer_text.empty() && active_page_ != Page::Countdown) {
         DrawHorizontalLine(kFooterTopY);
     }
-    DrawWifiIcon(10, 8);
-    DrawBatteryIcon(382, 12, battery_known_ ? battery_level_ : 0, battery_charging_);
+    DrawWifiIcon(10, 6);  // WiFi 图标 (12x12) 在 y=6
+    DrawBatteryIcon(380, 4, battery_known_ ? battery_level_ : 0, battery_charging_);  // 竖向电池 (10x18) 在 y=4
     display_->RequestUrgentRefresh();
 }
 
@@ -2818,6 +3264,35 @@ void LanMicApp::Run() {
 
     while (true) {
         const int64_t now_ms = esp_timer_get_time() / 1000;
+
+        // 倒计时逻辑处理
+        if (active_page_ == Page::Countdown) {
+            // 更新倒计时
+            UpdateCountdown();
+
+            // 提醒循环（每1秒播放一次，最多5次）
+            if (countdown_state_.alarming &&
+                countdown_state_.alarm_count < 5 &&
+                (now_ms - countdown_state_.last_alarm_at_ms) >= 1000) {
+                countdown_state_.last_alarm_at_ms = now_ms;
+                TriggerCountdownAlarm();
+                // 提醒达到5次后自动停止
+                if (countdown_state_.alarm_count >= 5) {
+                    StopCountdown();
+                }
+            }
+
+            // 倒计时页面按键处理
+            const bool up_click = up_clicked_.exchange(false);
+            const bool down_click = down_clicked_.exchange(false);
+            const bool boot_press = IsPttPressed() && !last_pressed;
+            if (up_click || down_click || boot_press) {
+                HandleCountdownInput(true);
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
+        }
+
         if (connect_attempt_completed_.exchange(false, std::memory_order_acq_rel)) {
             reconnect_stuck_prompt_ = false;
             if (IsServerConnected()) {
