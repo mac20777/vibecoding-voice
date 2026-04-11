@@ -10,3 +10,6 @@ tmp/
 npm-debug.log*
 .npm-cache/
 dist-desktop/
+firmware/.cache/
+firmware/build/
+server/__pycache__/
