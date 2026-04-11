@@ -61,11 +61,14 @@ private:
         Error
     };
     enum class Page {
-        Summary,
-        Todo,
-        Log,
-        Settings,
-        Countdown   // 倒计时页面
+        Summary,      // 对话页面
+        Todo,         // Todo 列表
+        Log,          // CLI 日志
+        Settings,     // 设置
+        Countdown,    // 倒计时页面
+        LifeBar,      // 人生进度条
+        Almanac,      // 老黄历
+        Weather       // 天气看板
     };
     enum class VoiceMode {
         Normal,
@@ -103,6 +106,74 @@ private:
         int64_t last_alarm_at_ms = 0;   // 上次提醒时间戳
     };
     CountdownState countdown_state_;
+
+    // 人生进度条状态
+    struct LifeBarState {
+        int year = 2026;
+        int day_of_year = 0;        // 当年第几天
+        int days_in_year = 365;     // 全年天数
+        float year_pct = 0.0f;      // 年进度百分比
+
+        int month = 1;              // 当前月份
+        int day_of_month = 1;       // 当月第几天
+        int days_in_month = 31;     // 当月天数
+        float month_pct = 0.0f;     // 月进度百分比
+
+        int weekday = 1;            // 周几 (1-7)
+        int day_of_week = 1;        // 周内第几天
+        float week_pct = 0.0f;      // 周进度百分比
+
+        int age = 30;               // 当前年龄
+        int life_expect = 80;       // 预期寿命
+        float life_pct = 0.0f;      // 人生进度百分比
+
+        std::string year_label;     // 年标签 "2026 年已过"
+        std::string month_label;    // 月标签
+        std::string week_label;     // 周标签
+    };
+    LifeBarState lifebar_state_;
+
+    // 老黄历状态
+    struct AlmanacState {
+        int year = 2026;
+        int month = 1;
+        int day = 1;
+        std::string lunar_date;        // 农历日期 (如 "正月初一")
+        std::string month_cn;          // 农历月份 (如 "一月")
+        std::string weekday_cn;        // 星期 (如 "周一")
+        std::string solar_term;        // 节气 (如 "立春")
+        std::string yi;                // 宜
+        std::string ji;                // 忌
+        std::string direction;         // 吉方
+        std::string health_tip;        // 养生提示
+        bool has_llm_data = false;     // 是否已获取 LLM 数据
+    };
+    AlmanacState almanac_state_;
+
+    // 天气看板状态
+    struct WeatherState {
+        std::string city;              // 城市
+        int today_temp = 0;            // 当前温度
+        std::string today_desc;        // 天气描述
+        int today_low = 0;             // 最低温度
+        int today_high = 0;            // 最高温度
+        int today_humidity = 0;        // 湿度
+        std::string today_wind_dir;    // 风向
+        int today_wind_level = 0;      // 风力
+        std::string sunrise;           // 日出时间
+        std::string sunset;            // 日落时间
+        std::string advice;            // 穿衣建议
+        // 预报数据（最多3天）
+        struct ForecastDay {
+            std::string weekday;
+            std::string desc;
+            int temp;
+        };
+        std::vector<ForecastDay> forecast;
+        bool has_data = false;         // 是否已获取数据
+    };
+    WeatherState weather_state_;
+
     enum class PendingTodoOpType {
         Toggle,
         Delete
@@ -235,6 +306,25 @@ private:
     void TriggerCountdownAlarm();
     void HandleCountdownInput(bool any_key);
     std::string FormatCountdownTime(int seconds) const;
+
+    // 人生进度条功能
+    void UpdateLifeBarState();
+    void DrawLifeBarPage(std::vector<Display::TextItem>& texts);
+    std::string FormatProgressBar(float pct, int width) const;
+
+    // 老黄历功能
+    void UpdateAlmanacState();
+    void DrawAlmanacPage(std::vector<Display::TextItem>& texts);
+    void RequestAlmanacLlmData();
+    std::string GetLunarMonthName(int month) const;
+    std::string GetLunarDayName(int day) const;
+    std::string GetSolarTerm(int day_of_year) const;
+
+    // 天气看板功能
+    void UpdateWeatherState();
+    void DrawWeatherPage(std::vector<Display::TextItem>& texts);
+    void RequestWeatherData();
+
     void SaveCachedTodoState();
     void LoadPendingTodoOps();
     void SavePendingTodoOps();

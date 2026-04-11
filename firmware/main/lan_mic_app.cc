@@ -15,6 +15,7 @@
 #include <cerrno>
 #include <cstring>
 #include <cstdio>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -2469,6 +2470,422 @@ std::string LanMicApp::FormatCountdownTime(int seconds) const {
 }
 
 // ============================================================
+// 人生进度条功能实现
+// ============================================================
+
+void LanMicApp::UpdateLifeBarState() {
+    // 获取当前时间
+    time_t now = time(nullptr);
+    struct tm* tm_now = localtime(&now);
+
+    if (tm_now == nullptr) {
+        return;
+    }
+
+    // 年进度
+    lifebar_state_.year = tm_now->tm_year + 1900;
+    lifebar_state_.day_of_year = tm_now->tm_yday + 1;  // tm_yday 从 0 开始
+
+    // 计算全年天数（闰年判断）
+    const int year = lifebar_state_.year;
+    const bool is_leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+    lifebar_state_.days_in_year = is_leap ? 366 : 365;
+
+    lifebar_state_.year_pct = static_cast<float>(lifebar_state_.day_of_year) /
+                               static_cast<float>(lifebar_state_.days_in_year) * 100.0f;
+    lifebar_state_.year_label = std::to_string(lifebar_state_.year) + " 年已过";
+
+    // 月进度
+    lifebar_state_.month = tm_now->tm_mon + 1;
+    lifebar_state_.day_of_month = tm_now->tm_mday;
+
+    // 计算当月天数
+    const int month_days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    lifebar_state_.days_in_month = month_days[tm_now->tm_mon];
+    if (tm_now->tm_mon == 1 && is_leap) {
+        lifebar_state_.days_in_month = 29;  // 闰年二月
+    }
+
+    lifebar_state_.month_pct = static_cast<float>(lifebar_state_.day_of_month) /
+                                static_cast<float>(lifebar_state_.days_in_month) * 100.0f;
+    lifebar_state_.month_label = std::to_string(lifebar_state_.month) + "月";
+
+    // 周进度
+    lifebar_state_.weekday = tm_now->tm_wday == 0 ? 7 : tm_now->tm_wday;  // tm_wday: 0=周日, 1-6=周一-周六
+    lifebar_state_.week_pct = static_cast<float>(lifebar_state_.weekday) / 7.0f * 100.0f;
+    lifebar_state_.week_label = "本周";
+
+    // 人生进度（基于年龄，默认30岁，预期寿命80岁）
+    // 从 NVS 读取用户配置的年龄，如果没有则使用默认值
+    Settings age_settings("lifebar", false);
+    lifebar_state_.age = age_settings.GetInt("age", 30);
+    lifebar_state_.life_expect = age_settings.GetInt("life_expect", 80);
+
+    lifebar_state_.life_pct = static_cast<float>(lifebar_state_.age) /
+                               static_cast<float>(lifebar_state_.life_expect) * 100.0f;
+
+    ESP_LOGI(kTag, "LifeBar updated: year=%.1f%% month=%.1f%% week=%.1f%% life=%.1f%%",
+             lifebar_state_.year_pct, lifebar_state_.month_pct,
+             lifebar_state_.week_pct, lifebar_state_.life_pct);
+}
+
+std::string LanMicApp::FormatProgressBar(float pct, int width) const {
+    // 生成进度条字符串，使用 █ 和 ░ 字符
+    // 墨水屏适配：█ = 全填充，░ = 半填充/空白
+    std::string bar;
+
+    const int filled = static_cast<int>(pct * width / 100.0f);
+    const int empty = width - filled;
+
+    // 填充部分
+    for (int i = 0; i < filled; ++i) {
+        bar += "█";
+    }
+    // 空白部分
+    for (int i = 0; i < empty; ++i) {
+        bar += "░";
+    }
+
+    return bar;
+}
+
+void LanMicApp::DrawLifeBarPage(std::vector<Display::TextItem>& texts) {
+    // 人生进度条布局 (400x300)
+    // 顶部：年进度（大百分比 + 进度条）
+    // 中间：月/周 双列进度条
+    // 底部：人生进度条
+
+    constexpr int kYearLabelY = 50;
+    constexpr int kYearPctY = 75;
+    constexpr int kYearBarY = 100;
+    constexpr int kMonthWeekY = 130;
+    constexpr int kMonthWeekBarY = 155;
+    constexpr int kSeparatorY = 180;
+    constexpr int kLifeLabelY = 200;
+    constexpr int kLifePctY = 225;
+    constexpr int kLifeBarY = 250;
+    constexpr int kQuoteY = 280;
+
+    // 年进度
+    texts.push_back({lifebar_state_.year_label, 12, kYearLabelY, 16});
+
+    // 大百分比显示
+    char pct_buf[16];
+    snprintf(pct_buf, sizeof(pct_buf), "%.1f%%", lifebar_state_.year_pct);
+    texts.push_back({pct_buf, 300, kYearPctY, 24});  // 大号字体
+
+    // 年进度条（宽度 320，高度用文字模拟）
+    std::string year_bar = FormatProgressBar(lifebar_state_.year_pct, 40);
+    texts.push_back({year_bar, 12, kYearBarY, 16});
+
+    // 月/周 双列
+    // 左列：月进度
+    texts.push_back({lifebar_state_.month_label, 12, kMonthWeekY, 16});
+    snprintf(pct_buf, sizeof(pct_buf), "%.1f%%", lifebar_state_.month_pct);
+    texts.push_back({pct_buf, 80, kMonthWeekY, 16});
+    std::string month_bar = FormatProgressBar(lifebar_state_.month_pct, 15);
+    texts.push_back({month_bar, 12, kMonthWeekBarY, 14});
+
+    // 右列：周进度
+    texts.push_back({lifebar_state_.week_label, 210, kMonthWeekY, 16});
+    snprintf(pct_buf, sizeof(pct_buf), "%.1f%%", lifebar_state_.week_pct);
+    texts.push_back({pct_buf, 280, kMonthWeekY, 16});
+    std::string week_bar = FormatProgressBar(lifebar_state_.week_pct, 15);
+    texts.push_back({week_bar, 210, kMonthWeekBarY, 14});
+
+    // 分隔线（虚线）
+    texts.push_back({"─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─", 12, kSeparatorY, 14});
+
+    // 人生进度条
+    texts.push_back({"人生", 12, kLifeLabelY, 16});
+    snprintf(pct_buf, sizeof(pct_buf), "%.1f%%", lifebar_state_.life_pct);
+    texts.push_back({pct_buf, 300, kLifeLabelY, 24});  // 大号字体
+
+    std::string life_bar = FormatProgressBar(lifebar_state_.life_pct, 40);
+    texts.push_back({life_bar, 12, kLifeBarY, 16});
+
+    // 底部引言
+    texts.push_back({"— Time Flies", 160, kQuoteY, 14});
+}
+
+// ============================================================
+// 老黄历功能实现
+// ============================================================
+
+void LanMicApp::UpdateAlmanacState() {
+    // 获取当前时间
+    time_t now = time(nullptr);
+    struct tm* tm_now = localtime(&now);
+
+    if (tm_now == nullptr) {
+        return;
+    }
+
+    almanac_state_.year = tm_now->tm_year + 1900;
+    almanac_state_.month = tm_now->tm_mon + 1;
+    almanac_state_.day = tm_now->tm_mday;
+
+    // 农历计算（简化版，使用预定义的农历日期对应）
+    // 这里使用一个简化的农历日期计算，实际应该使用完整的农历算法
+    // 由于 ESP32 内存有限，这里使用近似计算
+
+    // 星期
+    const char* weekdays[] = {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
+    almanac_state_.weekday_cn = weekdays[tm_now->tm_wday];
+
+    // 农历月份和日期（简化：基于一个固定的农历基准日）
+    // 实际应该使用完整的农历算法库
+    // 这里使用占位符，等待 LLM 数据填充
+    almanac_state_.month_cn = GetLunarMonthName(almanac_state_.month);
+
+    // 计算农历日期（简化版）
+    const int lunar_day_approx = almanac_state_.day - 10;  // 简化计算
+    almanac_state_.lunar_date = almanac_state_.month_cn + GetLunarDayName(
+        std::clamp(lunar_day_approx, 1, 30));
+
+    // 节气（基于年日数）
+    almanac_state_.solar_term = GetSolarTerm(tm_now->tm_yday + 1);
+
+    ESP_LOGI(kTag, "Almanac updated: %d-%d-%d, lunar: %s, term: %s",
+             almanac_state_.year, almanac_state_.month, almanac_state_.day,
+             almanac_state_.lunar_date.c_str(), almanac_state_.solar_term.c_str());
+}
+
+std::string LanMicApp::GetLunarMonthName(int month) const {
+    const char* months[] = {
+        "正月", "二月", "三月", "四月", "五月", "六月",
+        "七月", "八月", "九月", "十月", "十一月", "腊月"
+    };
+    return months[std::clamp(month - 1, 0, 11)];
+}
+
+std::string LanMicApp::GetLunarDayName(int day) const {
+    const char* days[] = {
+        "初一", "初二", "初三", "初四", "初五", "初六", "初七", "初八", "初九", "初十",
+        "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十",
+        "廿一", "廿二", "廿三", "廿四", "廿五", "廿六", "廿七", "廿八", "廿九", "三十"
+    };
+    return days[std::clamp(day - 1, 0, 29)];
+}
+
+std::string LanMicApp::GetSolarTerm(int day_of_year) const {
+    // 24 节气日期（近似，每年略有变化）
+    // 小寒、大寒、立春、雨水、惊蛰、春分、清明、谷雨、立夏、小满、芒种、夏至
+    // 小暑、大暑、立秋、处暑、白露、秋分、寒露、霜降、立冬、小雪、大雪、冬至
+    struct TermDate { int start; int end; const char* name; };
+    static const TermDate terms[] = {
+        {1, 5, "小寒"}, {6, 20, "大寒"}, {21, 35, "立春"}, {36, 50, "雨水"},
+        {51, 55, "惊蛰"}, {56, 80, "春分"}, {81, 85, "清明"}, {86, 100, "谷雨"},
+        {101, 105, "立夏"}, {106, 120, "小满"}, {121, 125, "芒种"}, {126, 150, "夏至"},
+        {151, 155, "小暑"}, {156, 185, "大暑"}, {186, 190, "立秋"}, {191, 205, "处暑"},
+        {206, 210, "白露"}, {211, 225, "秋分"}, {226, 230, "寒露"}, {231, 245, "霜降"},
+        {246, 250, "立冬"}, {251, 265, "小雪"}, {266, 270, "大雪"}, {271, 365, "冬至"}
+    };
+
+    for (const auto& t : terms) {
+        if (day_of_year >= t.start && day_of_year <= t.end) {
+            return t.name;
+        }
+    }
+    return "";
+}
+
+void LanMicApp::RequestAlmanacLlmData() {
+    // 通过 WebSocket 发送请求，让后端调用 LLM 生成黄历内容
+    if (!IsServerConnected()) {
+        ESP_LOGW(kTag, "Server not connected, cannot request almanac LLM data");
+        almanac_state_.yi = "读书、远行";
+        almanac_state_.ji = "动土";
+        almanac_state_.direction = "东南";
+        almanac_state_.health_tip = "注意养生";
+        almanac_state_.has_llm_data = false;
+        return;
+    }
+
+    // 发送请求 JSON
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", "almanac_request");
+    cJSON_AddNumberToObject(root, "year", almanac_state_.year);
+    cJSON_AddNumberToObject(root, "month", almanac_state_.month);
+    cJSON_AddNumberToObject(root, "day", almanac_state_.day);
+    cJSON_AddStringToObject(root, "lunar_date", almanac_state_.lunar_date.c_str());
+    cJSON_AddStringToObject(root, "solar_term", almanac_state_.solar_term.c_str());
+
+    char* json_str = cJSON_PrintUnformatted(root);
+    SendJson(json_str);
+    free(json_str);
+    cJSON_Delete(root);
+
+    ESP_LOGI(kTag, "Almanac LLM request sent");
+}
+
+void LanMicApp::DrawAlmanacPage(std::vector<Display::TextItem>& texts) {
+    // 老黄历布局 (400x300)
+    // 左列：日期区（农历/数字/月份/星期/节气）
+    // 右列：宜忌区（宜/忌/吉方/养生）
+
+    constexpr int kLeftX = 12;
+    constexpr int kRightX = 220;
+    constexpr int kTopY = 50;
+
+    // ===== 左列：日期区 =====
+    texts.push_back({almanac_state_.lunar_date, kLeftX, kTopY, 24});  // 大号字体
+
+    // 日期数字
+    texts.push_back({std::to_string(almanac_state_.day), kLeftX + 30, kTopY + 30, 32});  // 更大字体
+
+    // 月份
+    texts.push_back({almanac_state_.month_cn, kLeftX + 50, kTopY + 70, 16});
+
+    // 星期
+    texts.push_back({almanac_state_.weekday_cn, kLeftX + 50, kTopY + 90, 16});
+
+    // 分隔线
+    texts.push_back({"──────────", kLeftX, kTopY + 115, 14});
+
+    // 节气
+    if (!almanac_state_.solar_term.empty()) {
+        texts.push_back({almanac_state_.solar_term, kLeftX + 30, kTopY + 130, 20});
+    }
+
+    // ===== 右列：宜忌区 =====
+    texts.push_back({"宜", kRightX, kTopY, 20});
+    texts.push_back({almanac_state_.yi, kRightX, kTopY + 25, 16});
+
+    // 分隔线
+    texts.push_back({"──────────", kRightX, kTopY + 50, 14});
+
+    texts.push_back({"忌", kRightX, kTopY + 65, 20});
+    texts.push_back({almanac_state_.ji, kRightX, kTopY + 90, 16});
+
+    // 分隔线
+    texts.push_back({"─ ─ ─ ─ ─ ─", kRightX, kTopY + 115, 14});
+
+    // 吉方
+    texts.push_back({"吉方 " + almanac_state_.direction, kRightX, kTopY + 130, 16});
+
+    // 养生提示
+    texts.push_back({almanac_state_.health_tip, kRightX, kTopY + 150, 14});
+
+    // 底部来源
+    texts.push_back({"— " + almanac_state_.solar_term, 160, 280, 14});
+}
+
+// ============================================================
+// 天气看板功能实现
+// ============================================================
+
+void LanMicApp::UpdateWeatherState() {
+    // 天气数据从后端服务获取，这里先使用默认值
+    // 实际数据通过 HandleServerMessage 接收
+
+    if (!weather_state_.has_data) {
+        // 默认值
+        weather_state_.city = "杭州";
+        weather_state_.today_temp = 23;
+        weather_state_.today_desc = "晴";
+        weather_state_.today_low = 18;
+        weather_state_.today_high = 28;
+        weather_state_.today_humidity = 45;
+        weather_state_.today_wind_dir = "东北风";
+        weather_state_.today_wind_level = 3;
+        weather_state_.sunrise = "06:15";
+        weather_state_.sunset = "18:30";
+        weather_state_.advice = "早晚温差大，记得带件外套";
+
+        // 默认预报
+        weather_state_.forecast.clear();
+        weather_state_.forecast.push_back({"明天", "晴", 15});
+        weather_state_.forecast.push_back({"周三", "多云", 12});
+        weather_state_.forecast.push_back({"周四", "雨", 10});
+    }
+
+    ESP_LOGI(kTag, "Weather state updated: %s %d°C", weather_state_.city.c_str(), weather_state_.today_temp);
+}
+
+void LanMicApp::RequestWeatherData() {
+    if (!IsServerConnected()) {
+        ESP_LOGW(kTag, "Server not connected, cannot request weather data");
+        weather_state_.has_data = false;
+        UpdateWeatherState();  // 使用默认值
+        return;
+    }
+
+    // 发送天气请求
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", "weather_request");
+
+    char* json_str = cJSON_PrintUnformatted(root);
+    SendJson(json_str);
+    free(json_str);
+    cJSON_Delete(root);
+
+    ESP_LOGI(kTag, "Weather request sent");
+}
+
+void LanMicApp::DrawWeatherPage(std::vector<Display::TextItem>& texts) {
+    // 天气看板布局 (400x300)
+    // 顶部：城市名
+    // 中间：两列（左侧大温度+描述，右侧预报卡片）
+    // 底部：湿度/日出日落/穿衣建议
+
+    constexpr int kCityY = 50;
+    constexpr int kLeftX = 12;
+    constexpr int kRightX = 220;
+    constexpr int kMainY = 80;
+    constexpr int kInfoY = 200;
+    constexpr int kAdviceY = 260;
+
+    // 城市
+    texts.push_back({weather_state_.city, 12, kCityY, 20});
+
+    // ===== 左列：当前天气 =====
+    // 大温度显示
+    char temp_buf[16];
+    snprintf(temp_buf, sizeof(temp_buf), "%d°C", weather_state_.today_temp);
+    texts.push_back({temp_buf, kLeftX, kMainY, 36});  // 大号字体
+
+    // 天气描述
+    texts.push_back({weather_state_.today_desc, kLeftX, kMainY + 50, 18});
+
+    // 温度范围
+    snprintf(temp_buf, sizeof(temp_buf), "%d / %d", weather_state_.today_low, weather_state_.today_high);
+    texts.push_back({temp_buf, kLeftX, kMainY + 75, 16});
+
+    // ===== 右列：预报卡片 =====
+    int forecast_y = kMainY;
+    for (size_t i = 0; i < weather_state_.forecast.size() && i < 3; ++i) {
+        const auto& f = weather_state_.forecast[i];
+        texts.push_back({f.weekday, kRightX, forecast_y, 14});
+        texts.push_back({f.desc, kRightX + 60, forecast_y, 14});
+        snprintf(temp_buf, sizeof(temp_buf), "%d°", f.temp);
+        texts.push_back({temp_buf, kRightX + 120, forecast_y, 14});
+        forecast_y += 25;
+    }
+
+    // ===== 底部信息行 =====
+    // 湿度
+    snprintf(temp_buf, sizeof(temp_buf), "湿度 %d%%", weather_state_.today_humidity);
+    texts.push_back({temp_buf, kLeftX, kInfoY, 14});
+
+    // 风向风力
+    snprintf(temp_buf, sizeof(temp_buf), "%s %d级", weather_state_.today_wind_dir.c_str(), weather_state_.today_wind_level);
+    texts.push_back({temp_buf, 120, kInfoY, 14});
+
+    // 日出日落
+    texts.push_back({"日出 " + weather_state_.sunrise + " | 日落 " + weather_state_.sunset, kLeftX, kInfoY + 20, 14});
+
+    // 分隔线
+    texts.push_back({"────────────────────────────────", kLeftX, kInfoY + 40, 14});
+
+    // 穿衣建议
+    texts.push_back({weather_state_.advice, kLeftX, kAdviceY, 14});
+
+    // 底部来源
+    texts.push_back({"— Open-Meteo", 300, kAdviceY + 20, 12});
+}
+
+// ============================================================
 
 void LanMicApp::Shutdown() {
     DisconnectWebSocket();
@@ -2629,8 +3046,11 @@ void LanMicApp::ShowIdleTodoPage() {
 }
 
 std::string LanMicApp::GetFooterText() const {
-    // 倒计时页面不显示底部 footer（已内置提示）
-    if (active_page_ == Page::Countdown) {
+    // 新模式页面不显示底部 footer（已内置提示）
+    if (active_page_ == Page::Countdown ||
+        active_page_ == Page::LifeBar ||
+        active_page_ == Page::Almanac ||
+        active_page_ == Page::Weather) {
         return "";
     }
     // Hide footer on Summary (AI chat) page for cleaner chat UI
@@ -2907,12 +3327,19 @@ void LanMicApp::UpdateDisplay() {
                            : active_page_ == Page::Todo    ? "Todo"
                            : active_page_ == Page::Log     ? "日志"
                            : active_page_ == Page::Countdown ? "倒计时"
+                           : active_page_ == Page::LifeBar ? "进度"
+                           : active_page_ == Page::Almanac ? "黄历"
+                           : active_page_ == Page::Weather ? "天气"
                            :                                 "设置";
     texts.push_back({single_line(repo_name_.empty() ? "AI" : repo_name_, 18), 12, kContentHeaderY, 16});
     texts.push_back({page_label, 316, kContentHeaderY, 16});
 
-    // 倒计时页面不显示顶部标题行（使用全屏布局）
-    if (active_page_ != Page::Countdown) {
+    // 新模式页面使用全屏布局，不显示顶部标题行
+    const bool full_screen_page = (active_page_ == Page::Countdown ||
+                                     active_page_ == Page::LifeBar ||
+                                     active_page_ == Page::Almanac ||
+                                     active_page_ == Page::Weather);
+    if (!full_screen_page) {
         // 其他页面正常显示标题行
     }
 
@@ -3214,6 +3641,18 @@ void LanMicApp::UpdateDisplay() {
             std::string alarm_info = "提醒 " + std::to_string(countdown_state_.alarm_count) + "/5 次";
             texts.push_back({alarm_info, 280, kHintY, 14});
         }
+    } else if (active_page_ == Page::LifeBar) {
+        // 人生进度条页面
+        UpdateLifeBarState();
+        DrawLifeBarPage(texts);
+    } else if (active_page_ == Page::Almanac) {
+        // 老黄历页面
+        UpdateAlmanacState();
+        DrawAlmanacPage(texts);
+    } else if (active_page_ == Page::Weather) {
+        // 天气看板页面
+        UpdateWeatherState();
+        DrawWeatherPage(texts);
     }
 
     const std::string footer_text = GetFooterText();
@@ -3223,13 +3662,16 @@ void LanMicApp::UpdateDisplay() {
 
     display_->DrawTexts(texts, true);
     DrawHorizontalLine(kStatusBarBottomY);
-    // 倒计时页面使用全屏布局，不绘制标题分隔线
-    if (active_page_ != Page::Countdown) {
+    // 新模式页面使用全屏布局，不绘制标题分隔线
+    const bool full_screen_layout = (active_page_ == Page::Countdown ||
+                                      active_page_ == Page::LifeBar ||
+                                      active_page_ == Page::Almanac ||
+                                      active_page_ == Page::Weather);
+    if (!full_screen_layout) {
         DrawHorizontalLine(kHeaderLineY);
     }
-    // Summary page now uses full chat area, no prompt divider needed
-    // Only draw footer separator when footer is visible
-    if (!footer_text.empty() && active_page_ != Page::Countdown) {
+    // Only draw footer separator when footer is visible and not full screen
+    if (!footer_text.empty() && !full_screen_layout) {
         DrawHorizontalLine(kFooterTopY);
     }
     DrawWifiIcon(10, 6);  // WiFi 图标 (12x12) 在 y=6
@@ -3371,13 +3813,21 @@ void LanMicApp::Run() {
             if (IsNavButtonPressed(TODO_UP_BUTTON_GPIO)) {
                 EnterWifiSetupMode();
             } else if (active_page_ == Page::Summary) {
-                SwitchPage(Page::Todo);      // Summary → Todo
+                SwitchPage(Page::Todo);       // Summary → Todo
             } else if (active_page_ == Page::Todo) {
-                SwitchPage(Page::Log);       // Todo → Log
+                SwitchPage(Page::Log);        // Todo → Log
             } else if (active_page_ == Page::Log) {
-                EnterSettings();             // Log → Settings
+                SwitchPage(Page::LifeBar);    // Log → LifeBar
+            } else if (active_page_ == Page::LifeBar) {
+                SwitchPage(Page::Almanac);    // LifeBar → Almanac
+            } else if (active_page_ == Page::Almanac) {
+                SwitchPage(Page::Weather);    // Almanac → Weather
+            } else if (active_page_ == Page::Weather) {
+                EnterSettings();              // Weather → Settings
             } else if (active_page_ == Page::Settings) {
-                SwitchPage(Page::Summary);   // Settings → Summary
+                SwitchPage(Page::Summary);    // Settings → Summary
+            } else if (active_page_ == Page::Countdown) {
+                HandleCountdownInput(true);   // Countdown: 按键停止
             }
         }
 
@@ -3404,6 +3854,28 @@ void LanMicApp::Run() {
             HandleSettingsInput(up_click, down_click, boot_press);
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
+        }
+
+        // 新模式页面按键处理：BOOT 返回对话页面
+        if (active_page_ == Page::LifeBar ||
+            active_page_ == Page::Almanac ||
+            active_page_ == Page::Weather) {
+            const bool pressed_now = IsPttPressed();
+            const bool boot_press = pressed_now && !last_pressed;
+            if (boot_press) {
+                last_pressed = true;
+                // BOOT 切换到对话页面
+                SwitchPage(Page::Summary);
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
+            if (!pressed_now) last_pressed = false;
+            // UP/DN 在新模式页面可以触发刷新（可选）
+            if (up_click || down_click) {
+                UpdateDisplay();
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
         }
 
         if (todo_menu_open_) {
