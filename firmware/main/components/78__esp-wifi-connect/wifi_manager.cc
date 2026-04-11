@@ -67,7 +67,7 @@ bool WifiManager::Initialize(const WifiManagerConfig& config) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "NVS init failed: %s", esp_err_to_name(ret));
         return false;
     }
@@ -91,7 +91,7 @@ bool WifiManager::Initialize(const WifiManagerConfig& config) {
     cfg.nvs_enable = false;
     ret = esp_wifi_init(&cfg);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "WiFi init failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "esp_wifi_init failed: %s", esp_err_to_name(ret));
         return false;
     }
 

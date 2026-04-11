@@ -105,3 +105,7 @@ dependencies:
   idf:
     version: '>=5.4.0'
   espressif/esp_lcd_touch_st7123: ^1.0.0
+
+  # IDF 6.0 compatibility: these were built-in before
+  espressif/cjson: ^1
+  espressif/mqtt: '*'

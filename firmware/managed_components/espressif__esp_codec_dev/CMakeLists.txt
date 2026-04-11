@@ -18,6 +18,15 @@ else()
   list(APPEND priv_requires driver)
 endif()
 
+if("${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}" VERSION_GREATER_EQUAL "5.0")
+  list(APPEND priv_requires esp_adc)
+endif()
+
+set(requires "")
+if("${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}" VERSION_GREATER_EQUAL "6.0")
+  list(APPEND requires esp_hal_ana_conv)
+endif()
+
 list(APPEND COMPONENT_SRCS
   platform/audio_codec_gpio.c
   platform/audio_codec_ctrl_i2c.c
@@ -25,6 +34,10 @@ list(APPEND COMPONENT_SRCS
   platform/audio_codec_ctrl_spi.c
   platform/esp_codec_dev_os.c
 )
+
+if(CONFIG_CODEC_DATA_ADC_SUPPORT AND "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}" VERSION_GREATER_EQUAL "5.0")
+  list(APPEND COMPONENT_SRCS platform/audio_codec_data_adc.c)
+endif()
 
 if (CONFIG_CODEC_ES8311_SUPPORT)
   list(APPEND COMPONENT_SRCS device/es8311/es8311.c)
@@ -66,6 +79,10 @@ if (CONFIG_CODEC_ES8389_SUPPORT)
   list(APPEND COMPONENT_SRCS device/es8389/es8389.c)
 endif()
 
+if (CONFIG_CODEC_DUMMY_SUPPORT)
+  list(APPEND COMPONENT_SRCS device/dummy/dummy_codec.c)
+endif()
+
 if (CONFIG_CODEC_ZL38063_SUPPORT)
   list(APPEND COMPONENT_SRCS device/zl38063/zl38063.c
     device/zl38063/api_lib/vprocTwolf_access.c
@@ -84,7 +101,8 @@ endif()
 idf_component_register(SRCS "${COMPONENT_SRCS}"
                        INCLUDE_DIRS "${COMPONENT_ADD_INCLUDEDIRS}"
                        PRIV_INCLUDE_DIRS "${COMPONENT_PRIV_INCLUDEDIRS}"
-                       PRIV_REQUIRES ${priv_requires})
+                       PRIV_REQUIRES ${priv_requires}
+                       REQUIRES ${requires})
 # Library only support xtensa
 if (CONFIG_CODEC_ZL38063_SUPPORT)
   if (NOT ((CONFIG_IDF_TARGET STREQUAL "esp32c6") OR (CONFIG_IDF_TARGET STREQUAL "esp32c3") OR (CONFIG_IDF_TARGET STREQUAL "esp32p4")))

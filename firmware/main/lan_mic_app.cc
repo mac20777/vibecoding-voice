@@ -8,7 +8,7 @@
 #include <esp_timer.h>
 #include <lwip/inet.h>
 #include <lwip/sockets.h>
-#include <mbedtls/md.h>
+#include <psa/crypto.h>
 
 #include <algorithm>
 #include <cmath>
@@ -262,6 +262,17 @@ bool LanMicApp::Initialize() {
         display_->RequestUrgentFullRefresh();
     }
 
+    // Only clear WiFi config on true first boot.
+    // Accessing SsidManager triggers LoadFromNvs(), so we can check for saved credentials.
+    // This prevents wiping user-configured WiFi if the device reboots before server pairing.
+    bool has_saved_creds = !SsidManager::GetInstance().GetSsidList().empty();
+    if (first_boot_ && !has_saved_creds) {
+        ESP_LOGW(kTag, "First boot: clearing WiFi config for initial setup");
+        SsidManager::GetInstance().Clear();
+    } else if (first_boot_ && has_saved_creds) {
+        ESP_LOGI(kTag, "First boot detected but WiFi credentials exist, skipping clear");
+    }
+
     board_.SetNetworkEventCallback([this](NetworkEvent event, const std::string& data) {
         switch (event) {
             case NetworkEvent::Connecting:
@@ -325,6 +336,12 @@ void LanMicApp::LoadPersistedNetworkState() {
     cached_server_uri_ = nvs.GetString(kLastServerUriKey, "");
     paired_host_id_ = nvs.GetString(kPairedHostIdKey, "");
     paired_host_name_ = nvs.GetString(kPairedHostNameKey, "");
+
+    // Detect first boot: no paired host and no cached server URI
+    first_boot_ = paired_host_id_.empty() && cached_server_uri_.empty();
+    if (first_boot_) {
+        ESP_LOGI(kTag, "First boot detected (no persisted state)");
+    }
 
     if (!paired_host_id_.empty()) {
         ESP_LOGI(kTag, "Loaded paired host: id=%s name=%s",
@@ -807,21 +824,35 @@ std::string LanMicApp::HmacSha256Hex(const std::vector<std::string>& parts) cons
         payload += parts[index];
     }
 
-    const mbedtls_md_info_t* md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    if (md_info == nullptr) {
+    psa_status_t status = psa_crypto_init();
+    if (status != PSA_SUCCESS) {
+        ESP_LOGW(kTag, "PSA crypto init failed: %d", status);
+        return "";
+    }
+
+    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    psa_set_key_type(&attributes, PSA_KEY_TYPE_HMAC);
+    psa_set_key_algorithm(&attributes, PSA_ALG_HMAC(PSA_ALG_SHA_256));
+    psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_SIGN_HASH);
+
+    psa_key_id_t key = 0;
+    status = psa_import_key(&attributes,
+        reinterpret_cast<const uint8_t*>(CONFIG_LAN_SHARED_SECRET),
+        std::strlen(CONFIG_LAN_SHARED_SECRET), &key);
+    psa_reset_key_attributes(&attributes);
+    if (status != PSA_SUCCESS) {
+        ESP_LOGW(kTag, "PSA key import failed: %d", status);
         return "";
     }
 
     unsigned char digest[32] = {0};
-    const int ret = mbedtls_md_hmac(
-        md_info,
-        reinterpret_cast<const unsigned char*>(CONFIG_LAN_SHARED_SECRET),
-        std::strlen(CONFIG_LAN_SHARED_SECRET),
-        reinterpret_cast<const unsigned char*>(payload.data()),
-        payload.size(),
-        digest);
-    if (ret != 0) {
-        ESP_LOGW(kTag, "HMAC failed: %d", ret);
+    size_t digest_len = 0;
+    status = psa_mac_compute(key, PSA_ALG_HMAC(PSA_ALG_SHA_256),
+        reinterpret_cast<const uint8_t*>(payload.data()), payload.size(),
+        digest, sizeof(digest), &digest_len);
+    psa_destroy_key(key);
+    if (status != PSA_SUCCESS) {
+        ESP_LOGW(kTag, "PSA MAC compute failed: %d", status);
         return "";
     }
 
@@ -1335,6 +1366,7 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         const char* latest_assistant = GetJsonString(root, "latestAssistantText");
         const char* status_line = GetJsonString(root, "statusLine");
         const char* repo_name = GetJsonString(root, "repoName");
+        const bool done = GetJsonBool(root, "done", false);
         if (latest_user != nullptr) {
             transcript_text_ = latest_user;
         }
@@ -1350,6 +1382,14 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         }
         if (phase_ == Phase::Running) {
             active_page_ = Page::Summary;
+        }
+        // If LLM is done, reset phase to Idle so UI shows completed state
+        // Do NOT call ShowIdleTodoPage() to preserve conversation display
+        if (done && phase_ == Phase::Running) {
+            phase_ = Phase::Idle;
+            cli_phase_text_ = "idle";
+            PlayBeep(800, 80);
+            PlayBeep(1000, 100);  // AI reply complete: rising double beep
         }
     } else if (strcmp(type, "cli_log_tail") == 0) {
         cJSON* lines = cJSON_GetObjectItemCaseSensitive(root, "lines");
@@ -2679,8 +2719,10 @@ void LanMicApp::Run() {
                 EnterSettings();
             } else if (active_page_ == Page::Settings) {
                 SwitchPage(Page::Todo);
+            } else if (active_page_ == Page::Todo) {
+                SwitchPage(Page::Summary);  // Todo → Live
             } else {
-                SwitchPage(Page::Log);
+                SwitchPage(Page::Log);  // Live (Summary) → Log
             }
         }
 
@@ -2727,7 +2769,7 @@ void LanMicApp::Run() {
             continue;
         }
 
-        if (!IsWifiConnected()) {
+        if (!IsWifiConnected() && network_state_ != NetworkState::Config) {
             if (!offline_todo_mode_ &&
                 !todo_menu_open_ &&
                 !has_pending_transcript_ &&

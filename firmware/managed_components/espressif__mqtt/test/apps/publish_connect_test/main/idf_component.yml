@@ -1,0 +1,11 @@
+## IDF Component Manager Manifest File
+dependencies:
+  espressif/mosquitto:
+    version: ">=2.0.20"
+  protocol_examples_common:
+    path: ${IDF_PATH}/examples/common_components/protocol_examples_common
+  espressif/mqtt:
+    version: "*"
+    override_path: "../../../.."
+  idf:
+    version: ">=4.1.0"

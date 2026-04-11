@@ -6,7 +6,7 @@ documentation: https://docs.espressif.com/projects/esp-iot-solution/en/latest/ba
 issues: https://github.com/espressif/esp-iot-solution/issues
 repository: git://github.com/espressif/esp-iot-solution.git
 repository_info:
-  commit_sha: 4cc44ab939895610ef678649f8c0f68a225899e0
+  commit_sha: dabd4f5c477494af7e5ae8b37772d46d1d305535
   path: components/i2c_bus
 url: https://github.com/espressif/esp-iot-solution/tree/master/components/i2c_bus
-version: 1.5.0
+version: 1.5.1

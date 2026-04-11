@@ -113,16 +113,10 @@ static const char* WifiReasonToString(int reason) {
             return "AUTH_EXPIRE";
         case WIFI_REASON_AUTH_LEAVE:
             return "AUTH_LEAVE";
-        case WIFI_REASON_ASSOC_EXPIRE:
-            return "ASSOC_EXPIRE";
-        case WIFI_REASON_ASSOC_TOOMANY:
-            return "ASSOC_TOOMANY";
-        case WIFI_REASON_NOT_AUTHED:
-            return "NOT_AUTHED";
-        case WIFI_REASON_NOT_ASSOCED:
-            return "NOT_ASSOCED";
         case WIFI_REASON_ASSOC_LEAVE:
             return "ASSOC_LEAVE";
+        case WIFI_REASON_ASSOC_TOOMANY:
+            return "ASSOC_TOOMANY";
         case WIFI_REASON_ASSOC_NOT_AUTHED:
             return "ASSOC_NOT_AUTHED";
         case WIFI_REASON_DISASSOC_PWRCAP_BAD:

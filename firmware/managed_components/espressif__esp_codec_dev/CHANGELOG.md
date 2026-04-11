@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.5.7
+
+### Feature
+
+- Added support for resolving TX I2S handle from RX pair channel when only RX handle is provided in full duplex mode.
+- Added slot bit width reconfiguration when peer codec on the same I2S port already runs with wider slots.
+- Added channel gain setting for ES8389
+
+### Bug Fixed
+
+- Fixed 2ch TDM record wrongly for default right alignment comparing with STD mode.
+- Enhanced compatible check for multiple instance of codec_dev use same I2S port.
+  - Peer lookup prefers another data_if on the same port with only RX or only TX; if none, it matches the same data_if that has both RX and TX.
+- Fixed incorrect ES8389 microphone gain table
+
+## v1.5.6
+
+### Bug Fixed
+
+- Fixed es8311 pop issue when init again without close
+- Fixed the esp_adc dependency issue
+
+## v1.5.5
+
+### Feature
+
+- Added internal ADC microphone data interface support through `audio_codec_new_adc_data`.
+- Added dummy codec support for PA-only speaker designs, allowing `esp_codec_dev_open/close` to control PA automatically.
+
 ## v1.5.4
 
 ### Feature
@@ -34,7 +63,7 @@
 
 ## v1.5.0
 
-### Refactor:
+### Refactor
 
 - Clean up the component dependency, no longer depend on the `driver` component
 
@@ -74,13 +103,11 @@
 
 - Enhance ES8311 I2C noise immunity
 
-
 ## v1.3.3
 
 ### Bug Fixes
 
 - Fix codec without mute API, set mute wrong behavior
-
 
 ## v1.3.2
 
@@ -89,14 +116,12 @@
 - Fix `ES8374` volume register set error
 - Fix `ES8388` microphone volume gain set incorrect
 
-
 ## v1.3.1
 
 ### Features
 
 - Fix condition `CODEC_I2C_BACKWARD_COMPATIBLE` reversed
 - Fix `CODEC_I2C_BACKWARD_COMPATIBLE` set to false build error
-
 
 ## v1.3.0
 
@@ -105,7 +130,6 @@
 - Add configuration `CODEC_I2C_BACKWARD_COMPATIBLE` in Kconfig to allow use of the old I2C driver.
   Default is set to `y` for backward compatibility. To use the new I2C driver, set it to `n` instead.
 - Fix send I2C address low byte firstly
-
 
 ## v1.2.0
 
@@ -120,7 +144,6 @@
 
 - Fix I2S work in PDM mode record or play mono channel audio wrongly
 
-
 ## v1.1.0
 
 ### Features
@@ -131,13 +154,11 @@
 
 - Fix ES8311 playback fade in for long time
 
-
 ## v1.0.3
 
 ### Bug Fixes
 
 - Fix I2S TX and RX work in share mode, need enable TX before RX
-
 
 ## v1.0.2
 
@@ -146,13 +167,11 @@
 - Add I2S TDM support
 - Add API to `esp_codec_dev_set_in_channel_gain` to set input channel gain dependently
 
-
 ## v1.0.1
 
 ### Bug Fixes
 
 - Fix ES8388 volume register set incorrectly
-
 
 ## v1.0.0
 

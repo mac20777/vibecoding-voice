@@ -141,6 +141,7 @@ private:
     std::string cached_server_uri_;
     std::string paired_host_id_;
     std::string paired_host_name_;
+    bool first_boot_ = true;
 
     bool Initialize();
     void LoadPersistedNetworkState();
