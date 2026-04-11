@@ -1307,6 +1307,21 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         const char* text_value = GetJsonString(root, "text");
         if (text_value != nullptr) {
             transcript_text_ = text_value;
+            // Add user message to chat history when transcript is finalized
+            if (strlen(text_value) > 0) {
+                // Check for duplicate
+                if (chat_history_.empty() ||
+                    chat_history_.back().role != ChatRole::User ||
+                    chat_history_.back().text != text_value) {
+                    chat_history_.push_back({ChatRole::User, text_value});
+                    // Trim history if exceeds max size
+                    while (chat_history_.size() > kMaxChatHistorySize) {
+                        chat_history_.erase(chat_history_.begin());
+                    }
+                    // Auto-scroll to show the new message
+                    summary_scroll_offset_ = INT_MAX;  // Will be clamped in UpdateDisplay
+                }
+            }
         }
         has_pending_transcript_ = GetJsonBool(root, "requiresAction", false);
         phase_ = has_pending_transcript_ ? Phase::AwaitingAction : Phase::Idle;
@@ -1316,7 +1331,6 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
             status_text_ = voice_mode_ == VoiceMode::Todo ? "Todo input" : "Transcript ready";
         }
         active_page_ = PageForCurrentVoiceMode();
-        summary_scroll_offset_ = 0;
     } else if (strcmp(type, "transcript_cleared") == 0) {
         transcript_text_.clear();
         has_pending_transcript_ = false;
@@ -1374,7 +1388,6 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         }
         if (latest_assistant != nullptr) {
             latest_assistant_text_ = latest_assistant;
-            summary_scroll_offset_ = 0;
         }
         // Update chat history when conversation completes
         if (done && latest_user != nullptr && strlen(latest_user) > 0) {
@@ -1391,6 +1404,8 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
                 chat_history_.back().role != ChatRole::Assistant ||
                 chat_history_.back().text != latest_assistant) {
                 chat_history_.push_back({ChatRole::Assistant, latest_assistant});
+                // Auto-scroll to show new AI response
+                summary_scroll_offset_ = INT_MAX;  // Will be clamped in UpdateDisplay
             }
             // Trim history if exceeds max size
             while (chat_history_.size() > kMaxChatHistorySize) {
@@ -2585,7 +2600,7 @@ void LanMicApp::UpdateDisplay() {
 
             // Add history messages
             for (const auto& msg : chat_history_) {
-                const auto wrapped = WrapUtf8Lines(msg.text, kBodyCharsPerLine - 2, 0);  // -2 for prefix
+                const auto wrapped = WrapUtf8Lines(msg.text, kBodyCharsPerLine - 5, 0);  // -5 for "User: " or "LLM: " prefix
                 for (const auto& line : wrapped) {
                     chat_lines.push_back({line, msg.role == ChatRole::User});
                 }
@@ -2600,19 +2615,19 @@ void LanMicApp::UpdateDisplay() {
                 if (!transcript_text_.empty()) {
                     status_msg = transcript_text_;  // Show partial transcript
                 }
-                const auto wrapped = WrapUtf8Lines(status_msg, kBodyCharsPerLine - 2, 0);
+                const auto wrapped = WrapUtf8Lines(status_msg, kBodyCharsPerLine - 5, 0);  // -5 for "User: " prefix
                 for (const auto& line : wrapped) {
                     chat_lines.push_back({line, true});  // User input in progress
                 }
             } else if (phase_ == Phase::Running && !latest_assistant_text_.empty()) {
                 // Show AI response in progress
-                const auto wrapped = WrapUtf8Lines(latest_assistant_text_, kBodyCharsPerLine - 2, 0);
+                const auto wrapped = WrapUtf8Lines(latest_assistant_text_, kBodyCharsPerLine - 5, 0);  // -5 for "LLM: " prefix
                 for (const auto& line : wrapped) {
                     chat_lines.push_back({line, false});  // AI response
                 }
             } else if (has_pending_transcript_ && !transcript_text_.empty()) {
                 // Show pending transcript awaiting action
-                const auto wrapped = WrapUtf8Lines(transcript_text_, kBodyCharsPerLine - 2, 0);
+                const auto wrapped = WrapUtf8Lines(transcript_text_, kBodyCharsPerLine - 5, 0);  // -5 for "User: " prefix
                 for (const auto& line : wrapped) {
                     chat_lines.push_back({line, true});  // User message pending
                 }
@@ -2632,22 +2647,22 @@ void LanMicApp::UpdateDisplay() {
             const int display_offset = std::clamp(summary_scroll_offset_, 0, max_offset);
             summary_scroll_offset_ = display_offset;  // Store for next iteration
 
-            // Render lines with alignment
+            // Render lines with alignment and role prefix
             int y = kChatStartY;
             for (int i = display_offset; i < total_lines && y < kChatEndY; ++i) {
                 const auto& [line, is_user] = chat_lines[i];
                 std::string display_line;
                 int x_pos;
                 if (is_user) {
-                    // User message: prefix ">", right-aligned
-                    display_line = ">" + line;
+                    // User message: prefix "User: ", right-aligned with slight indent
+                    display_line = "User: " + line;
                     // Right-align: calculate x position based on line length
-                    // Each char ~8px (16px font), screen width 400, right margin ~10
-                    x_pos = std::max(12, static_cast<int>(400 - 10 - display_line.size() * 8));
+                    // Each char ~8px (16px font), screen width 400, right margin ~8
+                    x_pos = std::max(8, static_cast<int>(400 - 8 - display_line.size() * 8));
                 } else {
-                    // AI/system message: prefix "<", left-aligned
-                    display_line = "<" + line;
-                    x_pos = 12;
+                    // AI/system message: prefix "LLM: ", left-aligned
+                    display_line = "LLM: " + line;
+                    x_pos = 8;
                 }
                 texts.push_back({display_line, x_pos, y, 16});
                 y += kLineHeight;
