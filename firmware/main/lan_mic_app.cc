@@ -3785,7 +3785,6 @@ void LanMicApp::UpdateDisplay() {
             constexpr int kMarginX = 12;     // 左右边距（AI消息左对齐）
             constexpr int kMarginXRight = 0;   // 用户消息右边距（紧贴右边缘）
             constexpr int kBubbleMargin = 4; // 气泡内边距
-            constexpr int kBubbleRadius = 4; // 圆角半径
 
             // Build all lines from chat history
             std::vector<std::pair<std::string, bool>> chat_lines;  // (text, is_user)
