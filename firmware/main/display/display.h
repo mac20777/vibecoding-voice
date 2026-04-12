@@ -41,6 +41,9 @@ public:
     virtual void RequestUrgentRefresh() {}
     virtual void RequestUrgentFullRefresh() {}
 
+    // 获取 LVGL display 对象（用于 LVGL UI 模块）
+    virtual lv_display_t* GetLvDisplay() { return nullptr; }
+
     // 写入原始 1bpp 位图数据到帧缓冲区（由子类实现）
     // data 中 bit=1 表示黑色像素，bit=0 表示白色像素
     virtual void WriteRaw1bpp(int x, int y, int w, int h, const uint8_t* data, size_t len) { (void)x; (void)y; (void)w; (void)h; (void)data; (void)len; }

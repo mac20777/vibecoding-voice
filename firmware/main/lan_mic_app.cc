@@ -275,6 +275,16 @@ bool LanMicApp::Initialize() {
         return false;
     }
 
+    // 初始化 LVGL UI 管理器（如果 display 支持 LVGL）
+    if (display_ != nullptr) {
+        lv_display_t* lv_display = display_->GetLvDisplay();
+        if (lv_display != nullptr) {
+            ui_manager_ = std::make_unique<ui::UiManager>();
+            ui_manager_->Init(lv_display);
+            ESP_LOGI(kTag, "LVGL UI Manager initialized");
+        }
+    }
+
     ConfigureButtons();
     // The e-paper status bar already shows device state; keep the board LED
     // off so power/app LED blinking does not look like an error or recording.
@@ -2360,15 +2370,30 @@ void LanMicApp::SwitchPage(Page page) {
     if (page == Page::Todo || page == Page::Summary) {
         SyncVoiceModeToPage(page);
     }
-    // 切换到全屏页面时强制全屏刷新，清除残留图像（修复 UI 叠加 Bug）
-    const bool full_screen_page = (page == Page::LifeBar ||
-                                    page == Page::Almanac ||
-                                    page == Page::Weather ||
-                                    page == Page::Countdown);
-    if (full_screen_page && display_ != nullptr) {
-        display_->RequestUrgentFullRefresh();
+
+    // 使用 LVGL UI 管理器切换页面（如果已初始化）
+    if (ui_manager_) {
+        ui::PageId ui_page = ui::PageId::Chat;  // 默认对话页
+        switch (page) {
+            case Page::Summary: ui_page = ui::PageId::Chat; break;
+            case Page::Weather: ui_page = ui::PageId::Weather; break;
+            case Page::LifeBar: ui_page = ui::PageId::LifeBar; break;
+            case Page::Almanac: ui_page = ui::PageId::Almanac; break;
+            case Page::Settings: ui_page = ui::PageId::Settings; break;
+            default: ui_page = ui::PageId::Chat; break;
+        }
+        ui_manager_->SwitchPage(ui_page);
+    } else {
+        // 回退到 raw draw 模式
+        const bool full_screen_page = (page == Page::LifeBar ||
+                                        page == Page::Almanac ||
+                                        page == Page::Weather ||
+                                        page == Page::Countdown);
+        if (full_screen_page && display_ != nullptr) {
+            display_->RequestUrgentFullRefresh();
+        }
+        UpdateDisplay();
     }
-    UpdateDisplay();
 }
 
 void LanMicApp::EnterSettings() {
@@ -3643,6 +3668,13 @@ void LanMicApp::UpdateDisplay() {
         return;
     }
 
+    // 如果 LVGL UI 管理器已初始化，使用 LVGL widget
+    if (ui_manager_) {
+        UpdateLvglDisplay();
+        return;
+    }
+
+    // 以下是旧的 raw draw 实现（回退模式）
     std::vector<Display::TextItem> texts;
     auto single_line = [](const std::string& value, size_t max_chars) -> std::string {
         const auto lines = WrapUtf8Lines(value, max_chars, 1);
@@ -4115,6 +4147,170 @@ void LanMicApp::UpdateDisplay() {
         DrawBatteryIcon(380, battery_y, display_battery_level, display_battery_charging, battery_vertical_);
     }
     display_->RequestUrgentRefresh();
+}
+
+void LanMicApp::UpdateLvglDisplay() {
+    if (!ui_manager_) return;
+
+    // 先更新状态栏
+    ui::StatusBarData status_data;
+    const char* titles[] = {"对话", "天气", "人生进度", "老黄历", "设置"};
+    status_data.page_title = titles[static_cast<int>(ui_manager_->GetCurrentPage())];
+    status_data.wifi_connected = IsWifiConnected();
+    status_data.server_connected = IsServerConnected();
+    status_data.battery_level = battery_known_ ? battery_level_ : -1;
+    status_data.battery_charging = battery_charging_;
+    ui_manager_->UpdateStatusBar(status_data);
+
+    // 获取当前页面并更新数据
+    ui::PageId current_page = ui_manager_->GetCurrentPage();
+
+    switch (current_page) {
+        case ui::PageId::Chat: {
+            ui::ChatPage* chat_page = ui_manager_->GetChatPage();
+            if (chat_page) {
+                // 清空现有消息
+                chat_page->Clear();
+
+                // 添加历史消息
+                for (const auto& msg : chat_history_) {
+                    ui::ChatRole role = (msg.role == ChatRole::User) ?
+                        ui::ChatRole::User : ui::ChatRole::AI;
+                    chat_page->AddMessage(msg.text, role);
+                }
+
+                // 添加当前状态提示
+                if (phase_ == Phase::Recording) {
+                    chat_page->ShowStatus("正在录音...", ui::ChatRole::User);
+                } else if (phase_ == Phase::Transcribing) {
+                    chat_page->ShowStatus("识别中...", ui::ChatRole::User);
+                } else if (phase_ == Phase::Running) {
+                    if (latest_assistant_text_.empty()) {
+                        chat_page->ShowStatus("正在思考...", ui::ChatRole::AI);
+                    } else {
+                        chat_page->AddMessage(latest_assistant_text_, ui::ChatRole::AI);
+                    }
+                } else if (has_pending_transcript_ && !transcript_text_.empty()) {
+                    chat_page->AddMessage(transcript_text_, ui::ChatRole::User);
+                } else if (chat_history_.empty() && phase_ == Phase::Idle) {
+                    std::string hint = hint_text_.empty() ?
+                        "按 BOOT 键开始对话" : hint_text_;
+                    chat_page->ShowStatus(hint, ui::ChatRole::System);
+                }
+            }
+            break;
+        }
+
+        case ui::PageId::Weather: {
+            ui::WeatherPage* weather_page = ui_manager_->GetWeatherPage();
+            if (weather_page && weather_state_.has_data) {
+                ui::WeatherData data;
+                data.city = weather_state_.city;
+                data.temp = std::to_string(weather_state_.today_temp) + "°C";
+                data.condition = weather_state_.today_desc;
+                data.humidity = "湿度: " + std::to_string(weather_state_.today_humidity) + "%";
+                data.wind = weather_state_.today_wind_dir +
+                    " " + std::to_string(weather_state_.today_wind_level) + "级";
+                weather_page->UpdateWeather(data);
+            }
+            break;
+        }
+
+        case ui::PageId::LifeBar: {
+            ui::LifeBarPage* lifebar_page = ui_manager_->GetLifeBarPage();
+            if (lifebar_page) {
+                UpdateLifeBarState();
+                ui::LifeBarData data;
+                data.age = std::to_string(lifebar_state_.age);
+                data.goal = "人生进度";
+                data.progress = std::to_string(static_cast<int>(lifebar_state_.life_pct)) + "%";
+                lifebar_page->UpdateData(data);
+            }
+            break;
+        }
+
+        case ui::PageId::Almanac: {
+            ui::AlmanacPage* almanac_page = ui_manager_->GetAlmanacPage();
+            if (almanac_page) {
+                UpdateAlmanacState();
+                ui::AlmanacData data;
+                data.date = std::to_string(almanac_state_.year) + "/" +
+                    std::to_string(almanac_state_.month) + "/" +
+                    std::to_string(almanac_state_.day);
+                data.lunar_date = almanac_state_.lunar_date;
+                data.suit = almanac_state_.yi;
+                data.avoid = almanac_state_.ji;
+                data.auspicious = almanac_state_.direction;
+                almanac_page->UpdateData(data);
+            }
+            break;
+        }
+
+        case ui::PageId::Settings: {
+            ui::SettingsPage* settings_page = ui_manager_->GetSettingsPage();
+            if (settings_page) {
+                // 构建设置项列表
+                std::vector<ui::SettingsItem> items;
+
+                // Wi-Fi 状态
+                std::string wifi_label;
+                if (network_state_ == NetworkState::Offline) {
+                    wifi_label = "未连接";
+                } else if (network_state_ == NetworkState::Config) {
+                    wifi_label = "配置模式";
+                } else if (IsWifiConnected()) {
+                    wifi_label = WifiManager::GetInstance().GetSsid();
+                    if (wifi_label.empty()) wifi_label = "已连接";
+                } else {
+                    wifi_label = "连接中";
+                }
+                items.push_back({"Wi-Fi", wifi_label, [this]() { EnterWifiSetupMode(); }});
+
+                // 服务状态
+                std::string server_label = IsServerConnected() ? "在线" : "离线";
+                items.push_back({"服务", server_label, nullptr});
+
+                // 音量
+                items.push_back({"音量", std::to_string(volume_) + "%", nullptr});
+
+                // 电池预览调试（Spec v2 要求）
+                std::string battery_preview_value;
+                if (battery_preview_active_) {
+                    battery_preview_value = "[" + std::to_string(battery_preview_level_) + "%]";
+                }
+                items.push_back({"电池预览", battery_preview_value, [this]() {
+                    // 循环切换电池等级：0 -> 20 -> 50 -> 80 -> 100 -> 0
+                    const int levels[] = {0, 20, 50, 80, 100};
+                    int current_idx = 0;
+                    for (int i = 0; i < 5; ++i) {
+                        if (battery_preview_level_ == levels[i]) {
+                            current_idx = i;
+                            break;
+                        }
+                    }
+                    if (!battery_preview_active_) {
+                        battery_preview_active_ = true;
+                        battery_preview_level_ = 0;
+                    } else {
+                        battery_preview_level_ = levels[(current_idx + 1) % 5];
+                    }
+                    UpdateLvglDisplay();
+                }});
+
+                // 重启
+                items.push_back({"重启", "", [this]() { esp_restart(); }});
+
+                // 关机
+                items.push_back({"关机", "", [this]() { Shutdown(); }});
+
+                settings_page->SetItems(items);
+            }
+            break;
+        }
+    }
+
+    // 刷新显示
+    ui_manager_->RefreshNow();
 }
 
 void LanMicApp::Run() {

@@ -30,6 +30,13 @@ set(SOURCES
     "boards/zectrix-s3-epaper-4.2/zectrix-s3-epaper-4.2.cc"
     "boards/zectrix-s3-epaper-4.2/FT/acoustic_selftest.cc"
     "boards/zectrix-s3-epaper-4.2/FT/factory_test_service.cc"
+    "ui/ui_manager.cc"
+    "ui/pages/chat_page.cc"
+    "ui/pages/weather_page.cc"
+    "ui/pages/lifebar_page.cc"
+    "ui/pages/almanac_page.cc"
+    "ui/pages/settings_page.cc"
+    "ui/widgets/status_bar.cc"
 )
 
 set(INCLUDE_DIRS
@@ -37,6 +44,9 @@ set(INCLUDE_DIRS
     "audio"
     "display"
     "display/lvgl_display"
+    "ui"
+    "ui/pages"
+    "ui/widgets"
     "protocols"
     "components/78__esp-ml307/include"
     "boards/common"

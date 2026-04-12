@@ -16,6 +16,7 @@
 #include "board.h"
 #include "button.h"
 #include "display/display.h"
+#include "ui/ui_manager.h"
 
 class WebSocket;
 
@@ -31,6 +32,7 @@ private:
     AudioCodec* codec_ = nullptr;
     Display* display_ = nullptr;
     std::unique_ptr<WebSocket> ws_;
+    std::unique_ptr<ui::UiManager> ui_manager_;  // LVGL UI 管理器
     EventGroupHandle_t wifi_event_group_ = nullptr;
     Button up_button_;
     Button down_button_;
@@ -359,6 +361,9 @@ private:
     // 绘制真正的气泡边框（符合 Spec §3）
     void DrawBubble(int x, int y, int w, int h, bool filled, int radius = 4);
     void UpdateDisplay();
+
+    // LVGL UI 更新方法
+    void UpdateLvglDisplay();
 };
 
 #endif // LAN_MIC_APP_H
