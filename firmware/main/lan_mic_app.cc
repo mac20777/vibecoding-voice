@@ -55,6 +55,7 @@ constexpr char kTag[] = "LanMicApp";
 constexpr char kDiscoveryService[] = "vibecoding-voice";
 constexpr char kLanMicNamespace[] = "lan_mic";
 constexpr char kVolumeKey[] = "volume";
+constexpr char kBatteryStyleKey[] = "bat_style";  // 电池方向: 0=横向, 1=纵向
 constexpr char kLastServerUriKey[] = "last_srv_uri";
 constexpr char kPairedHostIdKey[] = "pair_host_id";
 constexpr char kPairedHostNameKey[] = "pair_host_nm";
@@ -152,29 +153,6 @@ constexpr uint8_t kWifiIconConnecting12x12[] = {
 
 // 竖向电池图标 (10x18) - 轮廓 + 动态填充
 // 设计: 顶部有充电指示头，主体为竖向柱状条
-constexpr uint8_t kBatteryIconV10x18_outline[] = {
-    // 顶部充电头 (3行)
-    0x30, 0x00,  // row 0:   ██         (充电头)
-    0x78, 0x00,  // row 1:  ████
-    0xFC, 0x00,  // row 2: ██████
-    // 电池主体轮廓 (14行)
-    0xFE, 0x00,  // row 3: ████████  (左边界)
-    0x82, 0x00,  // row 4: █      █
-    0x82, 0x00,  // row 5: █      █
-    0x82, 0x00,  // row 6: █      █
-    0x82, 0x00,  // row 7: █      █
-    0x82, 0x00,  // row 8: █      █
-    0x82, 0x00,  // row 9: █      █
-    0x82, 0x00,  // row 10: █      █
-    0x82, 0x00,  // row 11: █      █
-    0x82, 0x00,  // row 12: █      █
-    0x82, 0x00,  // row 13: █      █
-    0x82, 0x00,  // row 14: █      █
-    0xFE, 0x00,  // row 15: ████████  (底部封闭)
-    0xFE, 0x00,  // row 16: ████████
-    0xFE, 0x00,  // row 17: ████████
-};
-
 std::vector<std::string> WrapUtf8Lines(const std::string& text, size_t max_chars, size_t max_lines = 0) {
     std::vector<std::string> lines;
     std::string current;
@@ -408,6 +386,7 @@ bool LanMicApp::Initialize() {
 void LanMicApp::LoadPersistedNetworkState() {
     Settings nvs(kLanMicNamespace);
     volume_ = nvs.GetInt(kVolumeKey, 70);
+    battery_vertical_ = nvs.GetInt(kBatteryStyleKey, 0) != 0;  // 默认横向
     cached_server_uri_ = nvs.GetString(kLastServerUriKey, "");
     paired_host_id_ = nvs.GetString(kPairedHostIdKey, "");
     paired_host_name_ = nvs.GetString(kPairedHostNameKey, "");
@@ -2415,6 +2394,11 @@ void LanMicApp::SaveVolume() {
     nvs.SetInt(kVolumeKey, volume_);
 }
 
+void LanMicApp::SaveBatteryStyle() {
+    Settings nvs(kLanMicNamespace, true);
+    nvs.SetInt(kBatteryStyleKey, battery_vertical_ ? 1 : 0);
+}
+
 // ============================================================
 // 倒计时功能实现
 // ============================================================
@@ -3150,6 +3134,12 @@ void LanMicApp::ExecuteSettingsItem(int item) {
             }
             UpdateDisplay();
             break;
+        case kSettingsItemBatteryStyle:
+            // 电池方向切换：横向 ↔ 纵向
+            battery_vertical_ = !battery_vertical_;
+            SaveBatteryStyle();
+            UpdateDisplay();
+            break;
         case kSettingsItemRestart:
             // 重启设备
             status_text_ = "重启中...";
@@ -3414,20 +3404,18 @@ void LanMicApp::DrawWifiIcon(int x, int y) {
     display_->WriteRaw1bpp(x, y, 12, 12, icon_data, icon_len);
 }
 
-void LanMicApp::DrawBatteryIcon(int x, int y, int level, bool charging) {
+void LanMicApp::DrawBatteryIcon(int x, int y, int level, bool charging, bool vertical) {
     if (display_ == nullptr) {
         return;
     }
 
-    // 横向 3 节电池图标 (18x10)
-    // Spec v3: 外包矩形框，内部按 3 格划分水位
-    // 0-33%: 1格, 34-66%: 2格, 67-100%: 3格
-    const int w = 18;
-    const int h = 10;
-    const int bytes_per_row = (w + 7) / 8;  // 3 bytes per row
+    // 根据方向选择尺寸
+    const int w = vertical ? 10 : 18;
+    const int h = vertical ? 18 : 10;
+    const int bytes_per_row = (w + 7) / 8;
     std::vector<uint8_t> buffer(bytes_per_row * h, 0x00);
 
-    auto set_pixel = [&buffer, bytes_per_row, w](int px, int py, bool black) {
+    auto set_pixel = [&buffer, bytes_per_row, w, h](int px, int py, bool black) {
         if (px < 0 || px >= w || py < 0 || py >= h) return;
         const int byte_idx = py * bytes_per_row + (px / 8);
         const int bit_idx = 7 - (px % 8);
@@ -3438,58 +3426,111 @@ void LanMicApp::DrawBatteryIcon(int x, int y, int level, bool charging) {
         }
     };
 
-    // 外框（矩形边框 1px）
-    for (int px = 0; px < w; ++px) {
-        set_pixel(px, 0, true);       // 顶部边框
-        set_pixel(px, h - 1, true);   // 底部边框
-    }
-    for (int py = 0; py < h; ++py) {
-        set_pixel(0, py, true);       // 左边框
-        set_pixel(w - 2, py, true);   // 右边框（电池头在右端）
-    }
+    if (vertical) {
+        // 纵向电池 (10x18)，电池头在顶部，内部 3 格水平分隔
+        // 外框（矩形边框 1px）
+        for (int px = 0; px < w; ++px) {
+            set_pixel(px, 2, true);       // 主体顶部边框
+            set_pixel(px, h - 1, true);   // 底部边框
+        }
+        for (int py = 2; py < h; ++py) {
+            set_pixel(0, py, true);       // 左边框
+            set_pixel(w - 1, py, true);   // 右边框
+        }
 
-    // 电池头（右侧突出的小矩形）
-    set_pixel(w - 1, 2, true);
-    set_pixel(w - 1, 3, true);
-    set_pixel(w - 1, 4, true);
-    set_pixel(w - 1, 5, true);
-    set_pixel(w - 1, 6, true);
-    set_pixel(w - 1, 7, true);
+        // 电池头（顶部突出的小矩形）
+        for (int px = 2; px < w - 2; ++px) {
+            set_pixel(px, 0, true);  // 电池头顶部
+            set_pixel(px, 1, true);  // 电池头底部
+        }
 
-    // 内部 3 格分隔线（垂直线）
-    const int cell_width = (w - 2) / 3;  // 每格宽度约 5px
-    for (int py = 1; py < h - 1; ++py) {
-        set_pixel(cell_width, py, true);      // 第1格右边界
-        set_pixel(cell_width * 2, py, true);  // 第2格右边界
-    }
+        // 内部 3 格分隔线（水平线）
+        const int body_height = h - 3;  // 主体高度 (15)
+        const int cell_height = body_height / 3;  // 每格高度约 5px
+        for (int px = 1; px < w - 1; ++px) {
+            set_pixel(px, 2 + cell_height, true);      // 第1格底边界
+            set_pixel(px, 2 + cell_height * 2, true);  // 第2格底边界
+        }
 
-    // 计算填充格数：0-33% 1格, 34-66% 2格, 67-100% 3格
-    int filled_cells = 0;
-    if (level >= 67) filled_cells = 3;
-    else if (level >= 34) filled_cells = 2;
-    else if (level > 0) filled_cells = 1;
+        // 计算填充格数：0-33% 1格, 34-66% 2格, 67-100% 3格
+        int filled_cells = 0;
+        if (level >= 67) filled_cells = 3;
+        else if (level >= 34) filled_cells = 2;
+        else if (level > 0) filled_cells = 1;
 
-    // 填充格子（从左到右）
-    for (int cell = 0; cell < filled_cells; ++cell) {
-        int cell_start = 1 + cell * cell_width;
-        int cell_end = cell_start + cell_width - 1;
-        for (int px = cell_start; px < cell_end; ++px) {
-            for (int py = 1; py < h - 1; ++py) {
-                set_pixel(px, py, true);
+        // 填充格子（从底部向上）
+        for (int cell = 0; cell < filled_cells; ++cell) {
+            int cell_start = h - 1 - cell * cell_height - cell_height;
+            int cell_end = h - 1 - cell * cell_height;
+            for (int py = cell_start + 1; py < cell_end; ++py) {
+                for (int px = 1; px < w - 1; ++px) {
+                    set_pixel(px, py, true);
+                }
             }
         }
-    }
 
-    // 充电状态：在中间格显示闪电符号
-    if (charging) {
-        // 闪电在电池中央
-        int cx = (w - 2) / 2;
-        set_pixel(cx - 1, 2, true);
-        set_pixel(cx, 3, true);
-        set_pixel(cx - 2, 4, true);
-        set_pixel(cx + 1, 5, true);
-        set_pixel(cx, 6, true);
-        set_pixel(cx - 1, 7, true);
+        // 充电状态：在中间格显示闪电符号
+        if (charging) {
+            int cy = 2 + cell_height + cell_height / 2;  // 中间格中心
+            set_pixel(3, cy - 2, true);
+            set_pixel(4, cy - 1, true);
+            set_pixel(2, cy, true);
+            set_pixel(5, cy + 1, true);
+            set_pixel(4, cy + 2, true);
+            set_pixel(3, cy + 3, true);
+        }
+    } else {
+        // 横向电池 (18x10)，电池头在右侧，内部 3 格垂直分隔
+        // 外框（矩形边框 1px）
+        for (int px = 0; px < w - 2; ++px) {
+            set_pixel(px, 0, true);       // 顶部边框
+            set_pixel(px, h - 1, true);   // 底部边框
+        }
+        for (int py = 0; py < h; ++py) {
+            set_pixel(0, py, true);       // 左边框
+            set_pixel(w - 3, py, true);   // 右边框（电池头在右端）
+        }
+
+        // 电池头（右侧突出的小矩形）
+        for (int py = 2; py < h - 2; ++py) {
+            set_pixel(w - 2, py, true);  // 电池头左部
+            set_pixel(w - 1, py, true);  // 电池头右部
+        }
+
+        // 内部 3 格分隔线（垂直线）
+        const int cell_width = (w - 3) / 3;  // 每格宽度约 5px
+        for (int py = 1; py < h - 1; ++py) {
+            set_pixel(cell_width, py, true);      // 第1格右边界
+            set_pixel(cell_width * 2, py, true);  // 第2格右边界
+        }
+
+        // 计算填充格数：0-33% 1格, 34-66% 2格, 67-100% 3格
+        int filled_cells = 0;
+        if (level >= 67) filled_cells = 3;
+        else if (level >= 34) filled_cells = 2;
+        else if (level > 0) filled_cells = 1;
+
+        // 填充格子（从左到右）
+        for (int cell = 0; cell < filled_cells; ++cell) {
+            int cell_start = 1 + cell * cell_width;
+            int cell_end = cell_start + cell_width - 1;
+            for (int px = cell_start; px < cell_end; ++px) {
+                for (int py = 1; py < h - 1; ++py) {
+                    set_pixel(px, py, true);
+                }
+            }
+        }
+
+        // 充电状态：在中间格显示闪电符号
+        if (charging) {
+            int cx = cell_width + cell_width / 2;  // 中间格中心
+            set_pixel(cx - 1, 2, true);
+            set_pixel(cx, 3, true);
+            set_pixel(cx - 2, 4, true);
+            set_pixel(cx + 1, 5, true);
+            set_pixel(cx, 6, true);
+            set_pixel(cx - 1, 7, true);
+        }
     }
 
     // 低电量警告 (<20%): 反白显示
@@ -3666,7 +3707,9 @@ void LanMicApp::UpdateDisplay() {
         if (battery_known_ && battery_level_ < 20 && !battery_charging_) {
             battery_pct_text = "!" + battery_pct_text;
         }
-        texts.push_back({battery_pct_text, 340, 8, 16});  // 左移避免和电池图标重叠
+        // 根据电池方向调整百分比位置：横向 (y=8)，纵向 (y=5)
+        int pct_y = battery_vertical_ ? 5 : 8;
+        texts.push_back({battery_pct_text, 340, pct_y, 16});
 
         const char* page_label = active_page_ == Page::Summary ? "对话"
                                : active_page_ == Page::Todo    ? "Todo"
@@ -3917,6 +3960,11 @@ void LanMicApp::UpdateDisplay() {
         }
         items.push_back({FONT_ZECTRIX_ICON_POWER, battery_preview_label});
 
+        // 电池方向切换
+        std::string battery_style_label = "电池方向: ";
+        battery_style_label += battery_vertical_ ? "纵向" : "横向";
+        items.push_back({FONT_ZECTRIX_ICON_POWER, battery_style_label});
+
         // 重启设备
         items.push_back({FONT_ZECTRIX_ICON_REBOOT, "重启设备"});
 
@@ -4062,7 +4110,9 @@ void LanMicApp::UpdateDisplay() {
         // 电池图标（预览模式时显示预览等级）
         int display_battery_level = battery_preview_active_ ? battery_preview_level_ : (battery_known_ ? battery_level_ : 0);
         bool display_battery_charging = battery_preview_active_ ? false : battery_charging_;
-        DrawBatteryIcon(380, 4, display_battery_level, display_battery_charging);  // 横向电池 (18x10) 在 y=4
+        // 根据电池方向调整坐标：横向 18x10 (y=4)，纵向 10x18 (y=0)
+        int battery_y = battery_vertical_ ? 0 : 4;
+        DrawBatteryIcon(380, battery_y, display_battery_level, display_battery_charging, battery_vertical_);
     }
     display_->RequestUrgentRefresh();
 }
