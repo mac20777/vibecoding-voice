@@ -13,8 +13,8 @@ if((${IDF_TARGET} STREQUAL "esp32s3") OR (${IDF_TARGET} STREQUAL "esp32p4") OR (
         )
 
     set(requires
+        json
         spiffs
-        cjson
         )
 
     IF (IDF_VERSION_MAJOR GREATER 4)

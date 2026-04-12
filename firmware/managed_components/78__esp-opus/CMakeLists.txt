@@ -178,8 +178,8 @@ set(OPUS_COMPILE_OPTIONS
     -DHAVE_MEMORY_H
     -DUSE_ALLOCA
     -DOPUS_BUILD
-    -O2
-    -Wno-maybe-uninitialized
+    -O0
+    -Wno-uninitialized
     -Wno-unused-variable
 )
 

@@ -1,4 +1,3 @@
-#include <cmath>
 // Copyright 2020-2021 Espressif Systems (Shanghai) PTE LTD
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,7 +13,9 @@
 // limitations under the License.
 
 #include "ekf.h"
+#include <cmath>
 #include <float.h>
+#include <cmath>
 
 ekf::ekf(int x, int w) : NUMX(x),
     NUMW(w),
@@ -251,12 +252,12 @@ dspm::Mat ekf::quat2eul(const float q[4])
 dspm::Mat ekf::eul2rotm(float xyz[3])
 {
     dspm::Mat result(3, 3);
-    float Cx = std::cos(xyz[0]);
-    float Sx = std::sin(xyz[0]);
-    float Cy = std::cos(xyz[1]);
-    float Sy = std::sin(xyz[1]);
-    float Cz = std::cos(xyz[2]);
-    float Sz = std::sin(xyz[2]);
+    float Cx = cos(xyz[0]);
+    float Sx = sin(xyz[0]);
+    float Cy = cos(xyz[1]);
+    float Sy = sin(xyz[1]);
+    float Cz = cos(xyz[2]);
+    float Sz = sin(xyz[2]);
 
     result(0, 0) = Cy * Cz;
     result(0, 1) = -Cy * Sz;

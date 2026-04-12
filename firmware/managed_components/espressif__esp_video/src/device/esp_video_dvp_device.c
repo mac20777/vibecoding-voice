@@ -67,7 +67,7 @@ static esp_err_t dvp_get_input_frame_type(esp_cam_sensor_output_format_t sensor_
         *bpp = 16;
         break;
     case ESP_CAM_SENSOR_PIXFORMAT_YUV422:
-        *in_color = CAM_CTLR_COLOR_YUV422_YVYU;
+        *in_color = CAM_CTLR_COLOR_YUV422_YUYV;
         *v4l2_format = V4L2_PIX_FMT_YUV422P;
         *bpp = 16;
         break;

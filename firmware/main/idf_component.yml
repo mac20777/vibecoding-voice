@@ -52,10 +52,6 @@ dependencies:
   espressif/esp_new_jpeg: ^0.6.1
 
   # SenseCAP Watcher Board
-  wvirgil123/sscma_client:
-    version: 1.0.2
-    rules:
-    - if: target in [esp32s3]
 
   tny-robotics/sh1106-esp-idf: ^1.0.0
   waveshare/esp_lcd_jd9365_10_1:

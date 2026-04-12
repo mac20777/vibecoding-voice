@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -53,6 +53,24 @@ typedef struct {
     TaskHandle_t     msg_sender_task;  /* Notify this task when action is handled */
     int              *result_ptr;      /* Where to store operation result (ESP_CODEC_DEV_OK/ERR) */
 } adc_mic_msg_t;
+
+/* `adc_continuous_config_t.format` is deprecated in some IDF versions. */
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+static inline void adc_continuous_config_set_format(adc_continuous_config_t *cfg, adc_digi_output_format_t format)
+{
+    cfg->format = format;
+}
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 static void adc_mic_worker_task(void *arg)
 {
@@ -135,9 +153,9 @@ static esp_err_t adc_channel_config(adc_data_t *adc_data, uint8_t *channel, uint
      *
      */
 #if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S2
-    dig_cfg.format = ADC_DIGI_OUTPUT_FORMAT_TYPE1;
+    adc_continuous_config_set_format(&dig_cfg, ADC_DIGI_OUTPUT_FORMAT_TYPE1);
 #else
-    dig_cfg.format = ADC_DIGI_OUTPUT_FORMAT_TYPE2;
+    adc_continuous_config_set_format(&dig_cfg, ADC_DIGI_OUTPUT_FORMAT_TYPE2);
 #endif
 
     adc_digi_pattern_config_t *adc_pattern = calloc(channel_num, sizeof(adc_digi_pattern_config_t));
@@ -186,6 +204,15 @@ static int _adc_data_enable(const audio_codec_data_if_t *h, esp_codec_dev_type_t
     return op_result;
 }
 
+__attribute__((always_inline)) static inline uint16_t adc_mic_get_raw_value(adc_digi_output_data_t sample)
+{
+#if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S2
+    return sample.type1.data;
+#else
+    return sample.type2.data;
+#endif
+}
+
 /**
  * @brief Read ADC data from the continuous ADC interface.
  *
@@ -222,7 +249,7 @@ static int _adc_data_read(const audio_codec_data_if_t *h, uint8_t *data, int siz
         uint16_t *p = (uint16_t *)&data[cnt];
         size_t item_count = ret_num / sizeof(adc_digi_output_data_t);
         for (int i = 0; i < item_count; i++) {
-            uint16_t raw_value = buffer[i].val;
+            uint16_t raw_value = adc_mic_get_raw_value(buffer[i]);
             // Left shift to amplify audio.
             p[i] = (raw_value << CONFIG_ADC_MIC_APPLY_GAIN) - CONFIG_ADC_MIC_OFFSET;
         }
@@ -238,7 +265,7 @@ static int _adc_data_read(const audio_codec_data_if_t *h, uint8_t *data, int siz
         uint16_t *p = (uint16_t *)&data[cnt];
         size_t item_count = ret_num / sizeof(adc_digi_output_data_t);
         for (int i = 0; i < item_count; i++) {
-            uint16_t raw_value = buffer[i].val & 0xFFFF;
+            uint16_t raw_value = adc_mic_get_raw_value(buffer[i]);
             // Left shift to amplify audio.
             p[i] = (raw_value << CONFIG_ADC_MIC_APPLY_GAIN) - CONFIG_ADC_MIC_OFFSET;
         }

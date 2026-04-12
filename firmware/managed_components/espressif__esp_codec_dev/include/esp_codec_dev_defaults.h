@@ -3,7 +3,6 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-
 #ifndef _ESP_CODEC_DEV_DEFAULTS_H_
 #define _ESP_CODEC_DEV_DEFAULTS_H_
 
@@ -11,52 +10,46 @@
 #include "audio_codec_ctrl_if.h"
 #include "audio_codec_data_if.h"
 #include "audio_codec_gpio_if.h"
-#ifdef CONFIG_CODEC_DATA_ADC_SUPPORT
-#include "esp_codec_adc.h"
-#endif  /* CONFIG_CODEC_DATA_ADC_SUPPORT */
 
 #ifdef CONFIG_CODEC_ES8311_SUPPORT
 #include "es8311_codec.h"
-#endif  /* CONFIG_CODEC_ES8311_SUPPORT */
+#endif
 #ifdef CONFIG_CODEC_ES7210_SUPPORT
 #include "es7210_adc.h"
-#endif  /* CONFIG_CODEC_ES7210_SUPPORT */
+#endif
 #ifdef CONFIG_CODEC_ES7243_SUPPORT
 #include "es7243_adc.h"
-#endif  /* CONFIG_CODEC_ES7243_SUPPORT */
+#endif
 #ifdef CONFIG_CODEC_ES7243E_SUPPORT
 #include "es7243e_adc.h"
-#endif  /* CONFIG_CODEC_ES7243E_SUPPORT */
+#endif
 #ifdef CONFIG_CODEC_ES8156_SUPPORT
 #include "es8156_dac.h"
-#endif  /* CONFIG_CODEC_ES8156_SUPPORT */
+#endif
 #ifdef CONFIG_CODEC_AW88298_SUPPORT
 #include "aw88298_dac.h"
-#endif  /* CONFIG_CODEC_AW88298_SUPPORT */
+#endif
 #ifdef CONFIG_CODEC_ES8389_SUPPORT
 #include "es8389_codec.h"
-#endif  /* CONFIG_CODEC_ES8389_SUPPORT */
+#endif
 #ifdef CONFIG_CODEC_ES8374_SUPPORT
 #include "es8374_codec.h"
-#endif  /* CONFIG_CODEC_ES8374_SUPPORT */
+#endif
 #ifdef CONFIG_CODEC_ES8388_SUPPORT
 #include "es8388_codec.h"
-#endif  /* CONFIG_CODEC_ES8388_SUPPORT */
+#endif
 #ifdef CONFIG_CODEC_TAS5805M_SUPPORT
 #include "tas5805m_dac.h"
-#endif  /* CONFIG_CODEC_TAS5805M_SUPPORT */
+#endif
 #ifdef CONFIG_CODEC_ZL38063_SUPPORT
 #include "zl38063_codec.h"
-#endif  /* CONFIG_CODEC_ZL38063_SUPPORT */
+#endif
 #if CONFIG_CODEC_CJC8910_SUPPORT
 #include "cjc8910_codec.h"
-#endif  /* CONFIG_CODEC_CJC8910_SUPPORT */
-#if CONFIG_CODEC_DUMMY_SUPPORT
-#include "dummy_codec.h"
-#endif  /* CONFIG_CODEC_DUMMY_SUPPORT */
+#endif
 #ifdef __cplusplus
 extern "C" {
-#endif  /* __cplusplus */
+#endif
 
 /**
  * @brief Codec I2C configuration

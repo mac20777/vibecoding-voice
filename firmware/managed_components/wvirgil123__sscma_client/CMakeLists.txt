@@ -8,8 +8,8 @@ set(srcs "src/sscma_client_ops.c"
          "src/sscma_client_flasher_we2_spi.c"
          )
 set(includes "include" "interface")
-set(require "cjson" "mbedtls" "esp_timer" "esp_driver_gpio" "esp_driver_spi" "esp_driver_uart")
-set(priv_requires "driver")
+set(require "json" "mbedtls" "esp_timer" "driver")
+set(priv_requires "")
 
 idf_component_register(SRCS ${srcs}
                        INCLUDE_DIRS ${includes}

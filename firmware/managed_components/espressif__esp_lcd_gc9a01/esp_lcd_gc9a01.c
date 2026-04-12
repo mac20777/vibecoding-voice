@@ -74,17 +74,8 @@ esp_err_t esp_lcd_new_panel_gc9a01(const esp_lcd_panel_io_handle_t io, const esp
         break;
     }
 #else
-    switch (panel_dev_config->rgb_ele_order) {
-    case LCD_RGB_ELEMENT_ORDER_RGB:
-        gc9a01->madctl_val = 0;
-        break;
-    case LCD_RGB_ELEMENT_ORDER_BGR:
-        gc9a01->madctl_val |= LCD_CMD_BGR_BIT;
-        break;
-    default:
-        ESP_GOTO_ON_FALSE(false, ESP_ERR_NOT_SUPPORTED, err, TAG, "unsupported rgb element order");
-        break;
-    }
+    // v6.0 fix: removed deprecated rgb_endian/color_space
+    gc9a01->madctl_val = 0;
 #endif
 
     switch (panel_dev_config->bits_per_pixel) {

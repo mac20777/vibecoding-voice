@@ -1,4 +1,3 @@
-#include <cmath>
 // Copyright 2020-2021 Espressif Systems (Shanghai) PTE LTD
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,6 +13,8 @@
 // limitations under the License.
 
 #include "ekf_imu13states.h"
+#include <cmath>
+#include <cmath>
 
 ekf_imu13states::ekf_imu13states() : ekf(13, 18),
     mag0(3, 1),
@@ -152,9 +153,9 @@ void ekf_imu13states::TestFull(bool enable_att)
         }
         gyro_data *= 0; // reset gyro value
         if ((n >= (total_N / 2)) && (n < total_N * 12)) {
-            gyro_data(0, 0) = 1 / pi * std::cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
-            gyro_data(1, 0) = 2 / pi * std::cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
-            gyro_data(2, 0) = 3 / pi * std::cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
+            gyro_data(0, 0) = 1 / pi * cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
+            gyro_data(1, 0) = 2 / pi * cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
+            gyro_data(2, 0) = 3 / pi * cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
             count++;
         }
         dspm::Mat gyro_sample = gyro_data + gyro_err;

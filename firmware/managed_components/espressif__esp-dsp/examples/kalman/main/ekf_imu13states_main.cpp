@@ -86,9 +86,9 @@ void app_main()
         // Generate gyro values for system emulation
         gyro_data *= 0; // reset gyro value
         if ((n >= (total_N / 2)) && (n < total_N * 12)) {
-            gyro_data(0, 0) = 1 / pi * std::cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
-            gyro_data(1, 0) = 2 / pi * std::cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
-            gyro_data(2, 0) = 3 / pi * std::cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
+            gyro_data(0, 0) = 1 / pi * cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
+            gyro_data(1, 0) = 2 / pi * cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
+            gyro_data(2, 0) = 3 / pi * cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
             count++;
         }
         dspm::Mat gyro_sample = gyro_data + gyro_err;
@@ -149,9 +149,9 @@ void app_main()
         // Generate gyro values for system emulation
         gyro_data *= 0; // reset gyro value
         if ((n >= (total_N / 2)) && (n < total_N * 12)) {
-            gyro_data(0, 0) = 1 / pi * std::cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
-            gyro_data(1, 0) = 2 / pi * std::cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
-            gyro_data(2, 0) = 3 / pi * std::cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
+            gyro_data(0, 0) = 1 / pi * cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
+            gyro_data(1, 0) = 2 / pi * cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
+            gyro_data(2, 0) = 3 / pi * cos(-pi / 2 + pi / 2 * count * 2 / (total_N / 10));
             count++;
         }
         dspm::Mat gyro_sample = gyro_data + gyro_err;

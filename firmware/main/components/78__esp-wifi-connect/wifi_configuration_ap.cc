@@ -481,7 +481,7 @@ void WifiConfigurationAp::StartWebServer()
                     self->on_exit_requested_();
                 }
                 vTaskDelete(NULL);
-            }, "exit_config_task", 4096, this_, 5, NULL);
+            }, "exit_config_task", 8192, this_, 5, NULL);
             
             return ESP_OK;
         },
@@ -845,7 +845,7 @@ void WifiConfigurationAp::SmartConfigEventHandler(void *arg, esp_event_base_t ev
                     self->on_exit_requested_();
                 }
                 vTaskDelete(NULL);
-            }, "exit_config_task", 4096, self, 5, NULL);
+            }, "exit_config_task", 8192, self, 5, NULL);
             break;
         }
         case SC_EVENT_SEND_ACK_DONE:
