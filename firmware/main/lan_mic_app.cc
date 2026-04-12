@@ -279,7 +279,7 @@ bool LanMicApp::Initialize() {
     if (display_ != nullptr) {
         lv_display_t* lv_display = display_->GetLvDisplay();
         if (lv_display != nullptr) {
-            ui_manager_ = std::make_unique<ui::UiManager>();
+    ui_manager_ = std::make_unique<ui::UiManager>();
             ui_manager_->Init(lv_display);
             ESP_LOGI(kTag, "LVGL UI Manager initialized");
         }
@@ -1221,9 +1221,10 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         if (!has_pending_transcript_) {
             phase_ = Phase::Idle;
         }
-        // 连上服务器：上升双音
-        PlayBeep(600, 80);
-        PlayBeep(900, 100);
+        // 连上服务器：禁用提示音防止 crash
+        // PlayBeep(600, 80);
+        // PlayBeep(900, 100);
+        ESP_LOGI(kTag, "Server connected (Beep disabled)");
     } else if (strcmp(type, "server_ready") == 0) {
         status_text_ = "Ready";
         offline_todo_mode_ = false;
@@ -4154,7 +4155,7 @@ void LanMicApp::UpdateLvglDisplay() {
 
     // 先更新状态栏
     ui::StatusBarData status_data;
-    const char* titles[] = {"对话", "天气", "人生进度", "老黄历", "设置"};
+    const char* titles[] = {"对话", "Todo", "日志", "人生进度", "老黄历", "天气", "设置"};
     status_data.page_title = titles[static_cast<int>(ui_manager_->GetCurrentPage())];
     status_data.wifi_connected = IsWifiConnected();
     status_data.server_connected = IsServerConnected();
@@ -4264,22 +4265,22 @@ void LanMicApp::UpdateLvglDisplay() {
                 } else {
                     wifi_label = "连接中";
                 }
-                items.push_back({"Wi-Fi", wifi_label, [this]() { EnterWifiSetupMode(); }});
+                items.push_back({"Wi-Fi", wifi_label, ui::SettingsItemType::Normal, false, [this]() { EnterWifiSetupMode(); }});
 
                 // 服务状态
                 std::string server_label = IsServerConnected() ? "在线" : "离线";
-                items.push_back({"服务", server_label, nullptr});
+                items.push_back({"服务", server_label, ui::SettingsItemType::Normal, false, nullptr});
 
                 // 音量
-                items.push_back({"音量", std::to_string(volume_) + "%", nullptr});
+                items.push_back({"音量", std::to_string(volume_) + "%", ui::SettingsItemType::Normal, false, nullptr});
 
                 // 电池预览调试（Spec v2 要求）
                 std::string battery_preview_value;
                 if (battery_preview_active_) {
                     battery_preview_value = "[" + std::to_string(battery_preview_level_) + "%]";
                 }
-                items.push_back({"电池预览", battery_preview_value, [this]() {
-                    // 循环切换电池等级：0 -> 20 -> 50 -> 80 -> 100 -> 0
+                items.push_back({"电池预览", battery_preview_value, ui::SettingsItemType::Normal, false, [this]() {
+                    // 循环切换电池等级
                     const int levels[] = {0, 20, 50, 80, 100};
                     int current_idx = 0;
                     for (int i = 0; i < 5; ++i) {
@@ -4298,15 +4299,18 @@ void LanMicApp::UpdateLvglDisplay() {
                 }});
 
                 // 重启
-                items.push_back({"重启", "", [this]() { esp_restart(); }});
+                items.push_back({"重启", "", ui::SettingsItemType::Action, false, [this]() { esp_restart(); }});
 
                 // 关机
-                items.push_back({"关机", "", [this]() { Shutdown(); }});
+                items.push_back({"关机", "", ui::SettingsItemType::Action, false, [this]() { Shutdown(); }});
 
                 settings_page->SetItems(items);
             }
             break;
         }
+        default:
+            // Todo and Log pages are not fully implemented in LVGL yet
+            break;
     }
 
     // 刷新显示

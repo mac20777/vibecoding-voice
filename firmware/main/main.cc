@@ -12,6 +12,7 @@
 #include "application.h"
 #include "lan_mic_app.h"
 #include "system_info.h"
+#include "lvgl.h"
 
 #define TAG "main"
 
@@ -68,6 +69,8 @@ extern "C" void app_main(void)
     LogNvsStats();
 
 #if CONFIG_ZECTRIX_LAN_MIC_MODE
+    // Initialize LVGL library before creating any objects
+    lv_init();
     LanMicApp app;
     app.Run();
 #else

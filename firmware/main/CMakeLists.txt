@@ -32,6 +32,8 @@ set(SOURCES
     "boards/zectrix-s3-epaper-4.2/FT/factory_test_service.cc"
     "ui/ui_manager.cc"
     "ui/pages/chat_page.cc"
+    "ui/pages/todo_page.cc"
+    "ui/pages/log_page.cc"
     "ui/pages/weather_page.cc"
     "ui/pages/lifebar_page.cc"
     "ui/pages/almanac_page.cc"

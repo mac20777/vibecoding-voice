@@ -7,6 +7,8 @@
 #include <memory>
 
 #include "pages/chat_page.h"
+#include "pages/todo_page.h"
+#include "pages/log_page.h"
 #include "pages/weather_page.h"
 #include "pages/lifebar_page.h"
 #include "pages/almanac_page.h"
@@ -15,13 +17,15 @@
 
 namespace ui {
 
-// 页面索引
+// 页面索引（7个页面，按 spec_v2 顺序）
 enum class PageId {
     Chat = 0,      // AI 对话
-    Weather = 1,   // 天气看板
-    LifeBar = 2,   // 人生进度
-    Almanac = 3,   // 老黄历
-    Settings = 4,  // 设置
+    Todo = 1,      // Todo 任务列表
+    Log = 2,       // 系统日志
+    LifeBar = 3,   // 人生进度
+    Almanac = 4,   // 老黄历
+    Weather = 5,   // 天气看板
+    Settings = 6,  // 设置
 };
 
 // UI 管理器 - TabView 容器 + 状态栏
@@ -45,6 +49,9 @@ public:
     // 触发全局刷新（清除残影）
     void RequestFullRefresh();
 
+    // 清除内容区域（保留状态栏，spec_v3 §5）
+    void ClearContentArea();
+
     // 更新状态栏
     void UpdateStatusBar(const StatusBarData& data);
 
@@ -54,6 +61,8 @@ public:
 
     // 页面实例访问
     ChatPage* GetChatPage() { return chat_page_.get(); }
+    TodoPage* GetTodoPage() { return todo_page_.get(); }
+    LogPage* GetLogPage() { return log_page_.get(); }
     WeatherPage* GetWeatherPage() { return weather_page_.get(); }
     LifeBarPage* GetLifeBarPage() { return lifebar_page_.get(); }
     AlmanacPage* GetAlmanacPage() { return almanac_page_.get(); }
@@ -62,7 +71,7 @@ public:
 private:
     lv_display_t* display_ = nullptr;
     lv_obj_t* tabview_ = nullptr;
-    lv_obj_t* tabs_[5] = {nullptr};  // 5 个页面对象
+    lv_obj_t* tabs_[7] = {nullptr};  // 7 个页面对象
     PageId current_page_ = PageId::Chat;
     int refresh_count_ = 0;
     bool full_refresh_pending_ = false;
@@ -72,6 +81,8 @@ private:
 
     // 页面实例
     std::unique_ptr<ChatPage> chat_page_;
+    std::unique_ptr<TodoPage> todo_page_;
+    std::unique_ptr<LogPage> log_page_;
     std::unique_ptr<WeatherPage> weather_page_;
     std::unique_ptr<LifeBarPage> lifebar_page_;
     std::unique_ptr<AlmanacPage> almanac_page_;
