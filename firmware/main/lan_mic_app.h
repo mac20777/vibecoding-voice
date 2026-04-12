@@ -350,6 +350,8 @@ private:
     void DrawHorizontalLine(int y, int thickness = 1);
     void DrawWifiIcon(int x, int y);
     void DrawBatteryIcon(int x, int y, int level, bool charging);
+    // 绘制真正的气泡边框（符合 Spec §3）
+    void DrawBubble(int x, int y, int w, int h, bool filled, int radius = 4);
     void UpdateDisplay();
 };
 

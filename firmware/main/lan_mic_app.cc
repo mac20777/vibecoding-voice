@@ -3352,6 +3352,89 @@ void LanMicApp::DrawBatteryIcon(int x, int y, int level, bool charging) {
     display_->WriteRaw1bpp(x, y, 10, 18, buffer.data(), buffer.size());
 }
 
+// 绘制真正的气泡边框（符合 Spec §3）
+// filled=true: 用户消息（实心填充/深色）
+// filled=false: AI消息（边框/浅色填充）
+void LanMicApp::DrawBubble(int x, int y, int w, int h, bool filled, int radius) {
+    if (display_ == nullptr || w <= 0 || h <= 0) {
+        return;
+    }
+
+    // 1bpp 位图：每行宽度按字节对齐（每字节 8 像素）
+    const int bytes_per_row = (w + 7) / 8;
+    std::vector<uint8_t> buffer(bytes_per_row * h, 0x00);  // 初始化为白色
+
+    // 绘制圆角矩形
+    // radius 简化处理：圆角区域跳过边角像素
+    const int r = std::min(radius, std::min(w / 2, h / 2));
+
+    // 设置像素的辅助函数（在位图缓冲区中）
+    auto set_pixel = [&buffer, bytes_per_row, w](int px, int py, bool black) {
+        if (px < 0 || px >= w || py < 0) return;
+        const int byte_idx = py * bytes_per_row + (px / 8);
+        const int bit_idx = 7 - (px % 8);  // MSB first
+        if (black) {
+            buffer[byte_idx] |= (1 << bit_idx);
+        } else {
+            buffer[byte_idx] &= ~(1 << bit_idx);
+        }
+    };
+
+    // 绘制圆角矩形
+    for (int py = 0; py < h; ++py) {
+        for (int px = 0; px < w; ++px) {
+            // 检查是否在圆角区域（四个角）
+            const bool in_corner =
+                (px < r && py < r) ||                           // 左上角
+                (px >= w - r && py < r) ||                      // 右上角
+                (px < r && py >= h - r) ||                      // 左下角
+                (px >= w - r && py >= h - r);                   // 右下角
+
+            if (in_corner) {
+                // 圆角区域：计算距离圆心的距离
+                int cx, cy;
+                if (px < r && py < r) { cx = r - 1; cy = r - 1; }
+                else if (px >= w - r && py < r) { cx = w - r; cy = r - 1; }
+                else if (px < r && py >= h - r) { cx = r - 1; cy = h - r; }
+                else { cx = w - r; cy = h - r; }
+
+                const int dist_sq = (px - cx) * (px - cx) + (py - cy) * (py - cy);
+                const int r_sq = r * r;
+
+                if (filled) {
+                    // 实心气泡：圆角内部填充
+                    if (dist_sq <= r_sq) {
+                        set_pixel(px, py, true);
+                    }
+                } else {
+                    // 边框气泡：圆角边缘绘制
+                    const int inner_r = r - 2;  // 边框宽度约 2px
+                    if (dist_sq <= r_sq && dist_sq > (inner_r * inner_r)) {
+                        set_pixel(px, py, true);  // 边框像素
+                    }
+                }
+            } else {
+                // 非圆角区域（主体）
+                const bool is_border =
+                    (px < 2) || (px >= w - 2) ||  // 左右边框
+                    (py < 2) || (py >= h - 2);    // 上下边框
+
+                if (filled) {
+                    // 实心：全部填充
+                    set_pixel(px, py, true);
+                } else {
+                    // 边框：只绘制边框线
+                    if (is_border) {
+                        set_pixel(px, py, true);
+                    }
+                }
+            }
+        }
+    }
+
+    display_->WriteRaw1bpp(x, y, w, h, buffer.data(), buffer.size());
+}
+
 void LanMicApp::UpdateDisplay() {
     UpdateLed();
 
@@ -3443,16 +3526,20 @@ void LanMicApp::UpdateDisplay() {
                 y += kLineHeight;
             }
         } else {
-            // Chat conversation mode: 气泡布局
-            // 用户消息右侧对齐，AI消息左侧对齐
-            // 录音时右侧显示 "正在录音..."，等待回复时左侧显示 "正在思考..."
+            // Chat conversation mode: 真正的气泡布局（符合 Spec §3）
+            // 用户消息：右侧对齐，实心气泡（filled=true）
+            // AI消息：左侧对齐，边框气泡（filled=false）
             constexpr int kChatStartY = 72;  // Start after header line
             constexpr int kChatEndY = 264;   // Before footer (footer hidden on Summary)
             constexpr size_t kChatVisibleLines = (kChatEndY - kChatStartY) / kLineHeight;  // ~10 lines
-            constexpr int kMarginX = 8;      // 左右边距
-            constexpr int kBubblePadding = 2; // 气泡内边距（视觉上通过缩进实现）
+            constexpr int kMarginX = 12;     // 左右边距
+            constexpr int kBubbleMargin = 4; // 气泡内边距
+            constexpr int kBubbleRadius = 4; // 圆角半径
 
-            // Build all lines from chat history with role markers
+            // 存储气泡绘制信息（位置、大小、是否用户消息）
+            std::vector<std::tuple<int, int, int, int, bool>> bubbles;  // (x, y, w, h, is_user)
+
+            // Build all lines from chat history
             std::vector<std::pair<std::string, bool>> chat_lines;  // (text, is_user)
 
             // 录音/识别/运行状态时：隐藏历史消息，保持界面干净（符合 Spec §3）
@@ -3463,43 +3550,34 @@ void LanMicApp::UpdateDisplay() {
             // Add history messages only when not in active state
             if (!hide_history) {
                 for (const auto& msg : chat_history_) {
-                    // 气泡样式：用户消息加 [ ] 边框（右侧），AI 消息加 | | 边框（左侧）
-                    const auto wrapped = WrapUtf8Lines(msg.text, kBodyCharsPerLine - 4, 0);  // 预留边框空间
+                    const auto wrapped = WrapUtf8Lines(msg.text, kBodyCharsPerLine, 0);
                     for (const auto& line : wrapped) {
-                        // 用户消息：[文本] 格式，右侧对齐
-                        // AI 消息：|文本| 格式，左侧对齐
-                        const std::string bubble_line = msg.role == ChatRole::User ?
-                            "[" + line + "]" : "|" + line + "|";
-                        chat_lines.push_back({bubble_line, msg.role == ChatRole::User});
+                        chat_lines.push_back({line, msg.role == ChatRole::User});
                     }
                 }
             }
 
             // Add current transient content with status hints (符合 Spec §3)
             if (phase_ == Phase::Recording) {
-                // 录音状态：右侧显示 "正在录音..."（干净界面，无旧消息）
-                chat_lines.push_back({"正在录音...", true});  // User side, 右对齐
+                // 录音状态：右侧显示 "正在录音..."
+                chat_lines.push_back({"正在录音...", true});
             } else if (phase_ == Phase::Transcribing) {
-                // 识别状态：右侧显示 "识别中..."
-                chat_lines.push_back({"识别中...", true});  // User side, 右对齐
+                chat_lines.push_back({"识别中...", true});
             } else if (phase_ == Phase::Running) {
-                // AI 正在处理：左侧显示 "正在思考..." 或实时回复（气泡样式）
                 if (latest_assistant_text_.empty()) {
-                    chat_lines.push_back({"|正在思考...|", false});  // AI side, 左对齐，带边框
+                    chat_lines.push_back({"正在思考...", false});
                 } else {
-                    const auto wrapped = WrapUtf8Lines(latest_assistant_text_, kBodyCharsPerLine - 2, 0);
+                    const auto wrapped = WrapUtf8Lines(latest_assistant_text_, kBodyCharsPerLine, 0);
                     for (const auto& line : wrapped) {
-                        chat_lines.push_back({"|" + line + "|", false});  // AI side, 带边框
+                        chat_lines.push_back({line, false});
                     }
                 }
             } else if (has_pending_transcript_ && !transcript_text_.empty()) {
-                // 待发送文本：右侧显示，用户气泡样式
-                const auto wrapped = WrapUtf8Lines(transcript_text_, kBodyCharsPerLine - 2, 0);
+                const auto wrapped = WrapUtf8Lines(transcript_text_, kBodyCharsPerLine, 0);
                 for (const auto& line : wrapped) {
-                    chat_lines.push_back({"[" + line + "]", true});  // User side, 带边框
+                    chat_lines.push_back({line, true});
                 }
             } else if (chat_history_.empty() && phase_ == Phase::Idle) {
-                // 无历史记录，显示提示（左侧，不带边框）
                 std::string hint = hint_text_.empty() ? "按 BOOT 键开始对话" : hint_text_;
                 const auto wrapped = WrapUtf8Lines(hint, kBodyCharsPerLine, kChatVisibleLines);
                 for (const auto& line : wrapped) {
@@ -3510,25 +3588,37 @@ void LanMicApp::UpdateDisplay() {
             // Auto-scroll to bottom (show latest messages)
             const int total_lines = static_cast<int>(chat_lines.size());
             const int max_offset = std::max(0, total_lines - static_cast<int>(kChatVisibleLines));
-            // 新消息时自动滚动到底部（当处于底部位置时）
-            // 只有用户手动上滚时才保持当前位置
             bool at_bottom = summary_scroll_offset_ >= max_offset - 1 || summary_scroll_offset_ < 0;
             const int display_offset = at_bottom ? max_offset : std::clamp(summary_scroll_offset_, 0, max_offset);
-            summary_scroll_offset_ = display_offset;  // Store for next iteration
+            summary_scroll_offset_ = display_offset;
 
-            // Render lines with bubble-style alignment
+            // Render lines with real bubble drawing
             int y = kChatStartY;
             for (int i = display_offset; i < total_lines && y < kChatEndY; ++i) {
                 const auto& [line, is_user] = chat_lines[i];
-                int x_pos;
+
+                // 计算文本宽度（约 8px/字符 for 16px font）
+                const int text_width = line.size() * 8;
+                const int bubble_width = text_width + kBubbleMargin * 2;
+                const int bubble_height = kLineHeight + 2;
+
+                int x_pos, bubble_x;
                 if (is_user) {
-                    // 用户消息：右对齐（模拟右侧气泡）
-                    // 每字符约 8px 宽度 (16px 字体)
-                    x_pos = std::max(kMarginX, static_cast<int>(400 - kMarginX - line.size() * 8));
+                    // 用户消息：右对齐
+                    x_pos = 400 - kMarginX - text_width;
+                    bubble_x = 400 - kMarginX - bubble_width;
                 } else {
-                    // AI/系统消息：左对齐（模拟左侧气泡）
+                    // AI/系统消息：左对齐
                     x_pos = kMarginX;
+                    bubble_x = kMarginX - kBubbleMargin;
                 }
+
+                // 绘制气泡边框（符合 Spec §3）
+                // 用户消息：实心填充 (filled=true)
+                // AI消息：边框 (filled=false)
+                DrawBubble(bubble_x, y, bubble_width, bubble_height, is_user, kBubbleRadius);
+
+                // 在气泡内绘制文本
                 texts.push_back({line, x_pos, y, 16});
                 y += kLineHeight;
             }
