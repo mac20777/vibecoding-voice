@@ -45,6 +45,10 @@ public:
     // data 中 bit=1 表示黑色像素，bit=0 表示白色像素
     virtual void WriteRaw1bpp(int x, int y, int w, int h, const uint8_t* data, size_t len) { (void)x; (void)y; (void)w; (void)h; (void)data; (void)len; }
 
+    // 对帧缓冲区的指定区域进行反色（XOR 操作）
+    // bit=1 变为 bit=0（黑变白），bit=0 变为 bit=1（白变黑）
+    virtual void InvertRegion(int x, int y, int w, int h) { (void)x; (void)y; (void)w; (void)h; }
+
     // 文本渲染项
     struct TextItem {
         std::string content;

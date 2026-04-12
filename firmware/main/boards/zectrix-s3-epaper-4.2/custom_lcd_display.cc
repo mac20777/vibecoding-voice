@@ -1226,6 +1226,43 @@ void CustomLcdDisplay::WriteRaw1bpp(int x, int y, int w, int h, const uint8_t* d
     ESP_LOGI(TAG, "WriteRaw1bpp: region x=%d y=%d w=%d h=%d, %u bytes", x, y, w, h, (unsigned)len);
 }
 
+// 对帧缓冲区的指定区域进行反色（XOR 操作）
+void CustomLcdDisplay::InvertRegion(int x, int y, int w, int h) {
+    if (!buffer || w <= 0 || h <= 0) return;
+
+    xSemaphoreTake(dirty_mutex, portMAX_DELAY);
+
+    const int bytes_per_row = (Width + 7) >> 3;
+    for (int row = 0; row < h; row++) {
+        int dy = y + row;
+        if (dy < 0 || dy >= Height) continue;
+        for (int col = 0; col < w; col++) {
+            int dx = x + col;
+            if (dx < 0 || dx >= Width) continue;
+            // XOR 反色：翻转目标 bit
+            uint32_t idx = (uint32_t)dy * bytes_per_row + (uint32_t)(dx >> 3);
+            uint8_t mask = (uint8_t)(1U << (7 - (dx & 7)));
+            buffer[idx] ^= mask;  // XOR 反色
+        }
+    }
+
+    // 标记脏区域并触发刷新
+    Rect r = clamp_rect(align_x8({x, y, w, h}), Width, Height);
+    if (rect_area(r) > 0) {
+        dirty = rect_union(dirty, r);
+        pending = true;
+        refresh_in_progress = true;
+        UpdateDisplayBusyLocked();
+        sm_kick(kDisplayKickMs, "display_invert");
+        if (refresh_task) {
+            xTaskNotifyGive(refresh_task);
+        }
+    }
+
+    xSemaphoreGive(dirty_mutex);
+    ESP_LOGI(TAG, "InvertRegion: region x=%d y=%d w=%d h=%d", x, y, w, h);
+}
+
 // =======================================================
 // UTF-8 解码
 // =======================================================

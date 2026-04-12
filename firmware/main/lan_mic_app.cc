@@ -232,6 +232,31 @@ std::vector<std::string> WrapUtf8Lines(const std::string& text, size_t max_chars
     return lines;
 }
 
+// 计算文字的显示宽度（16px 字体）
+// ASCII 字符约 8px，中文字符约 16px
+int CalculateTextWidth(const std::string& text) {
+    int width = 0;
+    for (size_t i = 0; i < text.size();) {
+        const unsigned char ch = static_cast<unsigned char>(text[i]);
+        size_t char_len = 1;
+        if ((ch & 0x80) == 0x00) {
+            char_len = 1;
+            width += 8;  // ASCII: 8px
+        } else if ((ch & 0xE0) == 0xC0) {
+            char_len = 2;
+            width += 8;  // 2字节 UTF-8: 通常是拉丁扩展字符
+        } else if ((ch & 0xF0) == 0xE0) {
+            char_len = 3;
+            width += 16; // 中文等宽字符: 16px
+        } else if ((ch & 0xF8) == 0xF0) {
+            char_len = 4;
+            width += 16; // 4字节字符
+        }
+        i += char_len;
+    }
+    return width;
+}
+
 const char* GetJsonString(cJSON* root, const char* key) {
     cJSON* item = cJSON_GetObjectItemCaseSensitive(root, key);
     if (!cJSON_IsString(item) || item->valuestring == nullptr) {
@@ -2352,6 +2377,7 @@ void LanMicApp::SwitchPage(Page page) {
     offline_todo_mode_ = page == Page::Todo ? offline_todo_mode_ : false;
     todo_menu_open_ = false;
     settings_editing_volume_ = false;
+    battery_preview_active_ = false;  // 退出设置页时关闭电池预览
     if (page == Page::Todo || page == Page::Summary) {
         SyncVoiceModeToPage(page);
     }
@@ -2375,6 +2401,7 @@ void LanMicApp::EnterSettings() {
         todo_menu_open_ = false;
         settings_selected_item_ = 0;
         settings_editing_volume_ = false;
+        battery_preview_active_ = false;  // 关闭电池预览
         // 进入设置页时强制全屏刷新，清除残留图像
         if (display_ != nullptr) {
             display_->RequestUrgentFullRefresh();
@@ -3098,6 +3125,31 @@ void LanMicApp::ExecuteSettingsItem(int item) {
             settings_editing_volume_ = true;
             UpdateDisplay();
             break;
+        case kSettingsItemBatteryPreview:
+            // 电池预览：循环切换电量等级 (0/20/50/80/100)
+            if (!battery_preview_active_) {
+                battery_preview_active_ = true;
+                battery_preview_level_ = 0;
+            } else {
+                // 循环切换: 0 → 20 → 50 → 80 → 100 → 退出
+                const int levels[] = {0, 20, 50, 80, 100};
+                int current_idx = 0;
+                for (int i = 0; i < 5; ++i) {
+                    if (battery_preview_level_ == levels[i]) {
+                        current_idx = i;
+                        break;
+                    }
+                }
+                if (current_idx < 4) {
+                    battery_preview_level_ = levels[current_idx + 1];
+                } else {
+                    // 到达 100% 后退出预览
+                    battery_preview_active_ = false;
+                    battery_preview_level_ = 0;
+                }
+            }
+            UpdateDisplay();
+            break;
         case kSettingsItemRestart:
             // 重启设备
             status_text_ = "重启中...";
@@ -3367,64 +3419,18 @@ void LanMicApp::DrawBatteryIcon(int x, int y, int level, bool charging) {
         return;
     }
 
-    // 竖向电池图标 (10x18)
-    std::vector<uint8_t> buffer(kBatteryIconV10x18_outline,
-                                 kBatteryIconV10x18_outline + sizeof(kBatteryIconV10x18_outline));
+    // 横向 3 节电池图标 (18x10)
+    // Spec v3: 外包矩形框，内部按 3 格划分水位
+    // 0-33%: 1格, 34-66%: 2格, 67-100%: 3格
+    const int w = 18;
+    const int h = 10;
+    const int bytes_per_row = (w + 7) / 8;  // 3 bytes per row
+    std::vector<uint8_t> buffer(bytes_per_row * h, 0x00);
 
-    // 计算填充高度 (电池主体从 row 3 到 row 14, 共 12 行可填充)
-    // level 0-100 映射到 0-12 行
-    const int fill_rows = std::clamp((level * 12) / 100, 0, 12);
-
-    // 从底部向上填充 (row 14 开始向上)
-    for (int i = 0; i < fill_rows; ++i) {
-        const int row = 14 - i;  // 从 row 14 向上
-        if (row >= 3 && row <= 14) {
-            // 填充内部区域 (bit 1-6, 即 x=1 到 x=6)
-            buffer[row] |= 0x7C;  // ██████ 内部填充 (bit 1-6)
-        }
-    }
-
-    // 充电状态：在填充区域显示闪电符号（覆盖部分填充）
-    if (charging) {
-        // 闪电符号在电池中央 (row 7-11)
-        buffer[7]  |= 0x10;  // 闪电顶部
-        buffer[8]  |= 0x38;  // 闪电中部上
-        buffer[9]  |= 0x1C;  // 闪电中部下
-        buffer[10] |= 0x08;  // 闪电底部
-    }
-
-    // 低电量警告 (<20%): 反白显示整个图标
-    if (level < 20 && !charging) {
-        for (size_t i = 0; i < buffer.size(); ++i) {
-            buffer[i] = ~buffer[i];  // 反白
-        }
-    }
-
-    display_->WriteRaw1bpp(x, y, 10, 18, buffer.data(), buffer.size());
-}
-
-// 绘制真正的气泡边框（符合 Spec §3）
-// filled=true: 用户消息（实心填充/深色）
-// filled=false: AI消息（边框/浅色填充）
-void LanMicApp::DrawBubble(int x, int y, int w, int h, bool filled, int radius) {
-    if (display_ == nullptr || w <= 0 || h <= 0) {
-        return;
-    }
-
-    // 1bpp 位图：每行宽度按字节对齐（每字节 8 像素）
-    // 墨水屏单色限制：不能全填充黑底，否则黑色文字不可见
-    // 修正方案：filled=true 用户消息用加粗边框（2px），filled=false AI消息用普通边框（1px）
-    // 内部均留白，保证文字可见，靠边框粗细区分用户/AI
-    const int bytes_per_row = (w + 7) / 8;
-    std::vector<uint8_t> buffer(bytes_per_row * h, 0x00);  // 初始化为白色（内部留白）
-
-    const int r = std::min(radius, std::min(w / 2, h / 2));
-    const int border_width = filled ? 2 : 1;  // 用户消息加粗边框，AI消息普通边框
-
-    auto set_pixel = [&buffer, bytes_per_row, w, h](int px, int py, bool black) {
+    auto set_pixel = [&buffer, bytes_per_row, w](int px, int py, bool black) {
         if (px < 0 || px >= w || py < 0 || py >= h) return;
         const int byte_idx = py * bytes_per_row + (px / 8);
-        const int bit_idx = 7 - (px % 8);  // MSB first
+        const int bit_idx = 7 - (px % 8);
         if (black) {
             buffer[byte_idx] |= (1 << bit_idx);
         } else {
@@ -3432,49 +3438,157 @@ void LanMicApp::DrawBubble(int x, int y, int w, int h, bool filled, int radius) 
         }
     };
 
-    // 绘制圆角边框（内部不填充，保证文字可见）
+    // 外框（矩形边框 1px）
+    for (int px = 0; px < w; ++px) {
+        set_pixel(px, 0, true);       // 顶部边框
+        set_pixel(px, h - 1, true);   // 底部边框
+    }
     for (int py = 0; py < h; ++py) {
-        for (int px = 0; px < w; ++px) {
-            const bool in_corner =
-                (px < r && py < r) ||
-                (px >= w - r && py < r) ||
-                (px < r && py >= h - r) ||
-                (px >= w - r && py >= h - r);
+        set_pixel(0, py, true);       // 左边框
+        set_pixel(w - 2, py, true);   // 右边框（电池头在右端）
+    }
 
-            bool draw_border = false;
+    // 电池头（右侧突出的小矩形）
+    set_pixel(w - 1, 2, true);
+    set_pixel(w - 1, 3, true);
+    set_pixel(w - 1, 4, true);
+    set_pixel(w - 1, 5, true);
+    set_pixel(w - 1, 6, true);
+    set_pixel(w - 1, 7, true);
 
-            if (in_corner) {
-                // 圆角区域：计算距离圆心的距离
-                int cx, cy;
-                if (px < r && py < r) { cx = r - 1; cy = r - 1; }
-                else if (px >= w - r && py < r) { cx = w - r; cy = r - 1; }
-                else if (px < r && py >= h - r) { cx = r - 1; cy = h - r; }
-                else { cx = w - r; cy = h - r; }
+    // 内部 3 格分隔线（垂直线）
+    const int cell_width = (w - 2) / 3;  // 每格宽度约 5px
+    for (int py = 1; py < h - 1; ++py) {
+        set_pixel(cell_width, py, true);      // 第1格右边界
+        set_pixel(cell_width * 2, py, true);  // 第2格右边界
+    }
 
-                const int dist_sq = (px - cx) * (px - cx) + (py - cy) * (py - cy);
-                const int r_sq = r * r;
-                const int inner_r_sq = (r - border_width) * (r - border_width);
+    // 计算填充格数：0-33% 1格, 34-66% 2格, 67-100% 3格
+    int filled_cells = 0;
+    if (level >= 67) filled_cells = 3;
+    else if (level >= 34) filled_cells = 2;
+    else if (level > 0) filled_cells = 1;
 
-                // 在圆角边缘区域内绘制边框
-                if (dist_sq <= r_sq && dist_sq > inner_r_sq) {
-                    draw_border = true;
-                }
-            } else {
-                // 非圆角区域（主体）：绘制边框线
-                const bool is_left_border   = px < border_width;
-                const bool is_right_border  = px >= w - border_width;
-                const bool is_top_border    = py < border_width;
-                const bool is_bottom_border = py >= h - border_width;
-
-                if (is_left_border || is_right_border || is_top_border || is_bottom_border) {
-                    draw_border = true;
-                }
-            }
-
-            if (draw_border) {
+    // 填充格子（从左到右）
+    for (int cell = 0; cell < filled_cells; ++cell) {
+        int cell_start = 1 + cell * cell_width;
+        int cell_end = cell_start + cell_width - 1;
+        for (int px = cell_start; px < cell_end; ++px) {
+            for (int py = 1; py < h - 1; ++py) {
                 set_pixel(px, py, true);
             }
-            // 内部不填充，保持白色背景让文字可见
+        }
+    }
+
+    // 充电状态：在中间格显示闪电符号
+    if (charging) {
+        // 闪电在电池中央
+        int cx = (w - 2) / 2;
+        set_pixel(cx - 1, 2, true);
+        set_pixel(cx, 3, true);
+        set_pixel(cx - 2, 4, true);
+        set_pixel(cx + 1, 5, true);
+        set_pixel(cx, 6, true);
+        set_pixel(cx - 1, 7, true);
+    }
+
+    // 低电量警告 (<20%): 反白显示
+    if (level < 20 && !charging) {
+        for (size_t i = 0; i < buffer.size(); ++i) {
+            buffer[i] = ~buffer[i];
+        }
+    }
+
+    display_->WriteRaw1bpp(x, y, w, h, buffer.data(), buffer.size());
+}
+
+// 绘制气泡边框或实心填充（符合 Spec v3）
+// filled=true: 用户消息（实心填充黑底，需要配合 InvertRegion 实现白字）
+// filled=false: AI消息（边框）
+void LanMicApp::DrawBubble(int x, int y, int w, int h, bool filled, int radius) {
+    if (display_ == nullptr || w <= 0 || h <= 0) {
+        return;
+    }
+
+    const int bytes_per_row = (w + 7) / 8;
+    std::vector<uint8_t> buffer(bytes_per_row * h, 0x00);
+    const int r = std::min(radius, std::min(w / 2, h / 2));
+
+    auto set_pixel = [&buffer, bytes_per_row, w, h](int px, int py, bool black) {
+        if (px < 0 || px >= w || py < 0 || py >= h) return;
+        const int byte_idx = py * bytes_per_row + (px / 8);
+        const int bit_idx = 7 - (px % 8);
+        if (black) {
+            buffer[byte_idx] |= (1 << bit_idx);
+        } else {
+            buffer[byte_idx] &= ~(1 << bit_idx);
+        }
+    };
+
+    // 判断像素是否在圆角矩形内部
+    auto is_inside = [w, h, r](int px, int py) {
+        const bool in_corner =
+            (px < r && py < r) ||
+            (px >= w - r && py < r) ||
+            (px < r && py >= h - r) ||
+            (px >= w - r && py >= h - r);
+
+        if (in_corner) {
+            int cx, cy;
+            if (px < r && py < r) { cx = r - 1; cy = r - 1; }
+            else if (px >= w - r && py < r) { cx = w - r; cy = r - 1; }
+            else if (px < r && py >= h - r) { cx = r - 1; cy = h - r; }
+            else { cx = w - r; cy = h - r; }
+            const int dist_sq = (px - cx) * (px - cx) + (py - cy) * (py - cy);
+            return dist_sq <= r * r;
+        }
+        return true;  // 非圆角区域都在内部
+    };
+
+    if (filled) {
+        // 用户消息：实心填充（黑色）
+        for (int py = 0; py < h; ++py) {
+            for (int px = 0; px < w; ++px) {
+                if (is_inside(px, py)) {
+                    set_pixel(px, py, true);  // 填充黑色
+                }
+            }
+        }
+    } else {
+        // AI消息：边框（1px）
+        for (int py = 0; py < h; ++py) {
+            for (int px = 0; px < w; ++px) {
+                if (!is_inside(px, py)) continue;
+
+                const bool in_corner =
+                    (px < r && py < r) ||
+                    (px >= w - r && py < r) ||
+                    (px < r && py >= h - r) ||
+                    (px >= w - r && py >= h - r);
+
+                bool draw_border = false;
+                if (in_corner) {
+                    int cx, cy;
+                    if (px < r && py < r) { cx = r - 1; cy = r - 1; }
+                    else if (px >= w - r && py < r) { cx = w - r; cy = r - 1; }
+                    else if (px < r && py >= h - r) { cx = r - 1; cy = h - r; }
+                    else { cx = w - r; cy = h - r; }
+                    const int dist_sq = (px - cx) * (px - cx) + (py - cy) * (py - cy);
+                    const int r_sq = r * r;
+                    const int inner_r_sq = (r - 1) * (r - 1);
+                    if (dist_sq <= r_sq && dist_sq > inner_r_sq) {
+                        draw_border = true;
+                    }
+                } else {
+                    if (px == 0 || px == w - 1 || py == 0 || py == h - 1) {
+                        draw_border = true;
+                    }
+                }
+
+                if (draw_border) {
+                    set_pixel(px, py, true);
+                }
+            }
         }
     }
 
@@ -3512,11 +3626,21 @@ void LanMicApp::UpdateDisplay() {
     // 存储气泡绘制信息（位置、大小、是否用户消息）- DrawTexts后绘制
     std::vector<std::tuple<int, int, int, int, bool>> pending_bubbles;  // (x, y, w, h, is_user)
 
-    // 新模式页面使用全屏布局，不显示状态栏和顶部标题行
+    // 新模式页面使用全屏布局，不显示状态栏图标但显示标题
     const bool full_screen_page = (active_page_ == Page::Countdown ||
                                      active_page_ == Page::LifeBar ||
                                      active_page_ == Page::Almanac ||
                                      active_page_ == Page::Weather);
+
+    // 全屏页面标题（显示在顶部中间）
+    if (full_screen_page) {
+        const char* page_title = active_page_ == Page::LifeBar ? "人生进度"
+                               : active_page_ == Page::Almanac ? "老黄历"
+                               : active_page_ == Page::Weather ? "天气看板"
+                               : active_page_ == Page::Countdown ? "倒计时"
+                               : "未知";
+        texts.push_back({page_title, 180, 9, 16});  // 标题在顶部中间
+    }
 
     // 状态栏布局优化（仅非全屏页面）
     // WiFi 图标: x=10, y=6 (12x12)
@@ -3643,28 +3767,28 @@ void LanMicApp::UpdateDisplay() {
             for (int i = display_offset; i < total_lines && y < kChatEndY; ++i) {
                 const auto& [line, is_user] = chat_lines[i];
 
-                // 计算文本宽度（约 8px/字符 for 16px font）
-                const int text_width = line.size() * 8;
+                // 使用精确的文字宽度计算（中文 16px，ASCII 8px）
+                const int text_width = CalculateTextWidth(line);
                 const int bubble_width = text_width + kBubbleMargin * 2;
                 const int bubble_height = kLineHeight + 2;
 
                 int x_pos, bubble_x;
                 if (is_user) {
                     // 用户消息：右对齐，紧贴右边缘（kMarginXRight=0）
-                    x_pos = 400 - kMarginXRight - text_width;
+                    x_pos = 400 - kMarginXRight - text_width - kBubbleMargin;
                     bubble_x = 400 - kMarginXRight - bubble_width;
                 } else {
                     // AI/系统消息：左对齐
-                    x_pos = kMarginX;
-                    bubble_x = kMarginX - kBubbleMargin;
+                    x_pos = kMarginX + kBubbleMargin;
+                    bubble_x = kMarginX;
                 }
 
                 // 收集气泡信息，等 DrawTexts 后绘制（避免被清屏覆盖）
-                // 用户消息：加粗边框 (filled=true)
-                // AI消息：普通边框 (filled=false)
+                // 用户消息：实心填充 (filled=true)，需要反色实现白字
+                // AI消息：边框 (filled=false)
                 pending_bubbles.push_back({bubble_x, y, bubble_width, bubble_height, is_user});
 
-                // 在气泡内绘制文本
+                // 在气泡内绘制文本（位置调整为气泡内部）
                 texts.push_back({line, x_pos, y, 16});
                 y += kLineHeight;
             }
@@ -3786,6 +3910,13 @@ void LanMicApp::UpdateDisplay() {
         }
         items.push_back({FONT_ZECTRIX_ICON_SPEAKER, vol_label});
 
+        // 电池预览调试
+        std::string battery_preview_label = "电池预览";
+        if (battery_preview_active_) {
+            battery_preview_label += " [" + std::to_string(battery_preview_level_) + "%]";
+        }
+        items.push_back({FONT_ZECTRIX_ICON_POWER, battery_preview_label});
+
         // 重启设备
         items.push_back({FONT_ZECTRIX_ICON_REBOOT, "重启设备"});
 
@@ -3806,10 +3937,12 @@ void LanMicApp::UpdateDisplay() {
         }
 
         // 底部操作提示
-        if (!settings_editing_volume_) {
-            texts.push_back({"UP/DN 选择  BOOT 执行", 12, kFooterTextY - 16, 14});
-        } else {
+        if (settings_editing_volume_) {
             texts.push_back({"UP/DN ±10  BOOT 保存", 12, kFooterTextY - 16, 14});
+        } else if (battery_preview_active_) {
+            texts.push_back({"BOOT 切换电量等级", 12, kFooterTextY - 16, 14});
+        } else {
+            texts.push_back({"UP/DN 选择  BOOT 执行", 12, kFooterTextY - 16, 14});
         }
     }
 
@@ -3891,10 +4024,24 @@ void LanMicApp::UpdateDisplay() {
 
     display_->DrawTexts(texts, true);
 
-    // 绘制气泡边框（在 DrawTexts 之后，避免被清屏覆盖）
+    // 气泡绘制顺序（实现黑底白字）：
+    // 1. 先绘制用户气泡实心黑色
+    // 2. DrawTexts 已绘制文字（黑色）
+    // 3. 对用户气泡区域反色（文字变白）
+    // 4. 绘制 AI 气泡边框
     constexpr int kBubbleRadius = 4;
     for (const auto& [bx, by, bw, bh, is_user] : pending_bubbles) {
-        DrawBubble(bx, by, bw, bh, is_user, kBubbleRadius);
+        if (is_user) {
+            // 用户气泡：实心填充 + 反色实现黑底白字
+            DrawBubble(bx, by, bw, bh, true, kBubbleRadius);
+            display_->InvertRegion(bx, by, bw, bh);
+        }
+    }
+    // AI 气泡：边框（在用户气泡之后绘制，避免覆盖）
+    for (const auto& [bx, by, bw, bh, is_user] : pending_bubbles) {
+        if (!is_user) {
+            DrawBubble(bx, by, bw, bh, false, kBubbleRadius);
+        }
     }
 
     // 状态栏分隔线仅显示在非全屏页面
@@ -3912,7 +4059,10 @@ void LanMicApp::UpdateDisplay() {
     // 状态栏图标仅显示在非全屏页面
     if (!full_screen_page) {
         DrawWifiIcon(10, 6);  // WiFi 图标 (12x12) 在 y=6
-        DrawBatteryIcon(380, 4, battery_known_ ? battery_level_ : 0, battery_charging_);  // 竖向电池 (10x18) 在 y=4
+        // 电池图标（预览模式时显示预览等级）
+        int display_battery_level = battery_preview_active_ ? battery_preview_level_ : (battery_known_ ? battery_level_ : 0);
+        bool display_battery_charging = battery_preview_active_ ? false : battery_charging_;
+        DrawBatteryIcon(380, 4, display_battery_level, display_battery_charging);  // 横向电池 (18x10) 在 y=4
     }
     display_->RequestUrgentRefresh();
 }

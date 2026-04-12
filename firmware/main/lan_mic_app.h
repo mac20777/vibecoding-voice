@@ -187,14 +187,17 @@ private:
     // Settings page state - 扁平化菜单设计
     // 网络管理: Wi-Fi状态, 服务状态
     // 系统控制: 音量调节, 重启设备, 关机
-    static constexpr int kSettingsItemCount = 5;
-    static constexpr int kSettingsItemWifi     = 0;   // Wi-Fi 控制
-    static constexpr int kSettingsItemServer   = 1;   // 服务控制
-    static constexpr int kSettingsItemVolume   = 2;   // 音量调节
-    static constexpr int kSettingsItemRestart  = 3;   // 重启设备
-    static constexpr int kSettingsItemPowerOff = 4;   // 关机
+    static constexpr int kSettingsItemCount = 6;
+    static constexpr int kSettingsItemWifi         = 0;   // Wi-Fi 控制
+    static constexpr int kSettingsItemServer       = 1;   // 服务控制
+    static constexpr int kSettingsItemVolume       = 2;   // 音量调节
+    static constexpr int kSettingsItemBatteryPreview = 3; // 电池预览
+    static constexpr int kSettingsItemRestart      = 4;   // 重启设备
+    static constexpr int kSettingsItemPowerOff     = 5;   // 关机
     int settings_selected_item_ = 0;
     bool settings_editing_volume_ = false;
+    int battery_preview_level_ = 0;     // 电池预览等级 (0/20/50/80/100)
+    bool battery_preview_active_ = false;  // 电池预览模式是否激活
     int volume_ = 70;
     enum class NetworkState {
         Offline,
