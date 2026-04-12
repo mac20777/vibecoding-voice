@@ -3047,28 +3047,44 @@ void LanMicApp::HandleSettingsInput(bool up_click, bool down_click, bool boot_pr
 void LanMicApp::ExecuteSettingsItem(int item) {
     switch (item) {
         case kSettingsItemWifi:
-            // Wi-Fi 控制：进入 WiFi 配置模式或断开重连
+            // Wi-Fi 控制：断开/重连
             if (IsWifiConnected()) {
                 // 已连接时断开 WiFi
                 status_text_ = "断开 Wi-Fi...";
+                hint_text_ = "";
                 UpdateDisplay();
                 DisconnectWebSocket();
-                // WiFi 断开逻辑由 board 处理
-            } else {
-                // 未连接时进入 WiFi 配置模式
-                EnterWifiSetupMode();
+                WifiManager::GetInstance().StopStation();
+                network_state_ = NetworkState::Offline;
+                status_text_ = "Wi-Fi 已断开";
+            } else if (network_state_ == NetworkState::Offline) {
+                // 未连接时重连 WiFi
+                status_text_ = "重连 Wi-Fi...";
+                hint_text_ = "";
+                UpdateDisplay();
+                WifiManager::GetInstance().StartStation();
+            } else if (network_state_ == NetworkState::Config) {
+                // 配置模式时退出并重连
+                WifiManager::GetInstance().StopConfigAp();
+                WifiManager::GetInstance().StartStation();
+                network_state_ = NetworkState::Offline;
+                status_text_ = "退出配置模式";
             }
+            UpdateDisplay();
             break;
         case kSettingsItemServer:
-            // 服务控制：重新连接服务器
+            // 服务控制：断开/重连 WebSocket
             if (IsServerConnected()) {
-                // 已连接时断开
+                // 已连接时断开服务
                 status_text_ = "断开服务...";
                 hint_text_ = "";
                 DisconnectWebSocket();
                 phase_ = Phase::Idle;
+                status_text_ = "服务已断开";
             } else if (IsWifiConnected()) {
                 // WiFi 已连接但服务未连接：重连
+                status_text_ = "重连服务...";
+                hint_text_ = "";
                 RequestReconnect("重连服务...");
             } else {
                 // 无 WiFi：提示先连接 WiFi
@@ -3737,14 +3753,18 @@ void LanMicApp::UpdateDisplay() {
         // 构建菜单项（全汉化 + 图标）
         std::vector<std::pair<std::string, std::string>> items;  // (icon, label)
 
-        // Wi-Fi 状态控制
+        // Wi-Fi 状态控制（显示实际 SSID）
         std::string wifi_label;
         if (network_state_ == NetworkState::Offline) {
             wifi_label = "未连接";
         } else if (network_state_ == NetworkState::Config) {
             wifi_label = "配置模式";
+        } else if (IsWifiConnected()) {
+            // 已连接时显示实际 SSID
+            std::string ssid = WifiManager::GetInstance().GetSsid();
+            wifi_label = ssid.empty() ? "已连接" : ssid;
         } else {
-            wifi_label = IsWifiConnected() ? "已连接" : "连接中";
+            wifi_label = "连接中";
         }
         items.push_back({FONT_ZECTRIX_WIFI_FULL, "Wi-Fi: " + wifi_label});
 
