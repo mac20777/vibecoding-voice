@@ -1686,9 +1686,9 @@ void LanMicApp::PlayTtsAudio(const int16_t* pcm_data, size_t samples) {
 
     // Use codec's OutputData method to play audio
     // Process in chunks to avoid large memory allocations
-    // Chunk size: 512 samples = 32ms at 16kHz, delay should match playback time
+    // Chunk size: 512 samples = 32ms at 16kHz
     constexpr size_t kChunkSize = 512;
-    constexpr int kChunkDurationMs = 32;  // 512 samples / 16000 Hz * 1000
+    constexpr int kChunkDurationMs = 32;  // 512 samples / 16000 Hz * 1000 = 32ms
     size_t offset = 0;
 
     while (offset < samples) {
@@ -1697,6 +1697,8 @@ void LanMicApp::PlayTtsAudio(const int16_t* pcm_data, size_t samples) {
         codec_->OutputData(chunk_data);
         offset += chunk_samples;
         // Delay should be slightly longer than chunk duration to allow DMA to complete
+        // Note: FreeRTOS tick rate is typically 100Hz (10ms precision)
+        // pdMS_TO_TICKS(37) rounds to 4 ticks = 40ms due to tick alignment
         vTaskDelay(pdMS_TO_TICKS(kChunkDurationMs + 5));
     }
 
@@ -2248,8 +2250,6 @@ void LanMicApp::ExecuteTodoMenuItem(int item) {
                 return;
         }
     }
-                return;
-        }
     }
 
     if (todo_menu_kind_ == TodoMenuKind::TodoAction) {
