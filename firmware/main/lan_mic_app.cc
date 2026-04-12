@@ -3913,7 +3913,7 @@ void LanMicApp::UpdateDisplay() {
             texts.push_back({line, 12, y, 16});
             y += kLineHeight;
         }
-    } else {
+    } else if (active_page_ == Page::Settings) {
         // Settings page - 扁平化汉化菜单 + 图标（符合 spec_v3_icon_font.md）
         texts.push_back({std::string(FONT_ZECTRIX_ICON_SETTING) + " 设置", 12, kLogTitleY, 16});
 
