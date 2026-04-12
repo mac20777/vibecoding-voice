@@ -39,7 +39,8 @@ public:
 
 private:
     lv_obj_t* list_ = nullptr;        // lv_list 容器
-    std::vector<lv_obj_t*> items_;    // 列表项控件
+    std::vector<lv_obj_t*> items_;    // 列表项控件 (button objects)
+    std::vector<std::string> texts_;  // 原始文本（不含前缀）
 };
 
 }  // namespace ui
