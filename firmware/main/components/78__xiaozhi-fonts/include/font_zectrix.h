@@ -50,6 +50,22 @@ extern "C" {
 #define FONT_ZECTRIX_ICON_8 "\xee\xa4\x9c"             // icon-8 (e91c)
 #define FONT_ZECTRIX_ICON_9 "\xee\xa4\x9d"             // icon-9 (e91d)
 
+// Weather icons (待 IcoMoon 导入后生效) - spec_v3_icon_font.md
+// 使用方式: 先在 IcoMoon 中设计并导入这些图标，然后重新生成 TTF
+#define FONT_ZECTRIX_WEATHER_SUN "\xee\xa4\xa0"        // ☀️ 太阳 (e920) - 晴天
+#define FONT_ZECTRIX_WEATHER_CLOUD "\xee\xa4\xa1"      // ☁️ 云朵 (e921) - 多云
+#define FONT_ZECTRIX_WEATHER_PARTLY "\xee\xa4\xa2"     // ⛅ 多云转晴 (e922) - 半阴半晴
+#define FONT_ZECTRIX_WEATHER_RAIN "\xee\xa4\xa3"       // 🌧️ 下雨 (e923) - 雨天
+#define FONT_ZECTRIX_WEATHER_THUNDER "\xee\xa4\xa4"    // 🌩️ 雷暴 (e924) - 雷电
+#define FONT_ZECTRIX_WEATHER_SNOW "\xee\xa4\xa5"       // ❄️ 雪花 (e925) - 雪天
+#define FONT_ZECTRIX_WEATHER_FOG "\xee\xa4\xa6"        // 🌫️ 雾/霾 (e926) - 雾霾
+#define FONT_ZECTRIX_WEATHER_WIND "\xee\xa4\xa7"       // 💨 风 (e927) - 大风/风向
+#define FONT_ZECTRIX_WEATHER_TEMP "\xee\xa4\xa8"       // 🌡️ 温度 (e928) - 温度计
+#define FONT_ZECTRIX_WEATHER_HUMIDITY "\xee\xa4\xa9"   // 💧 湿度 (e929) - 水滴
+#define FONT_ZECTRIX_WEATHER_SUNRISE "\xee\xa4\xaa"    // 🌅 日出 (e92a) - 日出时间
+#define FONT_ZECTRIX_WEATHER_SUNSET "\xee\xa4\xab"     // 🌇 日落 (e92b) - 日落时间
+#define FONT_ZECTRIX_WEATHER_LOCATION "\xee\xa4\xac"   // 📍 位置 (e92c) - 城市标记
+
 
 #ifdef __cplusplus
 }

@@ -17,6 +17,8 @@
 
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(SourceHanSansSC_Medium_slim);
+LV_FONT_DECLARE(font_zectrix_16_1);  // Icon font 16px
+LV_FONT_DECLARE(font_zectrix_48_1);  // Icon font 48px
 
 #define TAG "CustomLcdDisplay"
 static constexpr uint32_t kDisplayKickMs = 1000;
@@ -1314,11 +1316,23 @@ void CustomLcdDisplay::DrawTexts(const std::vector<TextItem>& texts, bool clear)
     }
 
     for (const auto& item : texts) {
-        // size >= 20 用 24px 字体，否则用 16px
-        const lv_font_t* font = (item.size >= 20)
-            ? &SourceHanSansSC_Medium_slim
-            : &BUILTIN_TEXT_FONT;
-        render_text_to_buffer(item.content.c_str(), item.x, item.y, font);
+        // 图标渲染：使用 icon_font_16 或 icon_font_48
+        // 检测特殊标记 "\x01ICON:" 表示图标文本
+        const lv_font_t* font = nullptr;
+        const char* text = item.content.c_str();
+
+        // 检查是否为图标（以 UTF-8 图标编码开头，如 \xee\xa4\xxx）
+        if (item.content.size() >= 3 &&
+            item.content[0] == '\xee' &&
+            item.content[1] == '\xa4') {
+            // 这是图标字体编码，使用图标字体
+            font = (item.size >= 40) ? &font_zectrix_48_1 : &font_zectrix_16_1;
+        } else if (item.size >= 20) {
+            font = &SourceHanSansSC_Medium_slim;
+        } else {
+            font = &BUILTIN_TEXT_FONT;
+        }
+        render_text_to_buffer(text, item.x, item.y, font);
     }
 
     // 标记全屏脏区并触发刷新

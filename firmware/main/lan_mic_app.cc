@@ -23,6 +23,7 @@
 
 #include "board.h"
 #include "boards/zectrix-s3-epaper-4.2/config.h"
+#include "components/78__xiaozhi-fonts/include/font_zectrix.h"  // Icon font definitions
 
 extern "C" void ZectrixSetFactoryLedOverride(bool enabled, bool blink);
 #include "display.h"
@@ -2906,10 +2907,8 @@ void LanMicApp::RequestWeatherData() {
 }
 
 void LanMicApp::DrawWeatherPage(std::vector<Display::TextItem>& texts) {
-    // 天气看板布局 (400x300)
-    // 顶部：城市名
-    // 中间：两列（左侧大温度+描述，右侧预报卡片）
-    // 底部：湿度/日出日落/穿衣建议
+    // 天气看板布局 (400x300) - 符合 spec_v3_icon_font.md
+    // 使用图标美化布局
 
     constexpr int kCityY = 50;
     constexpr int kLeftX = 12;
@@ -2918,53 +2917,82 @@ void LanMicApp::DrawWeatherPage(std::vector<Display::TextItem>& texts) {
     constexpr int kInfoY = 200;
     constexpr int kAdviceY = 260;
 
-    // 城市
-    texts.push_back({weather_state_.city, 12, kCityY, 20});
+    // 顶部：位置图标 + 城市名
+    texts.push_back({FONT_ZECTRIX_WEATHER_LOCATION, 12, kCityY, 20});  // 📍 位置图标
+    texts.push_back({weather_state_.city, 36, kCityY, 20});
 
-    // ===== 左列：当前天气 =====
-    // 大温度显示
+    // ===== 主天气显示 =====
+    // 根据天气描述选择图标（待 IcoMoon 导入后生效）
+    std::string weather_icon = FONT_ZECTRIX_WEATHER_SUN;  // 默认晴天
+    if (weather_state_.today_desc.find("云") != std::string::npos ||
+        weather_state_.today_desc.find("多云") != std::string::npos) {
+        weather_icon = FONT_ZECTRIX_WEATHER_CLOUD;
+    } else if (weather_state_.today_desc.find("雨") != std::string::npos) {
+        weather_icon = FONT_ZECTRIX_WEATHER_RAIN;
+    } else if (weather_state_.today_desc.find("雪") != std::string::npos) {
+        weather_icon = FONT_ZECTRIX_WEATHER_SNOW;
+    }
+
+    // 主图标 + 温度
+    texts.push_back({weather_icon, kLeftX, kMainY, 48});  // 48px 天气图标
     char temp_buf[16];
     snprintf(temp_buf, sizeof(temp_buf), "%d°C", weather_state_.today_temp);
-    texts.push_back({temp_buf, kLeftX, kMainY, 36});  // 大号字体
+    texts.push_back({temp_buf, kLeftX + 60, kMainY + 10, 36});  // 大号温度
 
     // 天气描述
-    texts.push_back({weather_state_.today_desc, kLeftX, kMainY + 50, 18});
+    texts.push_back({weather_state_.today_desc, kLeftX, kMainY + 55, 18});
 
     // 温度范围
-    snprintf(temp_buf, sizeof(temp_buf), "%d / %d", weather_state_.today_low, weather_state_.today_high);
-    texts.push_back({temp_buf, kLeftX, kMainY + 75, 16});
+    snprintf(temp_buf, sizeof(temp_buf), "%d / %d°C", weather_state_.today_low, weather_state_.today_high);
+    texts.push_back({temp_buf, kLeftX, kMainY + 80, 16});
 
     // ===== 右列：预报卡片 =====
-    int forecast_y = kMainY;
+    texts.push_back({"━━ 未来三天 ━━", kRightX, kMainY - 10, 14});
+    int forecast_y = kMainY + 10;
     for (size_t i = 0; i < weather_state_.forecast.size() && i < 3; ++i) {
         const auto& f = weather_state_.forecast[i];
         texts.push_back({f.weekday, kRightX, forecast_y, 14});
-        texts.push_back({f.desc, kRightX + 60, forecast_y, 14});
+        // 预报图标（根据描述选择）
+        std::string fc_icon = FONT_ZECTRIX_WEATHER_SUN;
+        if (f.desc.find("云") != std::string::npos) {
+            fc_icon = FONT_ZECTRIX_WEATHER_CLOUD;
+        } else if (f.desc.find("雨") != std::string::npos) {
+            fc_icon = FONT_ZECTRIX_WEATHER_RAIN;
+        }
+        texts.push_back({fc_icon, kRightX + 50, forecast_y, 16});  // 16px 小图标
         snprintf(temp_buf, sizeof(temp_buf), "%d°", f.temp);
-        texts.push_back({temp_buf, kRightX + 120, forecast_y, 14});
+        texts.push_back({temp_buf, kRightX + 70, forecast_y, 14});
         forecast_y += 25;
     }
 
-    // ===== 底部信息行 =====
-    // 湿度
+    // ===== 底部信息行（带图标）=====
+    // 湿度 + 温度计
+    texts.push_back({FONT_ZECTRIX_WEATHER_HUMIDITY, kLeftX, kInfoY, 16});  // 💧 湿度图标
     snprintf(temp_buf, sizeof(temp_buf), "湿度 %d%%", weather_state_.today_humidity);
-    texts.push_back({temp_buf, kLeftX, kInfoY, 14});
+    texts.push_back({temp_buf, kLeftX + 20, kInfoY, 14});
 
-    // 风向风力
+    texts.push_back({FONT_ZECTRIX_WEATHER_TEMP, 120, kInfoY, 16});  // 🌡️ 温度图标
+    snprintf(temp_buf, sizeof(temp_buf), "体感 %d°C", weather_state_.today_temp);
+    texts.push_back({temp_buf, 140, kInfoY, 14});
+
+    // 风向 + 日出日落
+    texts.push_back({FONT_ZECTRIX_WEATHER_WIND, kLeftX, kInfoY + 20, 16});  // 💨 风图标
     snprintf(temp_buf, sizeof(temp_buf), "%s %d级", weather_state_.today_wind_dir.c_str(), weather_state_.today_wind_level);
-    texts.push_back({temp_buf, 120, kInfoY, 14});
+    texts.push_back({temp_buf, kLeftX + 20, kInfoY + 20, 14});
 
-    // 日出日落
-    texts.push_back({"日出 " + weather_state_.sunrise + " | 日落 " + weather_state_.sunset, kLeftX, kInfoY + 20, 14});
+    texts.push_back({FONT_ZECTRIX_WEATHER_SUNRISE, 180, kInfoY + 20, 16});  // 🌅 日出图标
+    texts.push_back({weather_state_.sunrise, 200, kInfoY + 20, 14});
 
-    // 分隔线
-    texts.push_back({"────────────────────────────────", kLeftX, kInfoY + 40, 14});
+    // 日落单独一行
+    texts.push_back({FONT_ZECTRIX_WEATHER_SUNSET, kLeftX, kInfoY + 40, 16});  // 🌇 日落图标
+    texts.push_back({weather_state_.sunset, kLeftX + 20, kInfoY + 40, 14});
 
     // 穿衣建议
+    texts.push_back({"────────────────────────────────", kLeftX, kInfoY + 60, 14});
     texts.push_back({weather_state_.advice, kLeftX, kAdviceY, 14});
 
     // 底部来源
-    texts.push_back({"— Open-Meteo", 300, kAdviceY + 20, 12});
+    texts.push_back({"— QWeather", 300, kAdviceY + 20, 12});
 }
 
 // ============================================================
@@ -3701,53 +3729,57 @@ void LanMicApp::UpdateDisplay() {
             y += kLineHeight;
         }
     } else {
-        // Settings page - 扁平化汉化菜单
-        texts.push_back({"设置", 12, kLogTitleY, 16});
+        // Settings page - 扁平化汉化菜单 + 图标（符合 spec_v3_icon_font.md）
+        texts.push_back({std::string(FONT_ZECTRIX_ICON_SETTING) + " 设置", 12, kLogTitleY, 16});
 
-        // 构建菜单项（全汉化）
-        std::vector<std::string> items;
+        // 构建菜单项（全汉化 + 图标）
+        std::vector<std::pair<std::string, std::string>> items;  // (icon, label)
 
         // Wi-Fi 状态控制
         std::string wifi_label;
         if (network_state_ == NetworkState::Offline) {
-            wifi_label = "Wi-Fi: 未连接";
+            wifi_label = "未连接";
         } else if (network_state_ == NetworkState::Config) {
-            wifi_label = "Wi-Fi: 配置模式";
+            wifi_label = "配置模式";
         } else {
-            wifi_label = IsWifiConnected() ? "Wi-Fi: 已连接" : "Wi-Fi: 连接中";
+            wifi_label = IsWifiConnected() ? "已连接" : "连接中";
         }
-        items.push_back(wifi_label);
+        items.push_back({FONT_ZECTRIX_WIFI_FULL, "Wi-Fi: " + wifi_label});
 
         // 服务状态控制
         std::string server_label;
         if (!IsWifiConnected()) {
-            server_label = "服务: 无网络";
+            server_label = "无网络";
         } else if (IsServerConnected()) {
-            server_label = "服务: 在线";
+            server_label = "在线";
         } else {
-            server_label = "服务: 离线";
+            server_label = "离线";
         }
-        items.push_back(server_label);
+        items.push_back({FONT_ZECTRIX_ICON_SYNC, "服务: " + server_label});
 
         // 音量调节
         std::string vol_label = "音量: " + std::to_string(volume_) + "%";
         if (settings_editing_volume_) {
             vol_label += " [调节中]";
         }
-        items.push_back(vol_label);
+        items.push_back({FONT_ZECTRIX_ICON_SPEAKER, vol_label});
 
         // 重启设备
-        items.push_back("重启设备");
+        items.push_back({FONT_ZECTRIX_ICON_REBOOT, "重启设备"});
 
         // 关机
-        items.push_back("关机");
+        items.push_back({FONT_ZECTRIX_ICON_POWER, "关机"});
 
         int y = kLogBodyY;
         for (size_t i = 0; i < items.size(); ++i) {
-            // 选中状态用 [x] 标记，未选中用 [ ] 标记（符合用户需求）
+            // 选中状态用 [x] 标记，未选中用 [ ] 标记
             std::string row = (static_cast<int>(i) == settings_selected_item_) ? "[x] " : "[ ] ";
-            row += items[i];
-            texts.push_back({row, 12, y, 16});
+            row += items[i].second;  // 只显示文本，图标单独渲染
+
+            // 先绘制图标（16px）
+            texts.push_back({items[i].first, 16, y + 2, 16});  // icon at x=16
+            // 再绘制文本（选中标记 + 标签）
+            texts.push_back({row, 36, y, 16});  // text at x=36
             y += kLineHeight + 4;  // 紧凑间距，提高可读性
         }
 
