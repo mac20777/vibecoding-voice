@@ -2377,6 +2377,8 @@ void LanMicApp::SwitchPage(Page page) {
         ui::PageId ui_page = ui::PageId::Chat;  // 默认对话页
         switch (page) {
             case Page::Summary: ui_page = ui::PageId::Chat; break;
+            case Page::Todo:    ui_page = ui::PageId::Todo; break;
+            case Page::Log:     ui_page = ui::PageId::Log; break;
             case Page::Weather: ui_page = ui::PageId::Weather; break;
             case Page::LifeBar: ui_page = ui::PageId::LifeBar; break;
             case Page::Almanac: ui_page = ui::PageId::Almanac; break;
@@ -4308,8 +4310,32 @@ void LanMicApp::UpdateLvglDisplay() {
             }
             break;
         }
+
+        case ui::PageId::Todo: {
+            ui::TodoPage* todo_page = ui_manager_->GetTodoPage();
+            if (todo_page) {
+                todo_page->Clear();
+                for (const auto& item : todo_items_) {
+                    todo_page->AddItem(item.title, item.completed);
+                }
+                todo_page->Refresh();
+            }
+            break;
+        }
+
+        case ui::PageId::Log: {
+            ui::LogPage* log_page = ui_manager_->GetLogPage();
+            if (log_page) {
+                log_page->Clear();
+                for (const auto& line : cli_log_lines_) {
+                    log_page->AddEntry(line, 0);  // 默认 info level
+                }
+                log_page->Refresh();
+            }
+            break;
+        }
+
         default:
-            // Todo and Log pages are not fully implemented in LVGL yet
             break;
     }
 
