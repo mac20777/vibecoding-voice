@@ -2251,7 +2251,6 @@ void LanMicApp::ExecuteTodoMenuItem(int item) {
                 return;
         }
     }
-    }
 
     if (todo_menu_kind_ == TodoMenuKind::TodoAction) {
         switch (item) {
@@ -3494,50 +3493,52 @@ void LanMicApp::UpdateDisplay() {
         quota_status_text = "5H:" + q5 + " 7d:" + qw;
     }
 
-    // 状态栏布局优化
+    // 存储气泡绘制信息（位置、大小、是否用户消息）- DrawTexts后绘制
+    std::vector<std::tuple<int, int, int, int, bool>> pending_bubbles;  // (x, y, w, h, is_user)
+
+    // 新模式页面使用全屏布局，不显示状态栏和顶部标题行
+    const bool full_screen_page = (active_page_ == Page::Countdown ||
+                                     active_page_ == Page::LifeBar ||
+                                     active_page_ == Page::Almanac ||
+                                     active_page_ == Page::Weather);
+
+    // 状态栏布局优化（仅非全屏页面）
     // WiFi 图标: x=10, y=6 (12x12)
     // 网络状态文本: x=28, y=9
     // Phase 标签: x=150, y=9
     // 电池百分比: x=352, y=8 (格式: "85%")
     // 电池图标: x=380, y=4 (竖向 10x18)
 
-    texts.push_back({GetNetworkLabel(), 28, 9, 16});
-
-    // 显示服务状态（在 WiFi 已连接但服务器未连接时显示）
-    if (IsWifiConnected() && !IsServerConnected() && !offline_todo_mode_) {
-        texts.push_back({"服务离线", 96, 9, 16});
-    }
-
-    texts.push_back({GetPhaseLabel(), 150, 9, 16});
-
-    // 电池百分比显示（格式: "85%" 或 "--%"）
-    std::string battery_pct_text = battery_known_ ?
-        std::to_string(std::clamp(battery_level_, 0, 100)) + "%" : "--%";
-    // 低电量警告时加叹号
-    if (battery_known_ && battery_level_ < 20 && !battery_charging_) {
-        battery_pct_text = "!" + battery_pct_text;
-    }
-    texts.push_back({battery_pct_text, 340, 8, 16});  // 左移避免和电池图标重叠
-
-    const char* page_label = active_page_ == Page::Summary ? "对话"
-                           : active_page_ == Page::Todo    ? "Todo"
-                           : active_page_ == Page::Log     ? "日志"
-                           : active_page_ == Page::Countdown ? "倒计时"
-                           : active_page_ == Page::LifeBar ? "进度"
-                           : active_page_ == Page::Almanac ? "黄历"
-                           : active_page_ == Page::Weather ? "天气"
-                           :                                 "设置";
-    texts.push_back({single_line(repo_name_.empty() ? "AI" : repo_name_, 18), 12, kContentHeaderY, 16});
-    // 将页面标签移到中间位置（符合用户需求）
-    texts.push_back({page_label, 180, kContentHeaderY, 16});
-
-    // 新模式页面使用全屏布局，不显示顶部标题行
-    const bool full_screen_page = (active_page_ == Page::Countdown ||
-                                     active_page_ == Page::LifeBar ||
-                                     active_page_ == Page::Almanac ||
-                                     active_page_ == Page::Weather);
     if (!full_screen_page) {
-        // 其他页面正常显示标题行
+        texts.push_back({GetNetworkLabel(), 28, 9, 16});
+
+        // 显示服务状态（在 WiFi 已连接但服务器未连接时显示）
+        if (IsWifiConnected() && !IsServerConnected() && !offline_todo_mode_) {
+            texts.push_back({"服务离线", 96, 9, 16});
+        }
+
+        texts.push_back({GetPhaseLabel(), 150, 9, 16});
+
+        // 电池百分比显示（格式: "85%" 或 "--%"）
+        std::string battery_pct_text = battery_known_ ?
+            std::to_string(std::clamp(battery_level_, 0, 100)) + "%" : "--%";
+        // 低电量警告时加叹号
+        if (battery_known_ && battery_level_ < 20 && !battery_charging_) {
+            battery_pct_text = "!" + battery_pct_text;
+        }
+        texts.push_back({battery_pct_text, 340, 8, 16});  // 左移避免和电池图标重叠
+
+        const char* page_label = active_page_ == Page::Summary ? "对话"
+                               : active_page_ == Page::Todo    ? "Todo"
+                               : active_page_ == Page::Log     ? "日志"
+                               : active_page_ == Page::Countdown ? "倒计时"
+                               : active_page_ == Page::LifeBar ? "进度"
+                               : active_page_ == Page::Almanac ? "黄历"
+                               : active_page_ == Page::Weather ? "天气"
+                               :                                 "设置";
+        texts.push_back({single_line(repo_name_.empty() ? "AI" : repo_name_, 18), 12, kContentHeaderY, 16});
+        // 将页面标签移到中间位置（符合用户需求）
+        texts.push_back({page_label, 180, kContentHeaderY, 16});
     }
 
     if (active_page_ == Page::Summary) {
@@ -3563,12 +3564,10 @@ void LanMicApp::UpdateDisplay() {
             constexpr int kChatStartY = 72;  // Start after header line
             constexpr int kChatEndY = 264;   // Before footer (footer hidden on Summary)
             constexpr size_t kChatVisibleLines = (kChatEndY - kChatStartY) / kLineHeight;  // ~10 lines
-            constexpr int kMarginX = 12;     // 左右边距
+            constexpr int kMarginX = 12;     // 左右边距（AI消息左对齐）
+            constexpr int kMarginXRight = 0;   // 用户消息右边距（紧贴右边缘）
             constexpr int kBubbleMargin = 4; // 气泡内边距
             constexpr int kBubbleRadius = 4; // 圆角半径
-
-            // 存储气泡绘制信息（位置、大小、是否用户消息）
-            std::vector<std::tuple<int, int, int, int, bool>> bubbles;  // (x, y, w, h, is_user)
 
             // Build all lines from chat history
             std::vector<std::pair<std::string, bool>> chat_lines;  // (text, is_user)
@@ -3635,19 +3634,19 @@ void LanMicApp::UpdateDisplay() {
 
                 int x_pos, bubble_x;
                 if (is_user) {
-                    // 用户消息：右对齐
-                    x_pos = 400 - kMarginX - text_width;
-                    bubble_x = 400 - kMarginX - bubble_width;
+                    // 用户消息：右对齐，紧贴右边缘（kMarginXRight=0）
+                    x_pos = 400 - kMarginXRight - text_width;
+                    bubble_x = 400 - kMarginXRight - bubble_width;
                 } else {
                     // AI/系统消息：左对齐
                     x_pos = kMarginX;
                     bubble_x = kMarginX - kBubbleMargin;
                 }
 
-                // 绘制气泡边框（符合 Spec §3）
-                // 用户消息：实心填充 (filled=true)
-                // AI消息：边框 (filled=false)
-                DrawBubble(bubble_x, y, bubble_width, bubble_height, is_user, kBubbleRadius);
+                // 收集气泡信息，等 DrawTexts 后绘制（避免被清屏覆盖）
+                // 用户消息：加粗边框 (filled=true)
+                // AI消息：普通边框 (filled=false)
+                pending_bubbles.push_back({bubble_x, y, bubble_width, bubble_height, is_user});
 
                 // 在气泡内绘制文本
                 texts.push_back({line, x_pos, y, 16});
@@ -3871,21 +3870,30 @@ void LanMicApp::UpdateDisplay() {
     }
 
     display_->DrawTexts(texts, true);
-    DrawHorizontalLine(kStatusBarBottomY);
-    // 新模式页面使用全屏布局，不绘制标题分隔线
-    const bool full_screen_layout = (active_page_ == Page::Countdown ||
-                                      active_page_ == Page::LifeBar ||
-                                      active_page_ == Page::Almanac ||
-                                      active_page_ == Page::Weather);
-    if (!full_screen_layout) {
+
+    // 绘制气泡边框（在 DrawTexts 之后，避免被清屏覆盖）
+    constexpr int kBubbleRadius = 4;
+    for (const auto& [bx, by, bw, bh, is_user] : pending_bubbles) {
+        DrawBubble(bx, by, bw, bh, is_user, kBubbleRadius);
+    }
+
+    // 状态栏分隔线仅显示在非全屏页面
+    if (!full_screen_page) {
+        DrawHorizontalLine(kStatusBarBottomY);
+    }
+    // 新模式页面使用全屏布局，不绘制标题分隔线和状态栏图标
+    if (!full_screen_page) {
         DrawHorizontalLine(kHeaderLineY);
     }
     // Only draw footer separator when footer is visible and not full screen
-    if (!footer_text.empty() && !full_screen_layout) {
+    if (!footer_text.empty() && !full_screen_page) {
         DrawHorizontalLine(kFooterTopY);
     }
-    DrawWifiIcon(10, 6);  // WiFi 图标 (12x12) 在 y=6
-    DrawBatteryIcon(380, 4, battery_known_ ? battery_level_ : 0, battery_charging_);  // 竖向电池 (10x18) 在 y=4
+    // 状态栏图标仅显示在非全屏页面
+    if (!full_screen_page) {
+        DrawWifiIcon(10, 6);  // WiFi 图标 (12x12) 在 y=6
+        DrawBatteryIcon(380, 4, battery_known_ ? battery_level_ : 0, battery_charging_);  // 竖向电池 (10x18) 在 y=4
+    }
     display_->RequestUrgentRefresh();
 }
 
