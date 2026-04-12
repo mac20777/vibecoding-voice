@@ -3397,16 +3397,17 @@ void LanMicApp::DrawBubble(int x, int y, int w, int h, bool filled, int radius) 
     }
 
     // 1bpp 位图：每行宽度按字节对齐（每字节 8 像素）
+    // 墨水屏单色限制：不能全填充黑底，否则黑色文字不可见
+    // 修正方案：filled=true 用户消息用加粗边框（2px），filled=false AI消息用普通边框（1px）
+    // 内部均留白，保证文字可见，靠边框粗细区分用户/AI
     const int bytes_per_row = (w + 7) / 8;
-    std::vector<uint8_t> buffer(bytes_per_row * h, 0x00);  // 初始化为白色
+    std::vector<uint8_t> buffer(bytes_per_row * h, 0x00);  // 初始化为白色（内部留白）
 
-    // 绘制圆角矩形
-    // radius 简化处理：圆角区域跳过边角像素
     const int r = std::min(radius, std::min(w / 2, h / 2));
+    const int border_width = filled ? 2 : 1;  // 用户消息加粗边框，AI消息普通边框
 
-    // 设置像素的辅助函数（在位图缓冲区中）
-    auto set_pixel = [&buffer, bytes_per_row, w](int px, int py, bool black) {
-        if (px < 0 || px >= w || py < 0) return;
+    auto set_pixel = [&buffer, bytes_per_row, w, h](int px, int py, bool black) {
+        if (px < 0 || px >= w || py < 0 || py >= h) return;
         const int byte_idx = py * bytes_per_row + (px / 8);
         const int bit_idx = 7 - (px % 8);  // MSB first
         if (black) {
@@ -3416,15 +3417,16 @@ void LanMicApp::DrawBubble(int x, int y, int w, int h, bool filled, int radius) 
         }
     };
 
-    // 绘制圆角矩形
+    // 绘制圆角边框（内部不填充，保证文字可见）
     for (int py = 0; py < h; ++py) {
         for (int px = 0; px < w; ++px) {
-            // 检查是否在圆角区域（四个角）
             const bool in_corner =
-                (px < r && py < r) ||                           // 左上角
-                (px >= w - r && py < r) ||                      // 右上角
-                (px < r && py >= h - r) ||                      // 左下角
-                (px >= w - r && py >= h - r);                   // 右下角
+                (px < r && py < r) ||
+                (px >= w - r && py < r) ||
+                (px < r && py >= h - r) ||
+                (px >= w - r && py >= h - r);
+
+            bool draw_border = false;
 
             if (in_corner) {
                 // 圆角区域：计算距离圆心的距离
@@ -3436,35 +3438,28 @@ void LanMicApp::DrawBubble(int x, int y, int w, int h, bool filled, int radius) 
 
                 const int dist_sq = (px - cx) * (px - cx) + (py - cy) * (py - cy);
                 const int r_sq = r * r;
+                const int inner_r_sq = (r - border_width) * (r - border_width);
 
-                if (filled) {
-                    // 实心气泡：圆角内部填充
-                    if (dist_sq <= r_sq) {
-                        set_pixel(px, py, true);
-                    }
-                } else {
-                    // 边框气泡：圆角边缘绘制
-                    const int inner_r = r - 2;  // 边框宽度约 2px
-                    if (dist_sq <= r_sq && dist_sq > (inner_r * inner_r)) {
-                        set_pixel(px, py, true);  // 边框像素
-                    }
+                // 在圆角边缘区域内绘制边框
+                if (dist_sq <= r_sq && dist_sq > inner_r_sq) {
+                    draw_border = true;
                 }
             } else {
-                // 非圆角区域（主体）
-                const bool is_border =
-                    (px < 2) || (px >= w - 2) ||  // 左右边框
-                    (py < 2) || (py >= h - 2);    // 上下边框
+                // 非圆角区域（主体）：绘制边框线
+                const bool is_left_border   = px < border_width;
+                const bool is_right_border  = px >= w - border_width;
+                const bool is_top_border    = py < border_width;
+                const bool is_bottom_border = py >= h - border_width;
 
-                if (filled) {
-                    // 实心：全部填充
-                    set_pixel(px, py, true);
-                } else {
-                    // 边框：只绘制边框线
-                    if (is_border) {
-                        set_pixel(px, py, true);
-                    }
+                if (is_left_border || is_right_border || is_top_border || is_bottom_border) {
+                    draw_border = true;
                 }
             }
+
+            if (draw_border) {
+                set_pixel(px, py, true);
+            }
+            // 内部不填充，保持白色背景让文字可见
         }
     }
 
