@@ -1536,6 +1536,75 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
             PlayBeep(880, 100);
             PlayBeep(1100, 150);
         }
+    } else if (strcmp(type, "weather_data") == 0) {
+        // 天气数据：从后端接收 QWeather API 数据
+        const char* city = GetJsonString(root, "city");
+        cJSON* temp_json = cJSON_GetObjectItemCaseSensitive(root, "temp");
+        const char* desc = GetJsonString(root, "desc");
+        cJSON* low_json = cJSON_GetObjectItemCaseSensitive(root, "low");
+        cJSON* high_json = cJSON_GetObjectItemCaseSensitive(root, "high");
+        cJSON* humidity_json = cJSON_GetObjectItemCaseSensitive(root, "humidity");
+        const char* wind_dir = GetJsonString(root, "windDir");
+        cJSON* wind_level_json = cJSON_GetObjectItemCaseSensitive(root, "windLevel");
+        const char* sunrise = GetJsonString(root, "sunrise");
+        const char* sunset = GetJsonString(root, "sunset");
+        const char* advice = GetJsonString(root, "advice");
+
+        if (city != nullptr) {
+            weather_state_.city = city;
+        }
+        if (cJSON_IsNumber(temp_json)) {
+            weather_state_.today_temp = temp_json->valueint;
+        }
+        if (desc != nullptr) {
+            weather_state_.today_desc = desc;
+        }
+        if (cJSON_IsNumber(low_json)) {
+            weather_state_.today_low = low_json->valueint;
+        }
+        if (cJSON_IsNumber(high_json)) {
+            weather_state_.today_high = high_json->valueint;
+        }
+        if (cJSON_IsNumber(humidity_json)) {
+            weather_state_.today_humidity = humidity_json->valueint;
+        }
+        if (wind_dir != nullptr) {
+            weather_state_.today_wind_dir = wind_dir;
+        }
+        if (cJSON_IsNumber(wind_level_json)) {
+            weather_state_.today_wind_level = wind_level_json->valueint;
+        }
+        if (sunrise != nullptr) {
+            weather_state_.sunrise = sunrise;
+        }
+        if (sunset != nullptr) {
+            weather_state_.sunset = sunset;
+        }
+        if (advice != nullptr) {
+            weather_state_.advice = advice;
+        }
+
+        // 解析预报数据
+        cJSON* forecast = cJSON_GetObjectItemCaseSensitive(root, "forecast");
+        if (cJSON_IsArray(forecast)) {
+            weather_state_.forecast.clear();
+            cJSON* day = nullptr;
+            cJSON_ArrayForEach(day, forecast) {
+                const char* weekday = GetJsonString(day, "weekday");
+                const char* fdesc = GetJsonString(day, "desc");
+                cJSON* ftemp_json = cJSON_GetObjectItemCaseSensitive(day, "temp");
+                if (weekday != nullptr && fdesc != nullptr) {
+                    WeatherState::ForecastDay fd;
+                    fd.weekday = weekday;
+                    fd.desc = fdesc;
+                    fd.temp = cJSON_IsNumber(ftemp_json) ? ftemp_json->valueint : 0;
+                    weather_state_.forecast.push_back(fd);
+                }
+            }
+        }
+
+        weather_state_.has_data = true;
+        ESP_LOGI(kTag, "Weather data received: %s %d°C", weather_state_.city.c_str(), weather_state_.today_temp);
     }
 
     cJSON_Delete(root);
@@ -2028,7 +2097,7 @@ int LanMicApp::GetTodoMenuItemCount() const {
         return 3;
     }
     if (todo_menu_kind_ == TodoMenuKind::Live) {
-        return 5;
+        return 2;  // 对话页 BOOT 菜单：清屏、返回
     }
     return 6;
 }
@@ -2050,17 +2119,13 @@ std::string LanMicApp::GetTodoMenuItemLabel(int item) const {
     }
 
     if (todo_menu_kind_ == TodoMenuKind::Live) {
+        // 对话页 BOOT 菜单：清屏/返回（动态显示选中状态）
+        const bool selected = (item == todo_menu_selected_item_);
         switch (item) {
             case 0:
-                return "Go Todo";
+                return selected ? "[x] 清屏" : "[ ] 清屏";
             case 1:
-                return "Reconnect host";
-            case 2:
-                return "Restart device";
-            case 3:
-                return "Settings";
-            case 4:
-                return "Back";
+                return selected ? "[x] 返回" : "[ ] 返回";
             default:
                 return "";
         }
@@ -2164,25 +2229,25 @@ void LanMicApp::ExecuteTodoMenuItem(int item) {
     }
 
     if (todo_menu_kind_ == TodoMenuKind::Live) {
+        // 对话页 BOOT 菜单执行
         switch (item) {
             case 0:
+                // 清屏：清空 chat_history_ 并刷新
+                chat_history_.clear();
+                latest_assistant_text_.clear();
+                transcript_text_.clear();
+                has_pending_transcript_ = false;
+                summary_scroll_offset_ = 0;
                 CloseTodoMenu();
-                SwitchPage(Page::Todo);
+                UpdateDisplay();
                 return;
             case 1:
-                CloseTodoMenu();
-                RequestReconnect("Refreshing host...");
-                return;
-            case 2:
-                restart_device();
-                return;
-            case 3:
-                CloseTodoMenu();
-                EnterSettings();
-                return;
-            case 4:
             default:
+                // 返回：关闭菜单
                 CloseTodoMenu();
+                return;
+        }
+    }
                 return;
         }
     }
@@ -2290,6 +2355,14 @@ void LanMicApp::SwitchPage(Page page) {
     if (page == Page::Todo || page == Page::Summary) {
         SyncVoiceModeToPage(page);
     }
+    // 切换到全屏页面时强制全屏刷新，清除残留图像（修复 UI 叠加 Bug）
+    const bool full_screen_page = (page == Page::LifeBar ||
+                                    page == Page::Almanac ||
+                                    page == Page::Weather ||
+                                    page == Page::Countdown);
+    if (full_screen_page && display_ != nullptr) {
+        display_->RequestUrgentFullRefresh();
+    }
     UpdateDisplay();
 }
 
@@ -2302,6 +2375,10 @@ void LanMicApp::EnterSettings() {
         todo_menu_open_ = false;
         settings_selected_item_ = 0;
         settings_editing_volume_ = false;
+        // 进入设置页时强制全屏刷新，清除残留图像
+        if (display_ != nullptr) {
+            display_->RequestUrgentFullRefresh();
+        }
         UpdateDisplay();
     }
 }
@@ -2470,7 +2547,7 @@ void LanMicApp::HandleCountdownInput(bool any_key) {
 std::string LanMicApp::FormatCountdownTime(int seconds) const {
     int mins = seconds / 60;
     int secs = seconds % 60;
-    char buf[8];
+    char buf[20];
     snprintf(buf, sizeof(buf), "%02d:%02d", mins, secs);
     return std::string(buf);
 }
@@ -2556,10 +2633,8 @@ std::string LanMicApp::FormatProgressBar(float pct, int width) const {
 }
 
 void LanMicApp::DrawLifeBarPage(std::vector<Display::TextItem>& texts) {
-    // 人生进度条布局 (400x300)
-    // 顶部：年进度（大百分比 + 进度条）
-    // 中间：月/周 双列进度条
-    // 底部：人生进度条
+    // 人生进度条布局 (400x300) - 墨水屏美化版
+    // 使用边框符号模拟反显/框选效果
 
     constexpr int kYearLabelY = 50;
     constexpr int kYearPctY = 75;
@@ -2572,43 +2647,49 @@ void LanMicApp::DrawLifeBarPage(std::vector<Display::TextItem>& texts) {
     constexpr int kLifeBarY = 250;
     constexpr int kQuoteY = 280;
 
-    // 年进度
-    texts.push_back({lifebar_state_.year_label, 12, kYearLabelY, 16});
+    // 顶部边框
+    texts.push_back({"┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓", 8, 40, 14});
 
-    // 大百分比显示
+    // 年进度（框选标题）
+    texts.push_back({"【" + lifebar_state_.year_label + "】", 12, kYearLabelY, 16});
+
+    // 大百分比显示（框选效果）
     char pct_buf[16];
     snprintf(pct_buf, sizeof(pct_buf), "%.1f%%", lifebar_state_.year_pct);
-    texts.push_back({pct_buf, 300, kYearPctY, 24});  // 大号字体
+    texts.push_back({"┃ " + std::string(pct_buf) + " ┃", 280, kYearPctY, 24});  // 大号字体加边框
 
-    // 年进度条（宽度 320，高度用文字模拟）
+    // 年进度条（宽度 320）
     std::string year_bar = FormatProgressBar(lifebar_state_.year_pct, 40);
-    texts.push_back({year_bar, 12, kYearBarY, 16});
+    texts.push_back({"│" + year_bar + "│", 12, kYearBarY, 16});
 
-    // 月/周 双列
-    // 左列：月进度
-    texts.push_back({lifebar_state_.month_label, 12, kMonthWeekY, 16});
+    // 分隔线
+    texts.push_back({"├─────────────────────────────────┤", 8, kSeparatorY - 20, 14});
+
+    // 月/周 双列（框选）
+    texts.push_back({"【月】", 12, kMonthWeekY, 16});
     snprintf(pct_buf, sizeof(pct_buf), "%.1f%%", lifebar_state_.month_pct);
-    texts.push_back({pct_buf, 80, kMonthWeekY, 16});
+    texts.push_back({pct_buf, 70, kMonthWeekY, 16});
     std::string month_bar = FormatProgressBar(lifebar_state_.month_pct, 15);
-    texts.push_back({month_bar, 12, kMonthWeekBarY, 14});
+    texts.push_back({"┃" + month_bar + "┃", 12, kMonthWeekBarY, 14});
 
-    // 右列：周进度
-    texts.push_back({lifebar_state_.week_label, 210, kMonthWeekY, 16});
+    texts.push_back({"【周】", 210, kMonthWeekY, 16});
     snprintf(pct_buf, sizeof(pct_buf), "%.1f%%", lifebar_state_.week_pct);
-    texts.push_back({pct_buf, 280, kMonthWeekY, 16});
+    texts.push_back({pct_buf, 270, kMonthWeekY, 16});
     std::string week_bar = FormatProgressBar(lifebar_state_.week_pct, 15);
-    texts.push_back({week_bar, 210, kMonthWeekBarY, 14});
+    texts.push_back({"┃" + week_bar + "┃", 210, kMonthWeekBarY, 14});
 
-    // 分隔线（虚线）
-    texts.push_back({"─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─", 12, kSeparatorY, 14});
+    // 分隔线
+    texts.push_back({"├─────────────────────────────────┤", 8, kSeparatorY, 14});
 
-    // 人生进度条
-    texts.push_back({"人生", 12, kLifeLabelY, 16});
+    // 人生进度条（重点框选）
+    texts.push_back({"┏━━【人生】━━━━━━━━━━━━━━━━━━━━━━━┓", 8, kLifeLabelY - 10, 16});
     snprintf(pct_buf, sizeof(pct_buf), "%.1f%%", lifebar_state_.life_pct);
-    texts.push_back({pct_buf, 300, kLifeLabelY, 24});  // 大号字体
-
+    texts.push_back({"┃     " + std::string(pct_buf) + "     ┃", 140, kLifePctY, 24});
     std::string life_bar = FormatProgressBar(lifebar_state_.life_pct, 40);
-    texts.push_back({life_bar, 12, kLifeBarY, 16});
+    texts.push_back({"┃" + life_bar + "┃", 12, kLifeBarY, 16});
+
+    // 底部边框
+    texts.push_back({"┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛", 8, kQuoteY - 10, 14});
 
     // 底部引言
     texts.push_back({"— Time Flies", 160, kQuoteY, 14});
@@ -2726,55 +2807,50 @@ void LanMicApp::RequestAlmanacLlmData() {
 }
 
 void LanMicApp::DrawAlmanacPage(std::vector<Display::TextItem>& texts) {
-    // 老黄历布局 (400x300)
-    // 左列：日期区（农历/数字/月份/星期/节气）
-    // 右列：宜忌区（宜/忌/吉方/养生）
+    // 老黄历布局 (400x300) - 墨水屏美化版
+    // 使用边框符号模拟反显/框选效果
 
     constexpr int kLeftX = 12;
-    constexpr int kRightX = 220;
+    constexpr int kRightX = 200;
     constexpr int kTopY = 50;
 
-    // ===== 左列：日期区 =====
-    texts.push_back({almanac_state_.lunar_date, kLeftX, kTopY, 24});  // 大号字体
+    // 顶部边框
+    texts.push_back({"┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓", 8, 40, 14});
 
-    // 日期数字
-    texts.push_back({std::to_string(almanac_state_.day), kLeftX + 30, kTopY + 30, 32});  // 更大字体
+    // ===== 左列：日期区（框选效果）=====
+    texts.push_back({"┌──────────┐", kLeftX, kTopY - 10, 14});
+    texts.push_back({"│" + almanac_state_.lunar_date + "│", kLeftX + 5, kTopY, 24});  // 大号字体加边框
 
-    // 月份
-    texts.push_back({almanac_state_.month_cn, kLeftX + 50, kTopY + 70, 16});
+    // 日期数字（大号框选）
+    texts.push_back({"┃ " + std::to_string(almanac_state_.day) + " ┃", kLeftX, kTopY + 35, 32});
 
-    // 星期
-    texts.push_back({almanac_state_.weekday_cn, kLeftX + 50, kTopY + 90, 16});
+    // 月份星期
+    texts.push_back({almanac_state_.month_cn + " " + almanac_state_.weekday_cn, kLeftX + 50, kTopY + 75, 16});
+    texts.push_back({"└──────────┘", kLeftX, kTopY + 95, 14});
 
-    // 分隔线
-    texts.push_back({"──────────", kLeftX, kTopY + 115, 14});
-
-    // 节气
+    // 节气（框选）
     if (!almanac_state_.solar_term.empty()) {
-        texts.push_back({almanac_state_.solar_term, kLeftX + 30, kTopY + 130, 20});
+        texts.push_back({"【" + almanac_state_.solar_term + "】", kLeftX + 20, kTopY + 115, 20});
     }
 
-    // ===== 右列：宜忌区 =====
-    texts.push_back({"宜", kRightX, kTopY, 20});
-    texts.push_back({almanac_state_.yi, kRightX, kTopY + 25, 16});
+    // ===== 右列：宜忌区（框选效果）=====
+    texts.push_back({"┏━━【宜】━━┓", kRightX, kTopY, 16});
+    texts.push_back({"┃ " + almanac_state_.yi + " ┃", kRightX, kTopY + 20, 16});
+    texts.push_back({"┗━━━━━━━━━┛", kRightX, kTopY + 40, 14});
 
-    // 分隔线
-    texts.push_back({"──────────", kRightX, kTopY + 50, 14});
+    texts.push_back({"┏━━【忌】━━┓", kRightX, kTopY + 55, 16});
+    texts.push_back({"┃ " + almanac_state_.ji + " ┃", kRightX, kTopY + 75, 16});
+    texts.push_back({"┗━━━━━━━━━┛", kRightX, kTopY + 95, 14});
 
-    texts.push_back({"忌", kRightX, kTopY + 65, 20});
-    texts.push_back({almanac_state_.ji, kRightX, kTopY + 90, 16});
+    // 吉方养生
+    texts.push_back({"【吉方】" + almanac_state_.direction, kRightX, kTopY + 115, 16});
+    texts.push_back({almanac_state_.health_tip, kRightX, kTopY + 140, 14});
 
-    // 分隔线
-    texts.push_back({"─ ─ ─ ─ ─ ─", kRightX, kTopY + 115, 14});
-
-    // 吉方
-    texts.push_back({"吉方 " + almanac_state_.direction, kRightX, kTopY + 130, 16});
-
-    // 养生提示
-    texts.push_back({almanac_state_.health_tip, kRightX, kTopY + 150, 14});
+    // 底部边框
+    texts.push_back({"┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛", 8, 270, 14});
 
     // 底部来源
-    texts.push_back({"— " + almanac_state_.solar_term, 160, 280, 14});
+    texts.push_back({"— " + almanac_state_.solar_term, 160, 285, 14});
 }
 
 // ============================================================
@@ -2989,18 +3065,18 @@ void LanMicApp::ExecuteSettingsItem(int item) {
 
 const char* LanMicApp::GetNetworkLabel() const {
     if (offline_todo_mode_ && network_state_ != NetworkState::Server) {
-        return "Offline";
+        return "离线";
     }
     switch (network_state_) {
         case NetworkState::Server:
-            return "Online";
+            return "在线";  // 符合 Spec §2：WSS 建立显示"在线"
         case NetworkState::Wifi:
-            return "No Srv";
+            return "WiFi";  // WiFi 已连接但服务未连接，显示 WiFi 状态
         case NetworkState::Config:
             return "AP";
         case NetworkState::Offline:
         default:
-            return "Offline";
+            return "离线";
     }
 }
 
@@ -3327,7 +3403,7 @@ void LanMicApp::UpdateDisplay() {
     if (battery_known_ && battery_level_ < 20 && !battery_charging_) {
         battery_pct_text = "!" + battery_pct_text;
     }
-    texts.push_back({battery_pct_text, 352, 8, 16});
+    texts.push_back({battery_pct_text, 340, 8, 16});  // 左移避免和电池图标重叠
 
     const char* page_label = active_page_ == Page::Summary ? "对话"
                            : active_page_ == Page::Todo    ? "Todo"
@@ -3338,7 +3414,8 @@ void LanMicApp::UpdateDisplay() {
                            : active_page_ == Page::Weather ? "天气"
                            :                                 "设置";
     texts.push_back({single_line(repo_name_.empty() ? "AI" : repo_name_, 18), 12, kContentHeaderY, 16});
-    texts.push_back({page_label, 316, kContentHeaderY, 16});
+    // 将页面标签移到中间位置（符合用户需求）
+    texts.push_back({page_label, 180, kContentHeaderY, 16});
 
     // 新模式页面使用全屏布局，不显示顶部标题行
     const bool full_screen_page = (active_page_ == Page::Countdown ||
@@ -3378,55 +3455,51 @@ void LanMicApp::UpdateDisplay() {
             // Build all lines from chat history with role markers
             std::vector<std::pair<std::string, bool>> chat_lines;  // (text, is_user)
 
-            // Add history messages
-            for (const auto& msg : chat_history_) {
-                // 根据角色添加前缀标识（英文）
-                const std::string prefix = msg.role == ChatRole::User ? "User: " : "LLM: ";
-                const auto wrapped = WrapUtf8Lines(msg.text, kBodyCharsPerLine - prefix.size(), 0);
-                for (const auto& line : wrapped) {
-                    chat_lines.push_back({prefix + line, msg.role == ChatRole::User});
+            // 录音/识别/运行状态时：隐藏历史消息，保持界面干净（符合 Spec §3）
+            const bool hide_history = (phase_ == Phase::Recording ||
+                                       phase_ == Phase::Transcribing ||
+                                       phase_ == Phase::Running);
+
+            // Add history messages only when not in active state
+            if (!hide_history) {
+                for (const auto& msg : chat_history_) {
+                    // 气泡样式：用户消息加 [ ] 边框（右侧），AI 消息加 | | 边框（左侧）
+                    const auto wrapped = WrapUtf8Lines(msg.text, kBodyCharsPerLine - 4, 0);  // 预留边框空间
+                    for (const auto& line : wrapped) {
+                        // 用户消息：[文本] 格式，右侧对齐
+                        // AI 消息：|文本| 格式，左侧对齐
+                        const std::string bubble_line = msg.role == ChatRole::User ?
+                            "[" + line + "]" : "|" + line + "|";
+                        chat_lines.push_back({bubble_line, msg.role == ChatRole::User});
+                    }
                 }
             }
 
-            // Add current transient content with status hints
+            // Add current transient content with status hints (符合 Spec §3)
             if (phase_ == Phase::Recording) {
-                // 录音状态：右侧显示 "正在录音..." + 实时文本
-                std::string recording_text = "正在录音...";
-                if (!transcript_text_.empty()) {
-                    recording_text = "User: " + transcript_text_;
-                }
-                const auto wrapped = WrapUtf8Lines(recording_text, kBodyCharsPerLine, 0);
-                for (const auto& line : wrapped) {
-                    chat_lines.push_back({line, true});  // User side
-                }
+                // 录音状态：右侧显示 "正在录音..."（干净界面，无旧消息）
+                chat_lines.push_back({"正在录音...", true});  // User side, 右对齐
             } else if (phase_ == Phase::Transcribing) {
-                // 识别状态：右侧显示识别中
-                std::string transcribing_text = "识别中...";
-                if (!transcript_text_.empty()) {
-                    transcribing_text = "User: " + transcript_text_;
-                }
-                const auto wrapped = WrapUtf8Lines(transcribing_text, kBodyCharsPerLine, 0);
-                for (const auto& line : wrapped) {
-                    chat_lines.push_back({line, true});  // User side
-                }
+                // 识别状态：右侧显示 "识别中..."
+                chat_lines.push_back({"识别中...", true});  // User side, 右对齐
             } else if (phase_ == Phase::Running) {
-                // AI 正在处理：左侧显示 "正在思考..." 或实时回复
-                std::string thinking_text = "正在思考...";
-                if (!latest_assistant_text_.empty()) {
-                    thinking_text = "LLM: " + latest_assistant_text_;
-                }
-                const auto wrapped = WrapUtf8Lines(thinking_text, kBodyCharsPerLine, 0);
-                for (const auto& line : wrapped) {
-                    chat_lines.push_back({line, false});  // AI side
+                // AI 正在处理：左侧显示 "正在思考..." 或实时回复（气泡样式）
+                if (latest_assistant_text_.empty()) {
+                    chat_lines.push_back({"|正在思考...|", false});  // AI side, 左对齐，带边框
+                } else {
+                    const auto wrapped = WrapUtf8Lines(latest_assistant_text_, kBodyCharsPerLine - 2, 0);
+                    for (const auto& line : wrapped) {
+                        chat_lines.push_back({"|" + line + "|", false});  // AI side, 带边框
+                    }
                 }
             } else if (has_pending_transcript_ && !transcript_text_.empty()) {
-                // 待发送文本：右侧显示
-                const auto wrapped = WrapUtf8Lines("User: " + transcript_text_, kBodyCharsPerLine, 0);
+                // 待发送文本：右侧显示，用户气泡样式
+                const auto wrapped = WrapUtf8Lines(transcript_text_, kBodyCharsPerLine - 2, 0);
                 for (const auto& line : wrapped) {
-                    chat_lines.push_back({line, true});
+                    chat_lines.push_back({"[" + line + "]", true});  // User side, 带边框
                 }
             } else if (chat_history_.empty() && phase_ == Phase::Idle) {
-                // 无历史记录，显示提示
+                // 无历史记录，显示提示（左侧，不带边框）
                 std::string hint = hint_text_.empty() ? "按 BOOT 键开始对话" : hint_text_;
                 const auto wrapped = WrapUtf8Lines(hint, kBodyCharsPerLine, kChatVisibleLines);
                 for (const auto& line : wrapped) {
@@ -3581,7 +3654,8 @@ void LanMicApp::UpdateDisplay() {
 
         int y = kLogBodyY;
         for (size_t i = 0; i < items.size(); ++i) {
-            std::string row = (static_cast<int>(i) == settings_selected_item_) ? "▶ " : "  ";
+            // 选中状态用 [x] 标记，未选中用 [ ] 标记（符合用户需求）
+            std::string row = (static_cast<int>(i) == settings_selected_item_) ? "[x] " : "[ ] ";
             row += items[i];
             texts.push_back({row, 12, y, 16});
             y += kLineHeight + 4;  // 紧凑间距，提高可读性
@@ -3593,8 +3667,10 @@ void LanMicApp::UpdateDisplay() {
         } else {
             texts.push_back({"UP/DN ±10  BOOT 保存", 12, kFooterTextY - 16, 14});
         }
-    } else {
-        // 倒计时页面 (Page::Countdown)
+    }
+
+    // 倒计时页面 (Page::Countdown)
+    if (active_page_ == Page::Countdown) {
         // 中央大号字体显示剩余时间，下方显示事项标签
 
         // 剩余时间字符串（格式 MM:SS）
@@ -3647,7 +3723,10 @@ void LanMicApp::UpdateDisplay() {
             std::string alarm_info = "提醒 " + std::to_string(countdown_state_.alarm_count) + "/5 次";
             texts.push_back({alarm_info, 280, kHintY, 14});
         }
-    } else if (active_page_ == Page::LifeBar) {
+    }
+
+    // 新增 InkSight 模式页面
+    if (active_page_ == Page::LifeBar) {
         // 人生进度条页面
         UpdateLifeBarState();
         DrawLifeBarPage(texts);

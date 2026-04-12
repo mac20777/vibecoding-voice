@@ -13,10 +13,10 @@
 #include <freertos/task.h>
 
 #include "audio_codec.h"
+#include "board.h"
 #include "button.h"
+#include "display/display.h"
 
-class Board;
-class Display;
 class WebSocket;
 
 class LanMicApp {
