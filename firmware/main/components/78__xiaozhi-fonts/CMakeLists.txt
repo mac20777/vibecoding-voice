@@ -5,6 +5,8 @@ idf_component_register(
         "src/SourceHanSansSC_Regular_slim.c"
         "src/font_zectrix_16_1.c"
         "src/font_zectrix_48_1.c"
+        "src/weather_icons/weather_icons_16.c"
+        "src/weather_icons/weather_icons_48.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES

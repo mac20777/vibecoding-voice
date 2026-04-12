@@ -2907,8 +2907,8 @@ void LanMicApp::RequestWeatherData() {
 }
 
 void LanMicApp::DrawWeatherPage(std::vector<Display::TextItem>& texts) {
-    // 天气看板布局 (400x300) - 符合 spec_v3_icon_font.md
-    // 使用图标美化布局
+    // 天气看板布局 (400x300) - 使用 FontAwesome 图标
+    // spec_v3_icon_font.md
 
     constexpr int kCityY = 50;
     constexpr int kLeftX = 12;
@@ -2918,26 +2918,29 @@ void LanMicApp::DrawWeatherPage(std::vector<Display::TextItem>& texts) {
     constexpr int kAdviceY = 260;
 
     // 顶部：位置图标 + 城市名
-    texts.push_back({FONT_ZECTRIX_WEATHER_LOCATION, 12, kCityY, 20});  // 📍 位置图标
+    texts.push_back({FONT_ZECTRIX_WEATHER_LOCATION, 12, kCityY, 20});  // 📍
     texts.push_back({weather_state_.city, 36, kCityY, 20});
 
     // ===== 主天气显示 =====
-    // 根据天气描述选择图标（待 IcoMoon 导入后生效）
+    // 根据天气描述自动选择 FontAwesome 图标
     std::string weather_icon = FONT_ZECTRIX_WEATHER_SUN;  // 默认晴天
-    if (weather_state_.today_desc.find("云") != std::string::npos ||
-        weather_state_.today_desc.find("多云") != std::string::npos) {
-        weather_icon = FONT_ZECTRIX_WEATHER_CLOUD;
+    if (weather_state_.today_desc.find("雷") != std::string::npos) {
+        weather_icon = FONT_ZECTRIX_WEATHER_THUNDER;      // 🌩️ 雷暴
     } else if (weather_state_.today_desc.find("雨") != std::string::npos) {
-        weather_icon = FONT_ZECTRIX_WEATHER_RAIN;
+        weather_icon = FONT_ZECTRIX_WEATHER_RAIN;         // 🌧️ 雨天
     } else if (weather_state_.today_desc.find("雪") != std::string::npos) {
-        weather_icon = FONT_ZECTRIX_WEATHER_SNOW;
+        weather_icon = FONT_ZECTRIX_WEATHER_SNOW;         // ❄️ 雪天
+    } else if (weather_state_.today_desc.find("云") != std::string::npos ||
+               weather_state_.today_desc.find("阴") != std::string::npos) {
+        weather_icon = FONT_ZECTRIX_WEATHER_CLOUD;        // ☁️ 多云
     }
+    // 晴天默认使用 SUN
 
-    // 主图标 + 温度
-    texts.push_back({weather_icon, kLeftX, kMainY, 48});  // 48px 天气图标
+    // 主图标 + 温度（48px 大图标）
+    texts.push_back({weather_icon, kLeftX, kMainY, 48});
     char temp_buf[16];
     snprintf(temp_buf, sizeof(temp_buf), "%d°C", weather_state_.today_temp);
-    texts.push_back({temp_buf, kLeftX + 60, kMainY + 10, 36});  // 大号温度
+    texts.push_back({temp_buf, kLeftX + 55, kMainY + 10, 36});
 
     // 天气描述
     texts.push_back({weather_state_.today_desc, kLeftX, kMainY + 55, 18});
@@ -2952,39 +2955,44 @@ void LanMicApp::DrawWeatherPage(std::vector<Display::TextItem>& texts) {
     for (size_t i = 0; i < weather_state_.forecast.size() && i < 3; ++i) {
         const auto& f = weather_state_.forecast[i];
         texts.push_back({f.weekday, kRightX, forecast_y, 14});
-        // 预报图标（根据描述选择）
+
+        // 预报图标选择（16px 小图标）
         std::string fc_icon = FONT_ZECTRIX_WEATHER_SUN;
-        if (f.desc.find("云") != std::string::npos) {
-            fc_icon = FONT_ZECTRIX_WEATHER_CLOUD;
+        if (f.desc.find("雷") != std::string::npos) {
+            fc_icon = FONT_ZECTRIX_WEATHER_THUNDER;
         } else if (f.desc.find("雨") != std::string::npos) {
             fc_icon = FONT_ZECTRIX_WEATHER_RAIN;
+        } else if (f.desc.find("雪") != std::string::npos) {
+            fc_icon = FONT_ZECTRIX_WEATHER_SNOW;
+        } else if (f.desc.find("云") != std::string::npos || f.desc.find("阴") != std::string::npos) {
+            fc_icon = FONT_ZECTRIX_WEATHER_CLOUD;
         }
-        texts.push_back({fc_icon, kRightX + 50, forecast_y, 16});  // 16px 小图标
+        texts.push_back({fc_icon, kRightX + 50, forecast_y, 16});
         snprintf(temp_buf, sizeof(temp_buf), "%d°", f.temp);
         texts.push_back({temp_buf, kRightX + 70, forecast_y, 14});
         forecast_y += 25;
     }
 
     // ===== 底部信息行（带图标）=====
-    // 湿度 + 温度计
-    texts.push_back({FONT_ZECTRIX_WEATHER_HUMIDITY, kLeftX, kInfoY, 16});  // 💧 湿度图标
+    // 湿度 + 体感温度
+    texts.push_back({FONT_ZECTRIX_WEATHER_HUMIDITY, kLeftX, kInfoY, 16});
     snprintf(temp_buf, sizeof(temp_buf), "湿度 %d%%", weather_state_.today_humidity);
     texts.push_back({temp_buf, kLeftX + 20, kInfoY, 14});
 
-    texts.push_back({FONT_ZECTRIX_WEATHER_TEMP, 120, kInfoY, 16});  // 🌡️ 温度图标
+    texts.push_back({FONT_ZECTRIX_WEATHER_TEMP, 120, kInfoY, 16});
     snprintf(temp_buf, sizeof(temp_buf), "体感 %d°C", weather_state_.today_temp);
     texts.push_back({temp_buf, 140, kInfoY, 14});
 
-    // 风向 + 日出日落
-    texts.push_back({FONT_ZECTRIX_WEATHER_WIND, kLeftX, kInfoY + 20, 16});  // 💨 风图标
+    // 风向 + 日出
+    texts.push_back({FONT_ZECTRIX_WEATHER_WIND, kLeftX, kInfoY + 20, 16});
     snprintf(temp_buf, sizeof(temp_buf), "%s %d级", weather_state_.today_wind_dir.c_str(), weather_state_.today_wind_level);
     texts.push_back({temp_buf, kLeftX + 20, kInfoY + 20, 14});
 
-    texts.push_back({FONT_ZECTRIX_WEATHER_SUNRISE, 180, kInfoY + 20, 16});  // 🌅 日出图标
+    texts.push_back({FONT_ZECTRIX_WEATHER_SUNRISE, 180, kInfoY + 20, 16});
     texts.push_back({weather_state_.sunrise, 200, kInfoY + 20, 14});
 
-    // 日落单独一行
-    texts.push_back({FONT_ZECTRIX_WEATHER_SUNSET, kLeftX, kInfoY + 40, 16});  // 🌇 日落图标
+    // 日落
+    texts.push_back({FONT_ZECTRIX_WEATHER_SUNSET, kLeftX, kInfoY + 40, 16});
     texts.push_back({weather_state_.sunset, kLeftX + 20, kInfoY + 40, 14});
 
     // 穿衣建议
