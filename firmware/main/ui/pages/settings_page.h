@@ -46,6 +46,7 @@ private:
     lv_obj_t* list_ = nullptr;           // lv_list 控件
     std::vector<lv_obj_t*> items_;       // 列表项控件
     std::vector<SettingsItem> item_data_; // 保存项数据
+    std::vector<std::function<void()>*> callbacks_; // 回调指针，用于释放内存
 
     // 获取项的前缀符号
     const char* GetItemSymbol(const SettingsItem& item) const;

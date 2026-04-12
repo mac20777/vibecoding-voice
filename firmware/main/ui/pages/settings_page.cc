@@ -18,6 +18,11 @@ SettingsPage::SettingsPage(lv_obj_t* parent) {
 }
 
 SettingsPage::~SettingsPage() {
+    // 释放回调内存
+    for (auto* callback : callbacks_) {
+        delete callback;
+    }
+    callbacks_.clear();
     // 子控件会随 list 删除而删除
 }
 
@@ -35,7 +40,11 @@ const char* SettingsPage::GetItemSymbol(const SettingsItem& item) const {
 }
 
 void SettingsPage::SetItems(const std::vector<SettingsItem>& items) {
-    // 清除现有项
+    // 清除现有项和回调内存
+    for (auto* callback : callbacks_) {
+        delete callback;
+    }
+    callbacks_.clear();
     for (lv_obj_t* item : items_) {
         lv_obj_delete(item);
     }
@@ -62,12 +71,14 @@ void SettingsPage::SetItems(const std::vector<SettingsItem>& items) {
 
         // 设置点击回调
         if (item.on_click) {
+            auto* callback_ptr = new std::function<void()>(item.on_click);
+            callbacks_.push_back(callback_ptr);
             lv_obj_add_event_cb(btn, [](lv_event_t* e) {
                 auto* callback = static_cast<std::function<void()>*>(lv_event_get_user_data(e));
                 if (callback && *callback) {
                     (*callback)();
                 }
-            }, LV_EVENT_CLICKED, new std::function<void()>(item.on_click));
+            }, LV_EVENT_CLICKED, callback_ptr);
         }
 
         items_.push_back(btn);
