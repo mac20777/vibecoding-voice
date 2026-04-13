@@ -63,7 +63,10 @@ void ChatPage::ShowStatus(const std::string& status, ChatRole role) {
         lv_obj_set_parent(status_label_, container_);
     }
 
-    lv_label_set_text(lv_obj_get_child(status_label_, 0), status.c_str());
+    lv_obj_t* label = lv_obj_get_child(status_label_, 0);
+    if (label) {
+        lv_label_set_text(label, status.c_str());
+    }
     lv_obj_remove_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -101,7 +104,9 @@ void ChatPage::ApplyBubbleStyle(lv_obj_t* bubble, ChatRole role) {
             lv_obj_set_style_border_width(bubble, 0, 0);
             // 文字白色
             lv_obj_t* label = lv_obj_get_child(bubble, 0);
-            lv_obj_set_style_text_color(label, lv_color_white(), 0);
+            if (label) {
+                lv_obj_set_style_text_color(label, lv_color_white(), 0);
+            }
             // 设置交叉轴右对齐（在 Flex 布局中）
             lv_obj_set_style_flex_cross_place(bubble, LV_FLEX_ALIGN_END, 0);
             break;
