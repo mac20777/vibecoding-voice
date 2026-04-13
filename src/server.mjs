@@ -31,11 +31,15 @@ const cliView = createCliView(config);
 const todoService = createTodoService({ storagePath: getUserTodoListPath() });
 const todoAssistant = createTodoAssistant(config);
 const recentHelloNonces = new Map();
-let currentVoiceMode = "normal";
 applyRateLimitSnapshot(readLatestRateLimits());
 
 const MIN_PLAUSIBLE_EPOCH_MS = Date.UTC(2020, 0, 1);
 const VALID_SEND_TARGETS = new Set(["text_injector", "codex_exec", "claude_code"]);
+
+function getVoiceMode(state) {
+  const mode = String(state?.voiceMode || "").trim().toLowerCase();
+  return VALID_VOICE_MODES.has(mode) ? mode : "normal";
+}
 
 function log(...args) {
   console.log(new Date().toISOString(), ...args);
@@ -97,20 +101,17 @@ function emitServerReady(ws) {
     textInjectionMode: config.textInjectionMode,
     transcriptDeliveryMode: config.transcriptDeliveryMode,
     sendTarget: config.sendTarget,
-    mode: currentVoiceMode,
+    mode: getVoiceMode(ws.clientState),
     authRequired: Boolean(config.lanSharedSecret)
   });
 }
 
 function broadcastServerReady() {
-  broadcastJson({
-    type: "server_ready",
-    textInjectionMode: config.textInjectionMode,
-    transcriptDeliveryMode: config.transcriptDeliveryMode,
-    sendTarget: config.sendTarget,
-    mode: currentVoiceMode,
-    authRequired: Boolean(config.lanSharedSecret)
-  });
+  for (const client of wss.clients) {
+    if (client.readyState === WebSocket.OPEN && client.clientState?.authenticated) {
+      emitServerReady(client);
+    }
+  }
 }
 
 function applySendTarget(nextTarget) {
@@ -176,14 +177,7 @@ function getTodoSnapshotPayload() {
 function emitModeState(ws) {
   sendJson(ws, {
     type: "mode_state",
-    mode: currentVoiceMode
-  });
-}
-
-function broadcastModeState() {
-  broadcastJson({
-    type: "mode_state",
-    mode: currentVoiceMode
+    mode: getVoiceMode(ws.clientState)
   });
 }
 
@@ -195,12 +189,12 @@ function broadcastTodoState() {
   broadcastJson(getTodoSnapshotPayload());
 }
 
-function applyVoiceMode(nextMode) {
+function applyVoiceMode(ws, state, nextMode) {
   if (!VALID_VOICE_MODES.has(nextMode)) {
     throw new Error(`unsupported_voice_mode:${nextMode}`);
   }
-  currentVoiceMode = nextMode;
-  broadcastModeState();
+  state.voiceMode = nextMode;
+  emitModeState(ws);
 }
 
 function formatTodoErrorMessage(error) {
@@ -329,6 +323,7 @@ function createClientState() {
   return {
     deviceId: "unknown",
     authenticated: !config.lanSharedSecret,
+    voiceMode: "normal",
     segmentActive: false,
     chunks: [],
     pendingSegments: [],
@@ -632,6 +627,7 @@ async function finalizeSegment(ws, state) {
   const pcmBuffer = Buffer.concat(state.chunks);
   state.segmentActive = false;
   state.chunks = [];
+  const voiceMode = getVoiceMode(state);
 
   if (pcmBuffer.length === 0) {
     sendJson(ws, { type: "status", status: "empty_segment" });
@@ -657,7 +653,7 @@ async function finalizeSegment(ws, state) {
     return;
   }
 
-  if (currentVoiceMode === "todo") {
+  if (voiceMode === "todo") {
     sendJson(ws, {
       type: "transcript_final",
       text: transcript,
@@ -738,7 +734,7 @@ async function dispatchPrompt(prompt) {
 }
 
 async function dispatchUserPrompt(ws, prompt, state) {
-  if (currentVoiceMode === "todo") {
+  if (getVoiceMode(state) === "todo") {
     await dispatchTodoPrompt(ws, prompt, state);
     return "todo";
   }
@@ -749,24 +745,25 @@ async function dispatchUserPrompt(ws, prompt, state) {
 
 async function sendPendingTranscript(ws, state) {
   const transcript = String(state.pendingTranscript || "").trim();
+  const voiceMode = getVoiceMode(state);
   if (!transcript) {
     sendJson(ws, { type: "status", status: "no_pending" });
     return;
   }
 
-  if (currentVoiceMode !== "todo" && config.sendTarget === "codex_exec" && codexSession.isRunning()) {
+  if (voiceMode !== "todo" && config.sendTarget === "codex_exec" && codexSession.isRunning()) {
     sendJson(ws, { type: "status", status: "cli_busy" });
     return;
   }
 
-  if (currentVoiceMode !== "todo" && config.sendTarget === "claude_code" && claudeSession.isRunning()) {
+  if (voiceMode !== "todo" && config.sendTarget === "claude_code" && claudeSession.isRunning()) {
     sendJson(ws, { type: "status", status: "cli_busy" });
     return;
   }
 
   state.pendingTranscript = "";
   state.pendingSegments = [];
-  if (currentVoiceMode === "todo") {
+  if (voiceMode === "todo") {
     await dispatchTodoPrompt(ws, transcript, state);
     return;
   }
@@ -960,12 +957,12 @@ wss.on("connection", (ws, req) => {
             sendJson(ws, { type: "warning", warning: "invalid_voice_mode" });
             break;
           }
-          if (currentVoiceMode !== nextMode) {
+          if (getVoiceMode(state) !== nextMode) {
             log("set_mode", state.deviceId, nextMode);
             if (nextMode !== "todo") {
               clearPendingTodoIntent(state);
             }
-            applyVoiceMode(nextMode);
+            applyVoiceMode(ws, state, nextMode);
           } else {
             emitModeState(ws);
           }
@@ -1004,7 +1001,7 @@ wss.on("connection", (ws, req) => {
           const promptText = String(message.text || "").trim();
           if (!promptText) { sendJson(ws, { type: "warning", warning: "prompt_empty" }); break; }
           log("prompt (console)", state.deviceId, promptText.slice(0, 80));
-          if (currentVoiceMode === "normal") {
+          if (getVoiceMode(state) === "normal") {
             if (config.sendTarget === "claude_code" && claudeSession.isRunning()) {
               sendJson(ws, { type: "status", status: "cli_busy" });
               break;
