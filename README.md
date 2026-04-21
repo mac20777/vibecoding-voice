@@ -112,6 +112,8 @@ npm install
 
 #### Desktop App (Windows)
 
+![VibeCoding Voice desktop UI](docs/screenshot-desktop-ui.png)
+
 If you want a normal desktop app instead of a terminal window, this repo now includes an Electron wrapper with:
 
 - system tray icon
@@ -556,6 +558,8 @@ npm install
 ```
 
 #### Windows 桌面版
+
+![VibeCoding Voice 桌面界面](docs/screenshot-desktop-ui.png)
 
 如果你不想让普通用户面对命令行，现在仓库里已经带了一个 Electron 桌面壳，支持：
 
