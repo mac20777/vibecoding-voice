@@ -1,0 +1,25 @@
+# 自动部署配置
+$:
+  push:
+    # 同步到 GitHub（所有推送都触发）
+    - stages:
+      - name: sync-to-github
+        imports: https://cnb.cool/ninvfeng/zectrix-lab/keys/-/blob/main/env.yml
+        script:
+          - git remote add github https://${GIHHUB_TOKEN}@github.com/zectrix-lab/zectrix_firmware.git || git remote set-url github https://${GIHHUB_TOKEN}@github.com/zectrix-lab/zectrix_firmware.git
+          - git push github HEAD:main
+          - echo '同步到 GitHub 完成'
+
+    # 代码变更 → 服务器拉取并编译固件
+    - stages:
+        - name: build-firmware
+          imports: https://cnb.cool/ninvfeng/zectrix-lab/keys/-/blob/main/env.yml
+          image: tencentcom/ssh
+          settings:
+            host:
+              - ${SERVER_HOST}:${SERVER_PORT}
+            username: ${SERVER_USER}
+            key: ${SERVER_SSHKEY}
+            script:
+              - cd /data/docker/aiserver/zectrix_firmware && git pull && source ~/.zshrc && ./build.sh
+              - echo '固件编译完成'

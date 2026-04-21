@@ -27,7 +27,7 @@ Start-Sleep -Milliseconds 60
 [System.Windows.Forms.SendKeys]::SendWait("^v")
 
 if ($Mode -eq "type_and_enter") {
-    Start-Sleep -Milliseconds 60
+    Start-Sleep -Milliseconds 200
     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
 }
 

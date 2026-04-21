@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src ws://127.0.0.1:*; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; img-src 'self' data:"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VibeCoding Voice</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700;900&family=Manrope:wght@400;500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <!-- Top Navigation -->
+    <nav class="topnav">
+      <div class="topnav-left">
+        <span class="brand">VIBE CODING</span>
+        <div class="nav-chips">
+          <div class="nav-chip">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4" />
+            </svg>
+            <span class="chip-label">Bridge</span>
+            <span class="ping-dot"></span>
+            <span id="status-pill" class="status-pill status-stopped">已停止</span>
+          </div>
+          <div class="nav-chip">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="7" width="20" height="10" rx="2" />
+              <path d="M7 7V5M12 7V5M17 7V5" />
+            </svg>
+            <span class="chip-label">Port</span>
+            <span id="service-port" class="chip-value">8765</span>
+          </div>
+        </div>
+      </div>
+      <div class="topnav-right">
+        <button id="start-service-button" class="nav-btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21" /></svg>
+          启动
+        </button>
+        <button id="restart-service-button" class="nav-btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+            <path d="M3 3v5h5" />
+          </svg>
+          重启
+        </button>
+        <button id="stop-service-button" class="nav-btn nav-btn-danger">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2" /></svg>
+          停止
+        </button>
+        <div class="nav-divider"></div>
+        <button id="open-config-folder-button" class="icon-btn" title="打开配置目录">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </svg>
+        </button>
+        <div class="mic-badge">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" />
+          </svg>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Layout -->
+    <div class="app-layout">
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <div class="sidebar-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M2 20h20M6 20V10M12 20V4M18 20V14" />
+            </svg>
+          </div>
+          <h2 class="sidebar-title">VibeCoding</h2>
+          <div class="sidebar-state">
+            <span class="ping-dot ping-secondary"></span>
+            <span id="cli-status" class="sidebar-status">尚未连接</span>
+          </div>
+        </div>
+
+        <div class="summary-stack">
+          <article class="summary-card">
+            <span class="summary-label">当前发送方式</span>
+            <strong id="summary-mode">输入注入</strong>
+            <p id="summary-delivery">设备确认后发送</p>
+          </article>
+          <article class="summary-card">
+            <span class="summary-label">语音识别</span>
+            <strong id="summary-provider">Volcengine</strong>
+            <p id="summary-provider-detail">推荐给中文环境</p>
+          </article>
+          <article class="summary-card">
+            <span class="summary-label">桌面行为</span>
+            <strong id="summary-launch">手动启动</strong>
+            <p id="summary-window-behavior">关闭窗口后仍保留界面</p>
+          </article>
+        </div>
+
+        <div class="meta-stack">
+          <article class="meta-card">
+            <span class="meta-label">用户配置文件</span>
+            <code id="user-config-path" class="path-code"></code>
+          </article>
+          <article class="meta-card">
+            <span class="meta-label">桌面设置文件</span>
+            <code id="desktop-settings-path" class="path-code"></code>
+          </article>
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <main class="content">
+        <!-- Status Section -->
+        <section class="status-section">
+          <div class="status-cards">
+            <article class="status-card">
+              <span class="card-label">当前模式</span>
+              <strong id="service-mode" class="card-value">Inject</strong>
+            </article>
+            <article class="status-card status-card-wide">
+              <div class="notice-stack">
+                <div id="service-message" class="notice notice-info"></div>
+                <div id="config-issues" class="notice notice-warning hidden"></div>
+                <div id="override-files" class="notice notice-subtle hidden"></div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- Config Section -->
+        <section class="config-section">
+          <div class="section-header">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+            <h3 class="section-title">设置中心</h3>
+          </div>
+
+          <div class="tab-strip" role="tablist" aria-label="设置分组">
+            <button class="tab-btn is-active" type="button" data-tab-trigger="basics" aria-selected="true">基础</button>
+            <button class="tab-btn" type="button" data-tab-trigger="speech" aria-selected="false">识别</button>
+            <button class="tab-btn" type="button" data-tab-trigger="workspace" aria-selected="false">工作区</button>
+            <button class="tab-btn" type="button" data-tab-trigger="advanced" aria-selected="false">高级</button>
+          </div>
+
+          <form id="settings-form" class="settings-form">
+            <!-- Basics Tab -->
+            <section class="settings-page is-active" data-tab-panel="basics">
+              <div class="form-grid form-grid-2">
+                <label class="field">
+                  <span class="field-label">发送目标</span>
+                  <select id="send-target" name="sendTarget">
+                    <option value="text_injector">输入注入</option>
+                    <option value="codex_exec">Codex</option>
+                    <option value="claude_code">Claude Code</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="field-label">转写发送时机</span>
+                  <select id="transcript-delivery-mode" name="transcriptDeliveryMode">
+                    <option value="confirm_on_device">设备确认后发送</option>
+                    <option value="immediate">识别完成立即发送</option>
+                  </select>
+                </label>
+                <label class="field field-full" data-mode-visible="text_injector">
+                  <span class="field-label">输入注入方式</span>
+                  <select id="text-injection-mode" name="textInjectionMode">
+                    <option value="type_and_enter">输入并回车</option>
+                    <option value="type_only">仅输入文本</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <!-- Speech Tab -->
+            <section class="settings-page hidden" data-tab-panel="speech">
+              <div class="form-grid">
+                <label class="field">
+                  <span class="field-label">语音识别提供商</span>
+                  <select id="stt-provider" name="sttProvider">
+                    <option value="volcengine">Volcengine</option>
+                    <option value="openai">OpenAI</option>
+                  </select>
+                </label>
+                <div class="provider-section" data-provider-section="openai">
+                  <label class="field field-full">
+                    <span class="field-label">OpenAI API Key</span>
+                    <input id="openai-api-key" name="openaiApiKey" type="password" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">OpenAI 转写模型</span>
+                    <input id="openai-model" name="openaiModel" type="text" placeholder="whisper-1" />
+                  </label>
+                </div>
+                <div class="provider-section" data-provider-section="volcengine">
+                  <label class="field">
+                    <span class="field-label">Volcengine App Key</span>
+                    <input id="volcengine-app-key" name="volcengineAppKey" type="password" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">Volcengine Access Key</span>
+                    <input id="volcengine-access-key" name="volcengineAccessKey" type="password" autocomplete="off" />
+                  </label>
+                </div>
+                <label class="field field-full">
+                  <span class="field-label">设备共享密钥</span>
+                  <input id="lan-shared-secret" name="lanSharedSecret" type="password" autocomplete="off" />
+                </label>
+              </div>
+            </section>
+
+            <!-- Workspace Tab -->
+            <section class="settings-page hidden" data-tab-panel="workspace">
+              <div class="form-grid">
+                <label class="field field-full">
+                  <span class="field-label">Codex 工作目录</span>
+                  <div class="path-row">
+                    <input id="codex-cwd" name="codexCwd" type="text" />
+                    <button id="pick-codex-cwd-button" class="pick-btn" type="button">选择</button>
+                  </div>
+                </label>
+                <label class="field field-full">
+                  <span class="field-label">Claude 工作目录</span>
+                  <div class="path-row">
+                    <input id="claude-cwd" name="claudeCwd" type="text" />
+                    <button id="pick-claude-cwd-button" class="pick-btn" type="button">选择</button>
+                  </div>
+                </label>
+                <div class="toggle-row">
+                  <label class="toggle-item">
+                    <input id="auto-launch" name="autoLaunch" type="checkbox" />
+                    <span>开机自启</span>
+                  </label>
+                  <label class="toggle-item">
+                    <input id="launch-to-tray" name="launchToTray" type="checkbox" />
+                    <span>登录后隐藏启动</span>
+                  </label>
+                  <label class="toggle-item">
+                    <input id="close-to-tray" name="closeToTray" type="checkbox" />
+                    <span>关闭窗口时最小化到托盘</span>
+                  </label>
+                </div>
+              </div>
+            </section>
+
+            <!-- Advanced Tab -->
+            <section class="settings-page hidden" data-tab-panel="advanced">
+              <div class="form-grid">
+                <div class="toggle-row toggle-row-single">
+                  <label class="toggle-item">
+                    <input id="codex-skip-git-repo-check" name="codexSkipGitRepoCheck" type="checkbox" />
+                    <span>Codex 跳过 Git 仓库检查</span>
+                  </label>
+                  <label class="toggle-item">
+                    <input
+                      id="claude-dangerously-skip-permissions"
+                      name="claudeDangerouslySkipPermissions"
+                      type="checkbox"
+                    />
+                    <span>Claude 减少权限确认</span>
+                  </label>
+                </div>
+              </div>
+            </section>
+
+            <div class="form-footer">
+              <p class="form-note">保存后会立即将当前配置应用到后台服务。</p>
+              <button id="save-settings-button" type="submit" class="btn-primary">保存并应用</button>
+            </div>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <!-- Bottom Pulse Panel -->
+    <div class="pulse-panel">
+      <div class="pulse-header">
+        <div class="pulse-tabs">
+          <button class="pulse-tab is-active">Pulse Feed</button>
+          <button class="pulse-tab">Service Log</button>
+          <button class="pulse-tab">CLI Events</button>
+        </div>
+      </div>
+      <div class="pulse-body">
+        <div class="feed-col">
+          <div class="feed-entry">
+            <span class="feed-dot feed-dot-primary"></span>
+            <div class="feed-text">
+              <span class="feed-label">最近转写</span>
+              <strong id="last-transcript">还没有收到语音</strong>
+            </div>
+          </div>
+          <div class="feed-entry">
+            <span class="feed-dot feed-dot-secondary"></span>
+            <div class="feed-text">
+              <span class="feed-label">最近指令</span>
+              <strong id="last-user-text">等待中</strong>
+            </div>
+          </div>
+          <div class="feed-entry">
+            <span class="feed-dot feed-dot-tertiary"></span>
+            <div class="feed-text">
+              <span class="feed-label">AI 回复摘要</span>
+              <strong id="last-assistant-text">等待中</strong>
+            </div>
+          </div>
+        </div>
+        <div class="log-col">
+          <h4 class="log-title">CLI 事件</h4>
+          <pre id="cli-log-tail" class="log-box">尚未连接。</pre>
+        </div>
+        <div class="log-col">
+          <h4 class="log-title">服务日志</h4>
+          <pre id="service-log-tail" class="log-box">等待启动。</pre>
+        </div>
+        <div class="waveform-col">
+          <span class="waveform-label">Input Level</span>
+          <div class="waveform">
+            <div class="bar" style="height:20%"></div>
+            <div class="bar" style="height:40%"></div>
+            <div class="bar bar-bright" style="height:80%"></div>
+            <div class="bar bar-secondary" style="height:100%"></div>
+            <div class="bar bar-bright" style="height:60%"></div>
+            <div class="bar" style="height:30%"></div>
+            <div class="bar" style="height:15%"></div>
+            <div class="bar bar-dim" style="height:10%"></div>
+          </div>
+          <div class="waveform-footer">
+            <span class="waveform-active">Active</span>
+            <span class="waveform-db">-12dB</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>

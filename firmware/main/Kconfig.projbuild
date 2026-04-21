@@ -1,0 +1,64 @@
+menu "Xiaozhi Assistant"
+
+config BOARD_TYPE_ZECTRIX_S3_EPAPER_4_2
+    bool "zectrix-s3-epaper-4.2 FT firmware"
+    default y
+    depends on IDF_TARGET_ESP32S3
+    help
+        This local repository has been reduced to a single FT-only firmware
+        for the zectrix-s3-epaper-4.2 board.
+
+config ZECTRIX_LAN_MIC_MODE
+    bool "Enable LAN microphone MVP mode"
+    default n
+    depends on BOARD_TYPE_ZECTRIX_S3_EPAPER_4_2
+    help
+        Boot into a minimal LAN microphone mode instead of the factory-test
+        flow. The device connects to Wi-Fi, opens a WebSocket to the host,
+        and streams raw PCM while BOOT is pressed.
+
+config LAN_MIC_SERVER_URI
+    string "LAN microphone server URI"
+    default ""
+    depends on ZECTRIX_LAN_MIC_MODE
+    help
+        Optional fallback WebSocket URI of the LAN voice server running on the
+        host PC. Leave this empty for release builds so the device relies on
+        discovery plus the last paired host. When LAN discovery is enabled,
+        the firmware tries discovery first, then the cached last-good URI,
+        and only falls back to this URI if both are unavailable.
+
+config LAN_DISCOVERY_ENABLED
+    bool "Enable LAN host discovery"
+    default y
+    depends on ZECTRIX_LAN_MIC_MODE
+    help
+        Discover the LAN voice host automatically over UDP broadcast so the
+        board can survive DHCP IP changes on the PC.
+
+config LAN_DISCOVERY_PORT
+    int "LAN discovery UDP port"
+    default 8766
+    range 1 65535
+    depends on ZECTRIX_LAN_MIC_MODE && LAN_DISCOVERY_ENABLED
+    help
+        UDP port used by the host bridge for LAN discovery replies.
+
+config LAN_DISCOVERY_HOST_ID
+    string "Expected LAN discovery host id"
+    default ""
+    depends on ZECTRIX_LAN_MIC_MODE && LAN_DISCOVERY_ENABLED
+    help
+        Optional host identifier. If set, the board will only accept
+        discovery replies from a host using the same id.
+
+config LAN_SHARED_SECRET
+    string "LAN shared secret"
+    default ""
+    depends on ZECTRIX_LAN_MIC_MODE
+    help
+        Optional shared secret used to HMAC-sign discovery replies and the
+        device hello message. Set the same secret on the host bridge to
+        require device authentication.
+
+endmenu

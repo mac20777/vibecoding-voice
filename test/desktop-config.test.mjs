@@ -1,0 +1,147 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { buildDesktopFormState, buildUserConfigUpdates } from "../src/desktop-config.mjs";
+import { normalizeDesktopSettings } from "../src/desktop-settings.mjs";
+import { listConfigFileCandidatesForMode, resolveSendTarget } from "../src/config.mjs";
+
+test("normalizeDesktopSettings applies safe defaults", () => {
+  assert.deepEqual(normalizeDesktopSettings(), {
+    autoLaunch: false,
+    launchToTray: false,
+    closeToTray: false
+  });
+
+  assert.deepEqual(
+    normalizeDesktopSettings({
+      autoLaunch: true,
+      launchToTray: true,
+      closeToTray: false
+    }),
+    {
+      autoLaunch: true,
+      launchToTray: true,
+      closeToTray: false
+    }
+  );
+});
+
+test("buildDesktopFormState exposes effective config values for the desktop UI", () => {
+  const formState = buildDesktopFormState(
+    {
+      sendTarget: "claude_code",
+      sttProvider: "openai",
+      openaiApiKey: "sk-test",
+      openaiModel: "gpt-4o-mini-transcribe",
+      volcengineAppKey: "",
+      volcengineAccessKey: "",
+      transcriptDeliveryMode: "immediate",
+      textInjectionMode: "type_only",
+      lanSharedSecret: "secret",
+      codexCwd: "D:/codex",
+      claudeCwd: "D:/claude",
+      codexSkipGitRepoCheck: true,
+      claudeDangerouslySkipPermissions: true,
+      loadedConfigFiles: ["C:/Users/test/AppData/Roaming/vibecoding-voice/config.env", "D:/github/app/.env"],
+      userConfigPath: "C:/Users/test/AppData/Roaming/vibecoding-voice/config.env",
+      cwdConfigPath: "D:/github/app/.env",
+      projectConfigPath: "D:/github/vibecoding-voice/.env",
+      port: 8765,
+      discoveryPort: 8766
+    },
+    {
+      autoLaunch: true,
+      launchToTray: true,
+      closeToTray: false
+    }
+  );
+
+  assert.equal(formState.sendTarget, "claude_code");
+  assert.equal(formState.sttProvider, "openai");
+  assert.equal(formState.openaiModel, "gpt-4o-mini-transcribe");
+  assert.equal(formState.transcriptDeliveryMode, "immediate");
+  assert.equal(formState.textInjectionMode, "type_only");
+  assert.deepEqual(formState.overrideFiles, ["D:/github/app/.env"]);
+  assert.deepEqual(formState.desktopSettings, {
+    autoLaunch: true,
+    launchToTray: true,
+    closeToTray: false
+  });
+});
+
+test("buildUserConfigUpdates normalizes desktop form payload into env values", () => {
+  const updates = buildUserConfigUpdates({
+    sendTarget: "codex_exec",
+    sttProvider: "volcengine",
+    openaiApiKey: "sk-keep",
+    openaiModel: "whisper-1",
+    volcengineAppKey: "app-key",
+    volcengineAccessKey: "access-key",
+    transcriptDeliveryMode: "immediate",
+    textInjectionMode: "type_only",
+    lanSharedSecret: "",
+    codexCwd: "D:/workspace",
+    claudeCwd: "",
+    codexSkipGitRepoCheck: true,
+    claudeDangerouslySkipPermissions: false
+  });
+
+  assert.deepEqual(updates, {
+    SEND_TARGET: "codex_exec",
+    STT_PROVIDER: "volcengine",
+    OPENAI_API_KEY: "sk-keep",
+    OPENAI_TRANSCRIBE_MODEL: "whisper-1",
+    VOLCENGINE_APP_KEY: "app-key",
+    VOLCENGINE_ACCESS_KEY: "access-key",
+    TRANSCRIPT_DELIVERY_MODE: "immediate",
+    TEXT_INJECTION_MODE: "type_only",
+    LAN_SHARED_SECRET: null,
+    CODEX_CWD: "D:/workspace",
+    CLAUDE_CWD: null,
+    CODEX_SKIP_GIT_REPO_CHECK: "1",
+    CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS: null
+  });
+});
+
+test("resolveSendTarget defaults desktop mode to inject", () => {
+  const resolved = resolveSendTarget("", {
+    desktopMode: true,
+    claudeCommand: "claude",
+    codexCommand: "codex"
+  });
+
+  assert.deepEqual(resolved, {
+    sendTarget: "text_injector",
+    sendTargetAuto: false
+  });
+});
+
+test("resolveSendTarget still preserves explicit desktop mode selection", () => {
+  const resolved = resolveSendTarget("codex_exec", {
+    desktopMode: true,
+    claudeCommand: "claude",
+    codexCommand: "codex"
+  });
+
+  assert.deepEqual(resolved, {
+    sendTarget: "codex_exec",
+    sendTargetAuto: false
+  });
+});
+
+test("desktop mode env limits config search to the user config file", () => {
+  const previousDesktopEnv = process.env.VIBE_DESKTOP;
+
+  process.env.VIBE_DESKTOP = "1";
+  try {
+    const candidates = listConfigFileCandidatesForMode();
+    assert.equal(candidates.length, 1);
+    assert.match(candidates[0], /config\.env$/);
+  } finally {
+    if (previousDesktopEnv === undefined) {
+      delete process.env.VIBE_DESKTOP;
+    } else {
+      process.env.VIBE_DESKTOP = previousDesktopEnv;
+    }
+  }
+});

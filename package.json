@@ -1,14 +1,88 @@
 {
-  "name": "vibecoding-voice",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@mac20777/vibecoding-voice",
+  "version": "0.2.12",
+  "private": false,
+  "description": "Voice-driven AI coding bridge and Windows desktop app for ESP32 e-paper devices with Inject, Codex, and Claude modes.",
   "type": "module",
+  "main": "desktop/main.cjs",
+  "files": [
+    "desktop",
+    "src",
+    "scripts",
+    "README.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    ".env.example"
+  ],
+  "bin": {
+    "vibe": "scripts/vibe.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mac20777/vibecoding-voice.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mac20777/vibecoding-voice/issues"
+  },
+  "homepage": "https://github.com/mac20777/vibecoding-voice#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "start": "node src/server.mjs",
-    "test": "node --test"
+    "doctor": "node src/server.mjs --doctor",
+    "test": "node --test",
+    "console": "node scripts/console.mjs",
+    "vibe": "node scripts/vibe.mjs",
+    "desktop:dev": "electron .",
+    "desktop:dist": "electron-builder --win nsis"
   },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "esp32",
+    "voice",
+    "codex",
+    "websocket",
+    "stt"
+  ],
   "dependencies": {
     "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "electron": "^35.7.5",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.mac20777.vibecodingvoice",
+    "productName": "VibeCoding Voice",
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "files": [
+      "build-assets/**/*",
+      "desktop/**/*",
+      "src/**/*",
+      "scripts/**/*",
+      "package.json",
+      "node_modules/ws/**/*"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build-assets/app-icon.png",
+      "signAndEditExecutable": false,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "perMachine": false
+    }
   }
 }
-

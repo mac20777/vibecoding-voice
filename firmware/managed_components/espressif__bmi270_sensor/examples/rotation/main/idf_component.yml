@@ -1,0 +1,4 @@
+dependencies:
+  bmi270_sensor:
+    version: '*'
+  idf: '>=5.0'
