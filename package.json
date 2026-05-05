@@ -2,7 +2,7 @@
   "name": "@mac20777/vibecoding-voice",
   "version": "0.2.12",
   "private": false,
-  "description": "Voice-driven AI coding bridge and Windows desktop app for ESP32 e-paper devices with Inject, Codex, and Claude modes.",
+  "description": "Voice-driven AI coding bridge and Windows desktop app for ESP32 e-paper devices with Inject, Codex, Claude, and Chinese-to-English voice translation.",
   "type": "module",
   "main": "desktop/main.cjs",
   "files": [

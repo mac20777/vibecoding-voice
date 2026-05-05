@@ -8,20 +8,21 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 
 ## English
 
-**Voice-driven AI coding via a wireless ESP32 e-paper device — no microphone, no keyboard interruption, just push-to-talk.**
+**Voice-driven AI coding via a wireless ESP32 e-paper device — speak naturally, confirm on the e-paper screen, and send text to Inject, Codex, or Claude without keyboard interruption.**
 
 > Now includes a Windows desktop app with tray mode, start-on-login, a local settings UI, and packaged installers, so non-technical users can use it without touching a terminal.
 >
-> Latest Zectrix 4.2" firmware package: `v2.2.3_zectrix-s3-epaper-4.2.zip`, with long-outage reconnect fixes and offline deep sleep support.
+> Latest Zectrix 4.2" firmware package: `v2.2.4_zectrix-s3-epaper-4.2.zip`, with long-outage reconnect fixes, offline deep sleep support, and Chinese-to-English voice translation confirmation.
 
 `vibecoding-voice` is a two-part open-source project:
 
-1. **Host bridge** (this repo) — a Node.js server that runs on your PC. It receives push-to-talk audio from an ESP32 device over WebSocket, transcribes it, and either injects the text into the active Windows input field or drives a Codex / Claude Code CLI session.
-2. **ESP32 firmware** (`firmware/`) — runs on supported e-paper boards such as Zectrix S3 and Waveshare S3, and is intended to grow into a fully DIY ESP32-S3 hardware path as well. It handles Wi-Fi, push-to-talk recording, device-side confirmation UI, resilient LAN reconnects, offline low-power sleep, and renders live CLI output on the e-ink screen.
+1. **Host bridge** (this repo) — a Node.js server that runs on your PC. It receives push-to-talk audio from an ESP32 device over WebSocket, transcribes it, can optionally translate Chinese speech into idiomatic English through DeepSeek, and either injects the text into the active Windows input field or drives a Codex / Claude Code CLI session.
+2. **ESP32 firmware** (`firmware/`) — runs on supported e-paper boards such as Zectrix S3 and Waveshare S3, and is intended to grow into a fully DIY ESP32-S3 hardware path as well. It handles Wi-Fi, push-to-talk recording, bilingual device-side confirmation UI, resilient LAN reconnects, offline low-power sleep, and renders live CLI output on the e-ink screen.
 
 ### Why this project is useful
 
 - Talk to Codex, Claude Code, or any active Windows input box through a dedicated ESP32 push-to-talk device
+- Speak Chinese and send polished English, with the board showing the Chinese original above the English translation before you confirm
 - Choose between a developer-friendly CLI flow and a normal Windows desktop app for non-technical users
 - Keep the host bridge running in the background with tray controls, mode switching, and saved local settings
 - Project AI progress, transcript confirmation, and device pairing state back onto the e-paper screen
@@ -76,7 +77,7 @@ Both boards use ESP32-S3 with onboard MEMS mic and push-button.
 - Local desktop settings UI with grouped tabs for mode, speech provider, workspace, and advanced options
 - Managed `codex exec --json` session bridge
 - Managed `claude -p --output-format stream-json` session bridge
-- Optional Chinese-to-idiomatic-English voice translation through DeepSeek before device confirmation and send
+- Optional Chinese-to-idiomatic-English voice translation through DeepSeek, configurable in the desktop app and confirmed on the board as `Chinese` / `English` before send
 - **Todo List page** with local persistence and page-based voice CRUD for simple plans
 - Live CLI status, prompt/reply summary, log tail, and quota snapshot projected to e-paper
 - **Multi-segment accumulation** — hold BOOT to keep appending speech, UP to send, DN to undo the last segment
@@ -497,16 +498,17 @@ node scripts/console.mjs
 
 > 现在已经带有 Windows 桌面版：支持托盘、自启动、本地设置界面和安装包，普通用户不用碰命令行也能直接用。
 >
-> 最新 Zectrix 4.2" 固件包：`v2.2.3_zectrix-s3-epaper-4.2.zip`，包含长时间断线后的自动重连修复和离线低功耗休眠支持。
+> 最新 Zectrix 4.2" 固件包：`v2.2.4_zectrix-s3-epaper-4.2.zip`，包含长时间断线后的自动重连修复、离线低功耗休眠，以及中文语音转英文的板端双语确认。
 
 `vibecoding-voice` 是一个由两部分组成的开源项目：
 
-1. **主机桥接服务**（本仓库）— 运行在你电脑上的 Node.js 服务器。它通过 WebSocket 从 ESP32 设备接收按键说话（PTT）音频，调用语音识别将其转写，然后注入 Windows 当前输入框，或者驱动 Codex / Claude Code CLI 会话。
-2. **ESP32 固件**（`firmware/` 目录）— 可运行在 Zectrix S3、Waveshare S3 这类已支持的电子墨水屏开发板上，后续也会补一个完全 DIY 的 ESP32-S3 硬件方案。负责 Wi-Fi 连接、按键录音、设备端确认界面、可靠的局域网重连、离线低功耗休眠，并将 CLI 实时输出渲染到电子墨水屏上。
+1. **主机桥接服务**（本仓库）— 运行在你电脑上的 Node.js 服务器。它通过 WebSocket 从 ESP32 设备接收按键说话（PTT）音频，调用语音识别将其转写，也可以通过 DeepSeek 把中文语音翻译成地道英文，然后注入 Windows 当前输入框，或者驱动 Codex / Claude Code CLI 会话。
+2. **ESP32 固件**（`firmware/` 目录）— 可运行在 Zectrix S3、Waveshare S3 这类已支持的电子墨水屏开发板上，后续也会补一个完全 DIY 的 ESP32-S3 硬件方案。负责 Wi-Fi 连接、按键录音、设备端双语确认界面、可靠的局域网重连、离线低功耗休眠，并将 CLI 实时输出渲染到电子墨水屏上。
 
 ### 这个项目现在能解决什么问题
 
 - 用一个独立的 ESP32 按键语音设备，把指令发给 Codex、Claude Code，或者直接发到 Windows 当前输入框
+- 可以中文说、英文发：设备确认页上半区显示中文原文，下半区显示英文译文，确认后发送英文
 - 同时兼容开发者工作流和普通用户工作流：既可以用 CLI，也可以用桌面版
 - 主机桥接服务可以常驻后台，通过托盘、模式切换和本地设置页来管理
 - 设备端不仅能说话输入，还能在电子墨水屏上看到 AI 执行进度、转写确认和连接状态
@@ -560,7 +562,7 @@ node scripts/console.mjs
 - 带本地设置界面：按“基础 / 识别 / 工作区 / 高级”分组管理配置
 - 托管 `codex exec --json` 会话
 - 托管 `claude -p --output-format stream-json` 会话
-- 可选中文转地道英文翻译：中文语音先经 DeepSeek 翻译，再进入设备确认和发送流程
+- 可选中文转地道英文翻译：中文语音先经 DeepSeek 翻译，桌面端可配置提示词，板子上以 `Chinese` / `English` 双区确认后再发送
 - **Todo List 页面**：本地持久化待办，按当前页面决定语音进入 Todo 还是 Live coding
 - 将 CLI 状态、提示/回复摘要、日志末行、配额快照实时投影到电子墨水屏
 - **多段语音累积** — 按住 BOOT 持续追加语音片段，UP 发送，DN 撤销上一段
