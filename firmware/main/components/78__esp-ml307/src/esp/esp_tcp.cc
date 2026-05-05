@@ -13,6 +13,7 @@
 static const char *TAG = "EspTcp";
 static constexpr int kConnectTimeoutMs = 1500;
 static constexpr int kSendTimeoutMs = 1000;
+static constexpr int kReceiveTimeoutMs = 1000;
 
 EspTcp::EspTcp() {
     event_group_ = xEventGroupCreate();
@@ -69,6 +70,11 @@ bool EspTcp::Connect(const std::string& host, int port) {
     send_timeout.tv_sec = kSendTimeoutMs / 1000;
     send_timeout.tv_usec = (kSendTimeoutMs % 1000) * 1000;
     setsockopt(tcp_fd_, SOL_SOCKET, SO_SNDTIMEO, &send_timeout, sizeof(send_timeout));
+
+    timeval receive_timeout = {};
+    receive_timeout.tv_sec = kReceiveTimeoutMs / 1000;
+    receive_timeout.tv_usec = (kReceiveTimeoutMs % 1000) * 1000;
+    setsockopt(tcp_fd_, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout, sizeof(receive_timeout));
 
     const int original_flags = fcntl(tcp_fd_, F_GETFL, 0);
     if (original_flags >= 0) {
@@ -134,12 +140,20 @@ bool EspTcp::Connect(const std::string& host, int port) {
     connected_.store(true, std::memory_order_relaxed);
 
     xEventGroupClearBits(event_group_, ESP_TCP_EVENT_RECEIVE_TASK_EXIT);
-    xTaskCreate([](void* arg) {
+    if (xTaskCreate([](void* arg) {
         EspTcp* tcp = (EspTcp*)arg;
         tcp->ReceiveTask();
+        tcp->receive_task_handle_ = nullptr;
         xEventGroupSetBits(tcp->event_group_, ESP_TCP_EVENT_RECEIVE_TASK_EXIT);
         vTaskDelete(NULL);
-    }, "tcp_receive", 4096, this, 1, &receive_task_handle_);
+    }, "tcp_receive", 4096, this, 1, &receive_task_handle_) != pdPASS) {
+        last_error_ = ENOMEM;
+        ESP_LOGE(TAG, "Failed to create receive task");
+        connected_.store(false, std::memory_order_relaxed);
+        close(tcp_fd_);
+        tcp_fd_ = -1;
+        return false;
+    }
     return true;
 }
 
@@ -149,14 +163,17 @@ void EspTcp::Disconnect() {
         return;
     }
 
-    // 主动断开，需要等待接收任务退出
-    DoDisconnect(true);
+    const bool wait_for_task =
+        receive_task_handle_ != nullptr &&
+        xTaskGetCurrentTaskHandle() != receive_task_handle_;
+    DoDisconnect(wait_for_task);
 }
 
 void EspTcp::DoDisconnect(bool wait_for_task) {
     connected_.store(false, std::memory_order_relaxed);
 
     if (tcp_fd_ != -1) {
+        shutdown(tcp_fd_, SHUT_RDWR);
         close(tcp_fd_);
         tcp_fd_ = -1;
 
@@ -207,6 +224,9 @@ void EspTcp::ReceiveTask() {
         int ret = recv(tcp_fd_, data.data(), data.size(), 0);
         if (ret <= 0) {
             if (ret < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    continue;
+                }
                 ESP_LOGE(TAG, "TCP receive failed: %d", ret);
             }
             // 被动断开，不需要等待接收任务退出（当前就是接收任务）

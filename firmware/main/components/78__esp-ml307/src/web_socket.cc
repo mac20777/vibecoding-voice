@@ -105,12 +105,25 @@ WebSocket::WebSocket(NetworkInterface* network, int connect_id) : network_(netwo
 }
 
 WebSocket::~WebSocket() {
-    if (connected_.load(std::memory_order_relaxed)) {
-        tcp_->Disconnect();
-    }
+    CleanupTcp();
     if (handshake_event_group_) {
         vEventGroupDelete(handshake_event_group_);
     }
+}
+
+void WebSocket::CleanupTcp() {
+    connected_.store(false, std::memory_order_relaxed);
+    handshake_completed_ = false;
+    if (!tcp_) {
+        return;
+    }
+
+    tcp_->OnStream(nullptr);
+    tcp_->OnDisconnected(nullptr);
+    if (tcp_->connected()) {
+        tcp_->Disconnect();
+    }
+    tcp_.reset();
 }
 
 void WebSocket::SetHeader(const char* key, const char* value) {
@@ -193,6 +206,7 @@ bool WebSocket::Connect(const char* uri) {
     // 使用 tcp 建立连接
     if (!tcp_->Connect(host, std::stoi(port))) {
         ESP_LOGE(TAG, "Failed to connect to server");
+        CleanupTcp();
         return false;
     }
 
@@ -224,6 +238,7 @@ bool WebSocket::Connect(const char* uri) {
 
     if (tcp_->Send(request) < 0) {
         ESP_LOGE(TAG, "Failed to send WebSocket handshake request");
+        CleanupTcp();
         return false;
     }
 
@@ -249,9 +264,11 @@ bool WebSocket::Connect(const char* uri) {
         if (on_error_) {
             on_error_(-1);
         }
+        CleanupTcp();
         return false;
     } else {
         ESP_LOGE(TAG, "WebSocket handshake timeout");
+        CleanupTcp();
         return false;
     }
 }
@@ -446,6 +463,9 @@ void WebSocket::OnTcpData(const std::string& data) {
                 connected_.store(false, std::memory_order_relaxed);
                 if (on_disconnected_) {
                     on_disconnected_();
+                }
+                if (tcp_ && tcp_->connected()) {
+                    tcp_->Disconnect();
                 }
                 break;
             case 0x9: // Ping

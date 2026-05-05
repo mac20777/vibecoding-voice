@@ -15,7 +15,9 @@
 #include <cerrno>
 #include <cstring>
 #include <cstdio>
+#include <fcntl.h>
 #include <string>
+#include <sys/select.h>
 #include <vector>
 
 #include <esp_sleep.h>
@@ -67,7 +69,9 @@ constexpr int kDiscoveryAttempts = 3;
 constexpr int kDiscoveryTimeoutMs = 600;
 constexpr int kDiscoveryRetryDelayMs = 150;
 constexpr int64_t kReconnectIntervalMinMs = 2000;
-constexpr int64_t kReconnectIntervalMaxMs = 60000;
+constexpr int64_t kReconnectIntervalMaxMs = 5000;
+constexpr int kReconnectFailuresBeforeWifiRecovery = 3;
+constexpr int64_t kWifiRecoveryCooldownMs = 30000;
 constexpr int64_t kClientPingIntervalMs = 10000;
 constexpr int64_t kPongTimeoutMs = 15000;
 constexpr int64_t kServerSilenceTimeoutMs = 45000;
@@ -483,6 +487,7 @@ void LanMicApp::StartConnectAttemptAsync() {
     connect_cancel_requested_.store(false, std::memory_order_release);
     connect_attempt_started_ms_.store(esp_timer_get_time() / 1000, std::memory_order_release);
     reconnect_stuck_prompt_ = false;
+    board_.SetPowerSaveLevel(PowerSaveLevel::BALANCED);
 
     if (xTaskCreate([](void* arg) {
             auto* self = static_cast<LanMicApp*>(arg);
@@ -514,6 +519,38 @@ void LanMicApp::RunConnectAttemptTask() {
         ws_.reset();
         hello_sent_ = false;
     }
+}
+
+void LanMicApp::RecoverWifiForReconnect(const char* reason) {
+    const char* recovery_reason = reason != nullptr ? reason : "unknown";
+    ESP_LOGW(kTag, "Restarting WiFi station for reconnect: reason=%s", recovery_reason);
+
+    connect_cancel_requested_.store(true, std::memory_order_release);
+    DisconnectWebSocket();
+    hello_sent_ = false;
+    server_uri_.clear();
+
+    auto& wifi = WifiManager::GetInstance();
+    if (wifi.IsConfigMode()) {
+        ESP_LOGW(kTag, "Skip WiFi reconnect recovery while config AP is active");
+        return;
+    }
+
+    board_.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+    wifi.ClearIpFastCache(recovery_reason);
+    wifi.ClearFastReconnectCache(recovery_reason);
+    wifi.StopStation();
+    if (wifi_event_group_ != nullptr) {
+        xEventGroupClearBits(wifi_event_group_, kWifiConnectedBit);
+    }
+    vTaskDelay(pdMS_TO_TICKS(300));
+    wifi.StartStation();
+
+    network_state_ = NetworkState::Offline;
+    status_text_ = "Resetting WiFi";
+    hint_text_ = "Retrying host";
+    phase_ = Phase::Idle;
+    UpdateDisplay();
 }
 
 bool LanMicApp::EnsureWebSocketConnected() {
@@ -678,6 +715,11 @@ bool LanMicApp::DiscoverServerUri() {
             continue;
         }
 
+        const int flags = fcntl(sock, F_GETFL, 0);
+        if (flags >= 0) {
+            fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+        }
+
         struct sockaddr_in broadcast_addr = {};
         broadcast_addr.sin_family = AF_INET;
         broadcast_addr.sin_port = htons(CONFIG_LAN_DISCOVERY_PORT);
@@ -703,10 +745,24 @@ bool LanMicApp::DiscoverServerUri() {
                 break;
             }
 
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            FD_SET(sock, &read_fds);
             struct timeval timeout = {};
             timeout.tv_sec = remaining_us / 1000000;
             timeout.tv_usec = remaining_us % 1000000;
-            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+            const int ready = select(sock + 1, &read_fds, nullptr, nullptr, &timeout);
+            if (ready < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                ESP_LOGW(kTag, "Discovery select failed: errno=%d", errno);
+                break;
+            }
+            if (ready == 0 || !FD_ISSET(sock, &read_fds)) {
+                continue;
+            }
 
             char response_buffer[512];
             struct sockaddr_in source_addr = {};
@@ -718,6 +774,9 @@ bool LanMicApp::DiscoverServerUri() {
                                           reinterpret_cast<struct sockaddr*>(&source_addr),
                                           &source_addr_len);
             if (received <= 0) {
+                if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    ESP_LOGW(kTag, "Discovery recv failed: errno=%d", errno);
+                }
                 continue;
             }
 
@@ -1120,6 +1179,8 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         status_text_ = "Ready";
         offline_todo_mode_ = false;
         reconnect_stuck_prompt_ = false;
+        boot_reconnect_pending_ = false;
+        boot_reconnect_failed_ = false;
         todo_menu_open_ = false;
         if (!has_pending_transcript_) {
             phase_ = Phase::Idle;
@@ -1131,6 +1192,8 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         status_text_ = "Ready";
         offline_todo_mode_ = false;
         reconnect_stuck_prompt_ = false;
+        boot_reconnect_pending_ = false;
+        boot_reconnect_failed_ = false;
         todo_menu_open_ = false;
         if (!has_pending_transcript_) {
             phase_ = Phase::Idle;
@@ -1199,6 +1262,7 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         SaveCachedTodoState();
         offline_todo_mode_ = false;
         reconnect_stuck_prompt_ = false;
+        boot_reconnect_failed_ = false;
         FlushPendingTodoOps();
     } else if (strcmp(type, "todo_result") == 0) {
         const char* message = GetJsonString(root, "message");
@@ -1767,6 +1831,9 @@ void LanMicApp::CloseTodoMenu() {
 }
 
 int LanMicApp::GetTodoMenuItemCount() const {
+    if (todo_menu_kind_ == TodoMenuKind::RestartConfirm) {
+        return 2;
+    }
     if (todo_menu_kind_ == TodoMenuKind::ReconnectStuck) {
         return 4;
     }
@@ -1780,6 +1847,17 @@ int LanMicApp::GetTodoMenuItemCount() const {
 }
 
 std::string LanMicApp::GetTodoMenuItemLabel(int item) const {
+    if (todo_menu_kind_ == TodoMenuKind::RestartConfirm) {
+        switch (item) {
+            case 0:
+                return "Restart device";
+            case 1:
+                return "Back";
+            default:
+                return "";
+        }
+    }
+
     if (todo_menu_kind_ == TodoMenuKind::ReconnectStuck) {
         switch (item) {
             case 0:
@@ -1903,6 +1981,18 @@ void LanMicApp::ExecuteTodoMenuItem(int item) {
                 restart_device();
                 return;
             case 3:
+            default:
+                CloseTodoMenu();
+                return;
+        }
+    }
+
+    if (todo_menu_kind_ == TodoMenuKind::RestartConfirm) {
+        switch (item) {
+            case 0:
+                restart_device();
+                return;
+            case 1:
             default:
                 CloseTodoMenu();
                 return;
@@ -2580,6 +2670,7 @@ void LanMicApp::Run() {
     }
 
     bool last_pressed = false;
+    bool boot_press_consumed = false;
     int64_t boot_pressed_since_ms = 0;
     bool todo_hold_started = false;
     int64_t last_reconnect_ms = 0;
@@ -2589,6 +2680,8 @@ void LanMicApp::Run() {
     int64_t awaiting_pong_since_ms = 0;
     int64_t awaiting_pong_baseline_ms = 0;
     int64_t reconnect_prompt_started_ms = 0;
+    int reconnect_failure_count = 0;
+    int64_t last_wifi_recovery_ms = -kWifiRecoveryCooldownMs;
     // Tracks when the current "disconnected stretch" started.
     // Initialised to now so a cold boot with no server still gets a full grace
     // period before sleeping, but reset on every disconnect so a board that had
@@ -2600,18 +2693,110 @@ void LanMicApp::Run() {
         const int64_t now_ms = esp_timer_get_time() / 1000;
         if (connect_attempt_completed_.exchange(false, std::memory_order_acq_rel)) {
             reconnect_stuck_prompt_ = false;
-            if (IsServerConnected()) {
+            const bool server_connected = IsServerConnected();
+            if (server_connected) {
+                reconnect_failure_count = 0;
+                boot_reconnect_pending_ = false;
+                boot_reconnect_failed_ = false;
                 reconnect_interval_ms = kReconnectIntervalMinMs;
                 disconnected_since_ms = now_ms;
                 last_ws_ping_ms = 0;
                 awaiting_pong_since_ms = 0;
                 awaiting_pong_baseline_ms = 0;
-            } else if (server_uri_.empty() && cached_server_uri_.empty() && GetFallbackServerUri().empty()) {
-                reconnect_interval_ms = kReconnectIntervalMinMs;
             } else {
-                reconnect_interval_ms = std::min(reconnect_interval_ms * 2, kReconnectIntervalMaxMs);
+                reconnect_failure_count++;
+                if (server_uri_.empty() && cached_server_uri_.empty() && GetFallbackServerUri().empty()) {
+                    reconnect_interval_ms = kReconnectIntervalMinMs;
+                } else {
+                    reconnect_interval_ms = std::min(reconnect_interval_ms * 2, kReconnectIntervalMaxMs);
+                }
+            }
+            const bool manual_reconnect_failed = !server_connected && boot_reconnect_pending_;
+            if (manual_reconnect_failed) {
+                boot_reconnect_pending_ = false;
+                boot_reconnect_failed_ = true;
+                status_text_ = "Reconnect failed";
+                hint_text_ = "Press BOOT to restart";
+                phase_ = Phase::Error;
+                active_page_ = Page::Todo;
+                offline_todo_mode_ = true;
+                UpdateDisplay();
+            }
+            bool did_wifi_recovery = false;
+            if (!server_connected &&
+                (manual_reconnect_failed ||
+                 reconnect_failure_count >= kReconnectFailuresBeforeWifiRecovery) &&
+                (now_ms - last_wifi_recovery_ms) >= kWifiRecoveryCooldownMs) {
+                last_wifi_recovery_ms = now_ms;
+                reconnect_failure_count = 0;
+                last_reconnect_ms = now_ms;
+                did_wifi_recovery = true;
+                RecoverWifiForReconnect(manual_reconnect_failed ? "manual_reconnect_failed"
+                                                                 : "reconnect_failed");
+            }
+            if (!server_connected && offline_todo_mode_ && !did_wifi_recovery) {
+                board_.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
             }
         }
+
+        auto open_restart_confirm = [this]() {
+            todo_menu_kind_ = TodoMenuKind::RestartConfirm;
+            todo_menu_selected_item_ = 0;
+            todo_menu_open_ = true;
+            active_page_ = Page::Todo;
+            status_text_ = "Restart device?";
+            hint_text_ = "BOOT confirm";
+            phase_ = Phase::Error;
+            UpdateDisplay();
+        };
+
+        auto handle_disconnected_boot_press = [&]() {
+            boot_press_consumed = true;
+            boot_pressed_since_ms = now_ms;
+            todo_hold_started = false;
+
+            if (boot_reconnect_failed_) {
+                open_restart_confirm();
+                return;
+            }
+
+            if (!IsWifiConnected()) {
+                boot_reconnect_pending_ = false;
+                boot_reconnect_failed_ = true;
+                offline_todo_mode_ = true;
+                active_page_ = Page::Todo;
+                network_state_ = NetworkState::Offline;
+                status_text_ = "No WiFi";
+                hint_text_ = "Press BOOT to restart";
+                phase_ = Phase::Error;
+                UpdateDisplay();
+                return;
+            }
+
+            if (connect_attempt_running_.load(std::memory_order_acquire)) {
+                boot_reconnect_pending_ = true;
+                status_text_ = "Reconnecting";
+                hint_text_ = "Press BOOT again if failed";
+                phase_ = Phase::Idle;
+                UpdateDisplay();
+                return;
+            }
+
+            boot_reconnect_pending_ = true;
+            boot_reconnect_failed_ = false;
+            offline_todo_mode_ = false;
+            todo_menu_open_ = false;
+            network_state_ = NetworkState::Wifi;
+            status_text_ = "Connecting";
+            hint_text_ = "Press BOOT again if failed";
+            phase_ = Phase::Idle;
+            disconnected_since_ms = now_ms;
+            reconnect_interval_ms = kReconnectIntervalMinMs;
+            last_reconnect_ms = now_ms;
+            StartConnectAttemptAsync();
+            UpdateDisplay();
+        };
+
         const int64_t connect_attempt_started_ms =
             connect_attempt_started_ms_.load(std::memory_order_acquire);
         if (connect_attempt_running_.load(std::memory_order_acquire) &&
@@ -2623,22 +2808,30 @@ void LanMicApp::Run() {
                      static_cast<long long>(connect_attempt_started_ms),
                      static_cast<long long>(now_ms));
             reconnect_stuck_prompt_ = true;
+            if (boot_reconnect_pending_) {
+                boot_reconnect_pending_ = false;
+                boot_reconnect_failed_ = true;
+            }
             offline_todo_mode_ = true;
-            todo_menu_kind_ = TodoMenuKind::ReconnectStuck;
-            todo_menu_selected_item_ = 0;
-            todo_menu_open_ = true;
             reconnect_prompt_started_ms = now_ms;
-            status_text_ = "Reconnect stuck";
-            hint_text_ = "Choose action";
+            todo_menu_open_ = false;
+            status_text_ = "Reconnect failed";
+            hint_text_ = "Press BOOT to restart";
             phase_ = Phase::Error;
             active_page_ = Page::Todo;
+            if ((now_ms - last_wifi_recovery_ms) >= kWifiRecoveryCooldownMs) {
+                last_wifi_recovery_ms = now_ms;
+                reconnect_failure_count = 0;
+                last_reconnect_ms = now_ms;
+                RecoverWifiForReconnect("connect_attempt_watchdog");
+            }
             UpdateDisplay();
         }
         if (ws_disconnected_pending_.exchange(false)) {
             hello_sent_ = false;
             network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
             status_text_ = "Disconnected";
-            hint_text_ = "Will retry automatically";
+            hint_text_ = "BOOT reconnect";
             phase_ = Phase::Idle;
             if (active_page_ == Page::Todo || offline_todo_mode_) {
                 offline_todo_mode_ = true;
@@ -2718,6 +2911,14 @@ void LanMicApp::Run() {
                 vTaskDelay(pdMS_TO_TICKS(10));
                 continue;
             }
+            if (todo_menu_kind_ == TodoMenuKind::ReconnectStuck &&
+                IsWifiConnected() &&
+                !IsServerConnected() &&
+                !connect_attempt_running_.load(std::memory_order_acquire) &&
+                (now_ms - last_reconnect_ms) >= reconnect_interval_ms) {
+                last_reconnect_ms = now_ms;
+                StartConnectAttemptAsync();
+            }
             const bool pressed_now = IsPttPressed();
             const bool boot_press  = pressed_now && !last_pressed;
             if (boot_press) last_pressed = true;
@@ -2737,25 +2938,27 @@ void LanMicApp::Run() {
                 vTaskDelay(pdMS_TO_TICKS(10));
                 continue;
             }
+            const bool pressed_now = IsPttPressed();
+            if (pressed_now && !last_pressed) {
+                last_pressed = true;
+                handle_disconnected_boot_press();
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
+            if (!pressed_now && last_pressed) {
+                boot_pressed_since_ms = 0;
+                todo_hold_started = false;
+                boot_press_consumed = false;
+                last_pressed = false;
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
             if (offline_todo_mode_ && active_page_ == Page::Todo) {
                 if (up_click) {
                     MoveTodoSelection(-1);
                 }
                 if (down_click) {
                     MoveTodoSelection(1);
-                }
-                const bool pressed_now = IsPttPressed();
-                if (pressed_now && !last_pressed) {
-                    last_pressed = true;
-                    boot_pressed_since_ms = now_ms;
-                    todo_hold_started = false;
-                } else if (!pressed_now && last_pressed) {
-                    if (!todo_hold_started && boot_pressed_since_ms > 0) {
-                        OpenTodoMenu(TodoMenuKind::TodoAction);
-                    }
-                    boot_pressed_since_ms = 0;
-                    todo_hold_started = false;
-                    last_pressed = false;
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(200));
@@ -2764,7 +2967,6 @@ void LanMicApp::Run() {
 
         if (!IsServerConnected() &&
             !connect_attempt_running_.load(std::memory_order_acquire) &&
-            !offline_todo_mode_ &&
             (now_ms - last_reconnect_ms) >= reconnect_interval_ms) {
             last_reconnect_ms = now_ms;
             StartConnectAttemptAsync();
@@ -2780,13 +2982,17 @@ void LanMicApp::Run() {
             (now_ms - disconnected_since_ms) >= kReconnectPromptTimeoutMs) {
             reconnect_stuck_prompt_ = true;
             offline_todo_mode_ = true;
-            todo_menu_kind_ = TodoMenuKind::ReconnectStuck;
-            todo_menu_selected_item_ = 0;
-            todo_menu_open_ = true;
             reconnect_prompt_started_ms = now_ms;
-            status_text_ = "No server";
-            hint_text_ = "Choose action";
+            todo_menu_open_ = false;
+            status_text_ = "Disconnected";
+            hint_text_ = "BOOT reconnect";
             active_page_ = Page::Todo;
+            if ((now_ms - last_wifi_recovery_ms) >= kWifiRecoveryCooldownMs) {
+                last_wifi_recovery_ms = now_ms;
+                reconnect_failure_count = 0;
+                last_reconnect_ms = now_ms;
+                RecoverWifiForReconnect("disconnected_prompt");
+            }
             UpdateDisplay();
         }
 
@@ -2934,6 +3140,12 @@ void LanMicApp::Run() {
                      static_cast<int>(phase_));
             boot_pressed_since_ms = now_ms;
             todo_hold_started = false;
+            if (!IsServerConnected()) {
+                handle_disconnected_boot_press();
+                last_pressed = true;
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
             const bool can_open_page_menu =
                 phase_ == Phase::Idle || phase_ == Phase::Error;
             const bool defer_page_press =
@@ -2945,33 +3157,23 @@ void LanMicApp::Run() {
                 vTaskDelay(pdMS_TO_TICKS(10));
                 continue;
             }
-            if (!IsServerConnected()) {
-                disconnected_since_ms = now_ms;
-                reconnect_interval_ms = kReconnectIntervalMinMs;
-                last_reconnect_ms = now_ms;
-                StartConnectAttemptAsync();
-                hint_text_ = "Retrying host...";
-                status_text_ = "Connecting";
-                phase_ = Phase::Idle;
-                UpdateDisplay();
-            } else {
-                SyncVoiceModeToActivePage();
-                ESP_LOGI(kTag, "PTT start");
-                SendPttStart();
-                phase_ = Phase::Recording;
-                status_text_ = "Recording";
-                hint_text_ = "Release BOOT to send";
-                // Flush a short rolling buffer first so speech around the
-                // button edge is not clipped.
-                FlushPrerollFrames();
-                StreamAudioFrame();
-                UpdateDisplay();
-            }
+            SyncVoiceModeToActivePage();
+            ESP_LOGI(kTag, "PTT start");
+            SendPttStart();
+            phase_ = Phase::Recording;
+            status_text_ = "Recording";
+            hint_text_ = "Release BOOT to send";
+            // Flush a short rolling buffer first so speech around the
+            // button edge is not clipped.
+            FlushPrerollFrames();
+            StreamAudioFrame();
+            UpdateDisplay();
             last_pressed = true;
         }
 
         if (pressed &&
             last_pressed &&
+            !boot_press_consumed &&
             (active_page_ == Page::Todo || active_page_ == Page::Summary) &&
             !todo_hold_started &&
             boot_pressed_since_ms > 0 &&
@@ -2999,7 +3201,9 @@ void LanMicApp::Run() {
 
         if (!pressed && last_pressed) {
             ESP_LOGI(kTag, "BOOT release phase=%d", static_cast<int>(phase_));
-            if (phase_ == Phase::Recording) {
+            if (boot_press_consumed) {
+                // Disconnected BOOT presses are handled on press-down.
+            } else if (phase_ == Phase::Recording) {
                 ESP_LOGI(kTag, "PTT stop");
                 SendPttStop();
                 phase_ = Phase::Transcribing;
@@ -3013,6 +3217,7 @@ void LanMicApp::Run() {
             }
             boot_pressed_since_ms = 0;
             todo_hold_started = false;
+            boot_press_consumed = false;
             last_pressed = false;
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;

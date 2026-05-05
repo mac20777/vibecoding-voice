@@ -74,7 +74,8 @@ private:
         Todo,
         TodoAction,
         Live,
-        ReconnectStuck
+        ReconnectStuck,
+        RestartConfirm
     };
     struct TodoItem {
         std::string id;
@@ -128,6 +129,8 @@ private:
     int todo_menu_selected_item_ = 0;
     bool offline_todo_mode_ = false;
     bool reconnect_stuck_prompt_ = false;
+    bool boot_reconnect_pending_ = false;
+    bool boot_reconnect_failed_ = false;
     bool pending_normal_after_reconnect_ = false;
     std::string hint_text_;
     int quota_5h_remaining_pct_ = -1;
@@ -154,6 +157,7 @@ private:
     bool EnsureWebSocketConnected();
     void StartConnectAttemptAsync();
     void RunConnectAttemptTask();
+    void RecoverWifiForReconnect(const char* reason);
     bool DiscoverServerUri();
     std::string GetExpectedDiscoveryHostId() const;
     std::string GetFallbackServerUri() const;

@@ -63,6 +63,7 @@ private:
 
     void OnTcpData(const std::string& data);
     bool SendControlFrame(uint8_t opcode, const void* data, size_t len);
+    void CleanupTcp();
 
     // Per-connection message reassembly state (must NOT be static — each
     // WebSocket instance has independent state so reconnects start clean).
