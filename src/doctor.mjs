@@ -221,6 +221,15 @@ function resolveTodoIntentLabel(config) {
     : { label: "deepseek — TODO_INTENT_API_KEY missing", valid: false };
 }
 
+function resolveVoiceTranslationLabel(config) {
+  if (!config.voiceTranslationEnabled) {
+    return { label: "off", valid: true };
+  }
+  return config.voiceTranslationApiKey
+    ? { label: `deepseek · ${config.voiceTranslationModel}`, valid: true }
+    : { label: "deepseek — VOICE_TRANSLATION_API_KEY missing", valid: false };
+}
+
 export async function runDoctor(config) {
   console.log("\nvibecoding-voice doctor\n");
 
@@ -246,6 +255,14 @@ export async function runDoctor(config) {
     ok(`Todo intent: ${todoIntent.label}`);
   } else {
     warn(`Todo intent: ${todoIntent.label}`);
+  }
+
+  const voiceTranslation = resolveVoiceTranslationLabel(config);
+  if (voiceTranslation.valid) {
+    ok(`Voice translation: ${voiceTranslation.label}`);
+  } else {
+    fail(`Voice translation: ${voiceTranslation.label}`);
+    hasError = true;
   }
 
   // Claude Code CLI
@@ -277,6 +294,7 @@ export async function runDoctor(config) {
   const autoNote = config.sendTargetAuto ? " [auto-detected]" : "";
   console.log(`\n  Target: \x1b[1m${config.sendTarget}\x1b[0m${autoNote}`);
   console.log(`  Delivery: \x1b[1m${config.transcriptDeliveryMode}\x1b[0m`);
+  console.log(`  Translation: \x1b[1m${config.voiceTranslationEnabled ? "on" : "off"}\x1b[0m`);
   console.log(`  Inject: \x1b[1m${config.textInjectionMode}\x1b[0m`);
   if (hasError) {
     console.log('  \x1b[31mSome checks failed — fix the issues above before starting. Run "vibe config" if needed.\x1b[0m\n');

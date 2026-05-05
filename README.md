@@ -76,6 +76,7 @@ Both boards use ESP32-S3 with onboard MEMS mic and push-button.
 - Local desktop settings UI with grouped tabs for mode, speech provider, workspace, and advanced options
 - Managed `codex exec --json` session bridge
 - Managed `claude -p --output-format stream-json` session bridge
+- Optional Chinese-to-idiomatic-English voice translation through DeepSeek before device confirmation and send
 - **Todo List page** with local persistence and page-based voice CRUD for simple plans
 - Live CLI status, prompt/reply summary, log tail, and quota snapshot projected to e-paper
 - **Multi-segment accumulation** — hold BOOT to keep appending speech, UP to send, DN to undo the last segment
@@ -171,6 +172,19 @@ VOLCENGINE_ACCESS_KEY=your-access-key
 TRANSCRIPT_DELIVERY_MODE=confirm_on_device
 LAN_SHARED_SECRET=replace-with-a-long-random-secret
 ```
+
+Optional voice translation can be enabled from the desktop app's Translation tab, or with:
+
+```env
+VOICE_TRANSLATION_ENABLED=1
+VOICE_TRANSLATION_API_KEY=your-deepseek-api-key
+VOICE_TRANSLATION_MODEL=deepseek-chat
+VOICE_TRANSLATION_BASE_URL=https://api.deepseek.com
+VOICE_TRANSLATION_PROMPT=Translate the user's Chinese voice transcript into natural, idiomatic English. Return only the English translation.
+```
+
+On the board, use the safer menu path: switch to the Live page, hold `UP`, select `English: On` / `English: Off` with `UP` / `DN`, then press `BOOT` to confirm. There is no single-click shortcut for this toggle, so accidental mode changes are less likely.
+When translation is enabled, the board's confirmation screen shows `Chinese` in the upper prompt area and the translated `English` text in the lower reply area; pressing `UP` sends the English text.
 
 If you're using Volcengine Ark and are not sure which recording recognition model / resource to use, start here:
 [Volcengine Ark Recording Recognition](https://console.volcengine.com/ark/region:ark+cn-beijing/tts/recordingRecognition)
@@ -412,6 +426,17 @@ Screen footer shows `BOOT Add · UP Send · DN Undo` when a transcript is pendin
 | `TODO_INTENT_TIMEOUT_MS` | `8000` | Todo intent request timeout |
 | `TODO_FOLLOWUP_TIMEOUT_MS` | `30000` | Auto-cancel timeout for incomplete Todo follow-ups |
 
+#### Voice Translation
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VOICE_TRANSLATION_ENABLED` | `0` | Translate Live page voice transcripts before confirmation/send |
+| `VOICE_TRANSLATION_API_KEY` | — | DeepSeek API key; falls back to `DEEPSEEK_API_KEY` or `TODO_INTENT_API_KEY` |
+| `VOICE_TRANSLATION_MODEL` | `deepseek-chat` | DeepSeek chat model |
+| `VOICE_TRANSLATION_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible DeepSeek base URL |
+| `VOICE_TRANSLATION_TIMEOUT_MS` | `12000` | Translation request timeout |
+| `VOICE_TRANSLATION_PROMPT` | built-in | Prompt used to translate Chinese speech into idiomatic English |
+
 #### CLI Session
 
 | Variable | Default | Description |
@@ -535,6 +560,7 @@ node scripts/console.mjs
 - 带本地设置界面：按“基础 / 识别 / 工作区 / 高级”分组管理配置
 - 托管 `codex exec --json` 会话
 - 托管 `claude -p --output-format stream-json` 会话
+- 可选中文转地道英文翻译：中文语音先经 DeepSeek 翻译，再进入设备确认和发送流程
 - **Todo List 页面**：本地持久化待办，按当前页面决定语音进入 Todo 还是 Live coding
 - 将 CLI 状态、提示/回复摘要、日志末行、配额快照实时投影到电子墨水屏
 - **多段语音累积** — 按住 BOOT 持续追加语音片段，UP 发送，DN 撤销上一段
@@ -630,6 +656,19 @@ VOLCENGINE_ACCESS_KEY=你的-access-key
 TRANSCRIPT_DELIVERY_MODE=confirm_on_device
 LAN_SHARED_SECRET=替换为一个足够长的随机密钥
 ```
+
+中文转地道英文翻译可以在桌面端“翻译”页开启，也可以用环境变量配置：
+
+```env
+VOICE_TRANSLATION_ENABLED=1
+VOICE_TRANSLATION_API_KEY=你的-deepseek-api-key
+VOICE_TRANSLATION_MODEL=deepseek-chat
+VOICE_TRANSLATION_BASE_URL=https://api.deepseek.com
+VOICE_TRANSLATION_PROMPT=Translate the user's Chinese voice transcript into natural, idiomatic English. Return only the English translation.
+```
+
+板子上也可以切换：先到 Live 页面，长按 `UP` 打开菜单，用 `UP` / `DN` 选中 `English: On` / `English: Off`，再按 `BOOT` 确认。这个开关没有做成单击快捷键，避免录音或翻页时误触。
+翻译开启后，板子的确认页上半区标题为 `Chinese`，显示你刚说的中文原文；下半区标题为 `English`，显示将要发送的英文译文。按 `UP` 发送的是英文。
 
 如果你用的是火山引擎 Ark，但不确定该选哪个录音识别模型或 `VOLCENGINE_RESOURCE_ID`，可以从这里开始：
 [火山引擎 Ark 录音识别页面](https://console.volcengine.com/ark/region:ark+cn-beijing/tts/recordingRecognition)
@@ -867,6 +906,17 @@ LAN_SHARED_SECRET=你的密钥
 | `TODO_INTENT_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible DeepSeek base URL |
 | `TODO_INTENT_TIMEOUT_MS` | `8000` | Todo 意图解析超时时间 |
 | `TODO_FOLLOWUP_TIMEOUT_MS` | `30000` | 不完整 Todo 追问的自动取消时间 |
+
+#### 语音翻译
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `VOICE_TRANSLATION_ENABLED` | `0` | 在 Live 页面发送前，把语音转写结果先翻译成英文 |
+| `VOICE_TRANSLATION_API_KEY` | — | DeepSeek API Key；未设置时会回退到 `DEEPSEEK_API_KEY` 或 `TODO_INTENT_API_KEY` |
+| `VOICE_TRANSLATION_MODEL` | `deepseek-chat` | DeepSeek chat 模型 |
+| `VOICE_TRANSLATION_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible DeepSeek base URL |
+| `VOICE_TRANSLATION_TIMEOUT_MS` | `12000` | 翻译请求超时时间 |
+| `VOICE_TRANSLATION_PROMPT` | 内置提示词 | 控制“中文语音转地道英文”的翻译风格 |
 
 #### CLI 会话
 

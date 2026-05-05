@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { getUserConfigPath, projectRoot } from "./paths.mjs";
+import { DEFAULT_VOICE_TRANSLATION_PROMPT } from "./translation-service.mjs";
 
 const INITIAL_ENV_KEYS = new Set(Object.keys(process.env));
 let appliedConfigKeys = new Set();
@@ -229,33 +230,35 @@ export function detectConfiguredSttProvider(config) {
 }
 
 export function getConfigIssues(config) {
-  if (config.mockTranscript) {
-    return [];
-  }
+  const issues = [];
 
-  const provider = detectConfiguredSttProvider(config);
-  if (!provider) {
-    return [
-      "No STT provider is configured. Set OPENAI_API_KEY or VOLCENGINE_APP_KEY + VOLCENGINE_ACCESS_KEY."
-    ];
-  }
-
-  if (provider === "openai") {
-    return config.openaiApiKey ? [] : ["OPENAI_API_KEY is not set."];
-  }
-
-  if (provider === "volcengine") {
-    const issues = [];
-    if (!config.volcengineAppKey) {
-      issues.push("VOLCENGINE_APP_KEY is not set.");
+  if (!config.mockTranscript) {
+    const provider = detectConfiguredSttProvider(config);
+    if (!provider) {
+      issues.push(
+        "No STT provider is configured. Set OPENAI_API_KEY or VOLCENGINE_APP_KEY + VOLCENGINE_ACCESS_KEY."
+      );
+    } else if (provider === "openai") {
+      if (!config.openaiApiKey) {
+        issues.push("OPENAI_API_KEY is not set.");
+      }
+    } else if (provider === "volcengine") {
+      if (!config.volcengineAppKey) {
+        issues.push("VOLCENGINE_APP_KEY is not set.");
+      }
+      if (!config.volcengineAccessKey) {
+        issues.push("VOLCENGINE_ACCESS_KEY is not set.");
+      }
+    } else {
+      issues.push(`Unsupported STT_PROVIDER: ${config.sttProvider}`);
     }
-    if (!config.volcengineAccessKey) {
-      issues.push("VOLCENGINE_ACCESS_KEY is not set.");
-    }
-    return issues;
   }
 
-  return [`Unsupported STT_PROVIDER: ${config.sttProvider}`];
+  if (config.voiceTranslationEnabled && !config.voiceTranslationApiKey) {
+    issues.push("VOICE_TRANSLATION_API_KEY is not set.");
+  }
+
+  return issues;
 }
 
 export function hasRequiredConfig(config) {
@@ -330,6 +333,11 @@ export function loadConfig(options = {}) {
     codexCommand
   });
   const todoIntentApiKey = process.env.TODO_INTENT_API_KEY || process.env.DEEPSEEK_API_KEY || "";
+  const voiceTranslationApiKey =
+    process.env.VOICE_TRANSLATION_API_KEY ||
+    process.env.DEEPSEEK_API_KEY ||
+    process.env.TODO_INTENT_API_KEY ||
+    "";
 
   return {
     bindHost: process.env.LAN_VOICE_BIND || "0.0.0.0",
@@ -358,6 +366,13 @@ export function loadConfig(options = {}) {
     todoIntentTimeoutMs: Number(process.env.TODO_INTENT_TIMEOUT_MS || "8000"),
     todoFollowupTimeoutMs: Number(process.env.TODO_FOLLOWUP_TIMEOUT_MS || "30000"),
     deepseekApiKey: process.env.DEEPSEEK_API_KEY || "",
+    voiceTranslationEnabled: process.env.VOICE_TRANSLATION_ENABLED === "1",
+    voiceTranslationProvider: process.env.VOICE_TRANSLATION_PROVIDER || "deepseek",
+    voiceTranslationApiKey,
+    voiceTranslationModel: process.env.VOICE_TRANSLATION_MODEL || "deepseek-chat",
+    voiceTranslationBaseUrl: process.env.VOICE_TRANSLATION_BASE_URL || "https://api.deepseek.com",
+    voiceTranslationTimeoutMs: Number(process.env.VOICE_TRANSLATION_TIMEOUT_MS || "12000"),
+    voiceTranslationPrompt: process.env.VOICE_TRANSLATION_PROMPT || DEFAULT_VOICE_TRANSLATION_PROMPT,
     dryRunTextInjection: process.env.DRY_RUN_TEXT_INJECTION === "1",
     codexCommand,
     codexCwd: resolveCodexCwd(),

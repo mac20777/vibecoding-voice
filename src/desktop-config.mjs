@@ -1,5 +1,6 @@
 import { detectConfiguredSttProvider, getConfigIssues } from "./config.mjs";
 import { normalizeDesktopSettings } from "./desktop-settings.mjs";
+import { DEFAULT_VOICE_TRANSLATION_PROMPT } from "./translation-service.mjs";
 
 const VALID_SEND_TARGETS = new Set(["text_injector", "codex_exec", "claude_code"]);
 const VALID_STT_PROVIDERS = new Set(["volcengine", "openai"]);
@@ -30,6 +31,12 @@ export function buildDesktopFormState(config, desktopSettings = {}) {
       String(config.textInjectionMode || "").trim().toLowerCase() === "type_only"
         ? "type_only"
         : "type_and_enter",
+    voiceTranslationEnabled: config.voiceTranslationEnabled === true,
+    voiceTranslationApiKey: String(config.voiceTranslationApiKey || ""),
+    voiceTranslationModel: String(config.voiceTranslationModel || "deepseek-chat"),
+    voiceTranslationBaseUrl: String(config.voiceTranslationBaseUrl || "https://api.deepseek.com"),
+    voiceTranslationTimeoutMs: String(config.voiceTranslationTimeoutMs || "12000"),
+    voiceTranslationPrompt: String(config.voiceTranslationPrompt || DEFAULT_VOICE_TRANSLATION_PROMPT),
     lanSharedSecret: String(config.lanSharedSecret || ""),
     codexCwd: String(config.codexCwd || ""),
     claudeCwd: String(config.claudeCwd || ""),
@@ -66,6 +73,23 @@ export function buildUserConfigUpdates(formState = {}) {
       String(formState.textInjectionMode || "").trim().toLowerCase() === "type_only"
         ? "type_only"
         : "type_and_enter",
+    VOICE_TRANSLATION_ENABLED: formState.voiceTranslationEnabled ? "1" : null,
+    VOICE_TRANSLATION_PROVIDER: formState.voiceTranslationEnabled ? "deepseek" : null,
+    VOICE_TRANSLATION_API_KEY: formState.voiceTranslationEnabled
+      ? normalizeOptionalText(formState.voiceTranslationApiKey)
+      : null,
+    VOICE_TRANSLATION_MODEL: formState.voiceTranslationEnabled
+      ? normalizeOptionalText(formState.voiceTranslationModel) || "deepseek-chat"
+      : null,
+    VOICE_TRANSLATION_BASE_URL: formState.voiceTranslationEnabled
+      ? normalizeOptionalText(formState.voiceTranslationBaseUrl) || "https://api.deepseek.com"
+      : null,
+    VOICE_TRANSLATION_TIMEOUT_MS: formState.voiceTranslationEnabled
+      ? normalizeOptionalText(formState.voiceTranslationTimeoutMs) || "12000"
+      : null,
+    VOICE_TRANSLATION_PROMPT: formState.voiceTranslationEnabled
+      ? normalizeOptionalText(formState.voiceTranslationPrompt) || DEFAULT_VOICE_TRANSLATION_PROMPT
+      : null,
     LAN_SHARED_SECRET: normalizeOptionalText(formState.lanSharedSecret),
     CODEX_CWD: normalizeOptionalText(formState.codexCwd),
     CLAUDE_CWD: normalizeOptionalText(formState.claudeCwd),

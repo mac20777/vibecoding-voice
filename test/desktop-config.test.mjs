@@ -37,6 +37,12 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
       volcengineAccessKey: "",
       transcriptDeliveryMode: "immediate",
       textInjectionMode: "type_only",
+      voiceTranslationEnabled: true,
+      voiceTranslationApiKey: "translation-key",
+      voiceTranslationModel: "deepseek-chat",
+      voiceTranslationBaseUrl: "https://api.deepseek.com",
+      voiceTranslationTimeoutMs: 12000,
+      voiceTranslationPrompt: "Translate to idiomatic English.",
       lanSharedSecret: "secret",
       codexCwd: "D:/codex",
       claudeCwd: "D:/claude",
@@ -61,6 +67,9 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
   assert.equal(formState.openaiModel, "gpt-4o-mini-transcribe");
   assert.equal(formState.transcriptDeliveryMode, "immediate");
   assert.equal(formState.textInjectionMode, "type_only");
+  assert.equal(formState.voiceTranslationEnabled, true);
+  assert.equal(formState.voiceTranslationApiKey, "translation-key");
+  assert.equal(formState.voiceTranslationPrompt, "Translate to idiomatic English.");
   assert.deepEqual(formState.overrideFiles, ["D:/github/app/.env"]);
   assert.deepEqual(formState.desktopSettings, {
     autoLaunch: true,
@@ -79,6 +88,12 @@ test("buildUserConfigUpdates normalizes desktop form payload into env values", (
     volcengineAccessKey: "access-key",
     transcriptDeliveryMode: "immediate",
     textInjectionMode: "type_only",
+    voiceTranslationEnabled: true,
+    voiceTranslationApiKey: "translation-key",
+    voiceTranslationModel: "deepseek-chat",
+    voiceTranslationBaseUrl: "https://api.deepseek.com",
+    voiceTranslationTimeoutMs: "12000",
+    voiceTranslationPrompt: "Translate to idiomatic English.",
     lanSharedSecret: "",
     codexCwd: "D:/workspace",
     claudeCwd: "",
@@ -95,6 +110,13 @@ test("buildUserConfigUpdates normalizes desktop form payload into env values", (
     VOLCENGINE_ACCESS_KEY: "access-key",
     TRANSCRIPT_DELIVERY_MODE: "immediate",
     TEXT_INJECTION_MODE: "type_only",
+    VOICE_TRANSLATION_ENABLED: "1",
+    VOICE_TRANSLATION_PROVIDER: "deepseek",
+    VOICE_TRANSLATION_API_KEY: "translation-key",
+    VOICE_TRANSLATION_MODEL: "deepseek-chat",
+    VOICE_TRANSLATION_BASE_URL: "https://api.deepseek.com",
+    VOICE_TRANSLATION_TIMEOUT_MS: "12000",
+    VOICE_TRANSLATION_PROMPT: "Translate to idiomatic English.",
     LAN_SHARED_SECRET: null,
     CODEX_CWD: "D:/workspace",
     CLAUDE_CWD: null,

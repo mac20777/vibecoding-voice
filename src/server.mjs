@@ -7,7 +7,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { createCliView, formatCodexEvent, pushLogLine, summarizeAssistantText } from "./cli-projector.mjs";
 import { readLatestRateLimits } from "./codex-rate-limits.mjs";
 import { readLatestClaudeRateLimits } from "./claude-rate-limits.mjs";
-import { loadConfig } from "./config.mjs";
+import { loadConfig, writeUserConfigValues } from "./config.mjs";
 import { runDoctor } from "./doctor.mjs";
 import { startDiscoveryServer } from "./discovery-server.mjs";
 import { isFreshTimestamp, signHelloPayload, signaturesMatch } from "./lan-auth.mjs";
@@ -18,6 +18,7 @@ import { CodexSessionManager } from "./codex-session.mjs";
 import { transcribePcm16Mono } from "./stt.mjs";
 import { createTodoAssistant } from "./todo-assistant.mjs";
 import { createTodoService, VALID_VOICE_MODES } from "./todo-service.mjs";
+import { createVoiceTranslationService } from "./translation-service.mjs";
 import { injectText } from "./text-injector.mjs";
 
 const config = loadConfig();
@@ -31,6 +32,7 @@ const claudeSession = new ClaudeSessionManager(config);
 const cliView = createCliView(config);
 const todoService = createTodoService({ storagePath: getUserTodoListPath() });
 const todoAssistant = createTodoAssistant(config);
+let voiceTranslation = createVoiceTranslationService(config);
 const recentHelloNonces = new Map();
 applyRateLimitSnapshot(readLatestRateLimits());
 
@@ -70,6 +72,7 @@ function printBanner() {
   console.log(`  target     ${targetLabel}`);
   console.log(`  stt        ${sttLabel}`);
   console.log(`  todo       ${todoAssistant.label()}`);
+  console.log(`  translate  ${voiceTranslation.label()}`);
   console.log(`  auth       ${authLabel}`);
   console.log(`  ws         ws://${config.bindHost}:${config.port}`);
   if (config.discoveryEnabled) {
@@ -100,6 +103,7 @@ function emitServerReady(ws) {
     textInjectionMode: config.textInjectionMode,
     transcriptDeliveryMode: config.transcriptDeliveryMode,
     sendTarget: config.sendTarget,
+    voiceTranslationEnabled: voiceTranslation.isEnabled(),
     mode: getVoiceMode(ws.clientState),
     authRequired: Boolean(config.lanSharedSecret)
   });
@@ -326,7 +330,10 @@ function createClientState() {
     segmentActive: false,
     chunks: [],
     pendingSegments: [],
+    pendingOriginalSegments: [],
     pendingTranscript: "",
+    pendingOriginalTranscript: "",
+    pendingTransform: "none",
     pendingTodoIntent: null,
     pendingTodoIntentExpiresAt: 0,
     pendingTodoTimer: null
@@ -351,6 +358,7 @@ function joinPendingSegments(segments) {
 
 function updatePendingTranscript(state) {
   state.pendingTranscript = joinPendingSegments(state.pendingSegments);
+  state.pendingOriginalTranscript = joinPendingSegments(state.pendingOriginalSegments);
   return state.pendingTranscript;
 }
 
@@ -647,7 +655,9 @@ async function finalizeSegment(ws, state) {
     sendJson(ws, {
       type: "status",
       status: hadPendingTranscript ? "empty_segment" : "transcript_empty",
-      text: state.pendingTranscript
+      text: state.pendingTranscript,
+      originalText: state.pendingOriginalTranscript,
+      transform: state.pendingTransform
     });
     return;
   }
@@ -661,26 +671,45 @@ async function finalizeSegment(ws, state) {
     });
     state.pendingTranscript = "";
     state.pendingSegments = [];
+    state.pendingOriginalTranscript = "";
+    state.pendingOriginalSegments = [];
+    state.pendingTransform = "none";
     await dispatchTodoPrompt(ws, transcript, state);
     return;
   }
 
+  const translationResult = await translateVoiceTranscript(ws, transcript);
+  const translatedTranscript = translationResult.text;
+  const transcriptTransform = translationResult.transform;
+
   if (config.transcriptDeliveryMode === "confirm_on_device") {
-    state.pendingSegments.push(transcript);
+    state.pendingSegments.push(translatedTranscript);
+    state.pendingOriginalSegments.push(transcript);
+    state.pendingTransform = transcriptTransform;
     const pendingTranscript = updatePendingTranscript(state);
     sendJson(ws, {
       type: "transcript_final",
       text: pendingTranscript,
+      originalText: state.pendingOriginalTranscript,
+      transform: state.pendingTransform,
       latencyMs: Date.now() - startedAt,
       requiresAction: true
     });
-    sendJson(ws, { type: "status", status: "awaiting_action", text: pendingTranscript });
+    sendJson(ws, {
+      type: "status",
+      status: "awaiting_action",
+      text: pendingTranscript,
+      originalText: state.pendingOriginalTranscript,
+      transform: state.pendingTransform
+    });
     return;
   }
 
   sendJson(ws, {
     type: "transcript_final",
-    text: transcript,
+    text: translatedTranscript,
+    originalText: transcript,
+    transform: transcriptTransform,
     latencyMs: Date.now() - startedAt,
     requiresAction: false
   });
@@ -690,8 +719,14 @@ async function finalizeSegment(ws, state) {
       throw new Error("Codex session is busy");
     }
     state.pendingTranscript = "";
-    sendJson(ws, { type: "status", status: "typed", text: transcript });
-    launchCodexPrompt(transcript);
+    sendJson(ws, {
+      type: "status",
+      status: "typed",
+      text: translatedTranscript,
+      originalText: transcript,
+      transform: transcriptTransform
+    });
+    launchCodexPrompt(translatedTranscript);
     return;
   }
 
@@ -700,14 +735,76 @@ async function finalizeSegment(ws, state) {
       throw new Error("Claude session is busy");
     }
     state.pendingTranscript = "";
-    sendJson(ws, { type: "status", status: "typed", text: transcript });
-    launchClaudePrompt(transcript);
+    sendJson(ws, {
+      type: "status",
+      status: "typed",
+      text: translatedTranscript,
+      originalText: transcript,
+      transform: transcriptTransform
+    });
+    launchClaudePrompt(translatedTranscript);
     return;
   }
 
-  await dispatchPrompt(transcript);
+  await dispatchPrompt(translatedTranscript);
   state.pendingTranscript = "";
-  sendJson(ws, { type: "status", status: "typed", text: transcript });
+  sendJson(ws, {
+    type: "status",
+    status: "typed",
+    text: translatedTranscript,
+    originalText: transcript,
+    transform: transcriptTransform
+  });
+}
+
+function emitVoiceTranslationState(ws) {
+  sendJson(ws, {
+    type: "voice_translation_state",
+    enabled: voiceTranslation.isEnabled()
+  });
+}
+
+function applyVoiceTranslationEnabled(enabled, { persist = false } = {}) {
+  if (enabled && !config.voiceTranslationApiKey) {
+    throw new Error("voice_translation_api_key_missing");
+  }
+
+  config.voiceTranslationEnabled = Boolean(enabled);
+  voiceTranslation = createVoiceTranslationService(config);
+
+  if (persist) {
+    writeUserConfigValues({
+      VOICE_TRANSLATION_ENABLED: config.voiceTranslationEnabled ? "1" : null
+    });
+  }
+
+  broadcastServerReady();
+  for (const client of wss.clients) {
+    if (client.readyState === WebSocket.OPEN && client.clientState?.authenticated) {
+      emitVoiceTranslationState(client);
+    }
+  }
+}
+
+async function translateVoiceTranscript(ws, transcript) {
+  if (!voiceTranslation.isEnabled()) {
+    return { text: transcript, transform: "none" };
+  }
+
+  sendJson(ws, { type: "status", status: "translating", text: transcript });
+  try {
+    const translated = await voiceTranslation.translate(transcript);
+    log("voice translation", {
+      from: transcript.slice(0, 80),
+      to: translated.slice(0, 80)
+    });
+    return { text: translated, transform: "translation" };
+  } catch (error) {
+    const warning = error instanceof Error ? error.message : String(error);
+    log("voice translation error", warning);
+    sendJson(ws, { type: "warning", warning: `Translation failed: ${warning}` });
+    return { text: transcript, transform: "none" };
+  }
 }
 
 async function dispatchPrompt(prompt) {
@@ -762,12 +859,23 @@ async function sendPendingTranscript(ws, state) {
 
   state.pendingTranscript = "";
   state.pendingSegments = [];
+  const originalTranscript = String(state.pendingOriginalTranscript || "").trim();
+  const transform = String(state.pendingTransform || "none").trim() || "none";
+  state.pendingOriginalTranscript = "";
+  state.pendingOriginalSegments = [];
+  state.pendingTransform = "none";
   if (voiceMode === "todo") {
     await dispatchTodoPrompt(ws, transcript, state);
     return;
   }
 
-  sendJson(ws, { type: "status", status: "typed", text: transcript });
+  sendJson(ws, {
+    type: "status",
+    status: "typed",
+    text: transcript,
+    originalText: originalTranscript,
+    transform
+  });
   if (config.sendTarget === "codex_exec") {
     launchCodexPrompt(transcript);
     return;
@@ -788,12 +896,21 @@ function undoPendingTranscript(ws, state) {
   }
 
   state.pendingSegments.pop();
+  state.pendingOriginalSegments.pop();
   const transcript = updatePendingTranscript(state);
   if (transcript) {
-    sendJson(ws, { type: "status", status: "awaiting_action", text: transcript });
+    sendJson(ws, {
+      type: "status",
+      status: "awaiting_action",
+      text: transcript,
+      originalText: state.pendingOriginalTranscript,
+      transform: state.pendingTransform
+    });
     return;
   }
 
+  state.pendingOriginalTranscript = "";
+  state.pendingTransform = "none";
   sendJson(ws, { type: "transcript_cleared" });
   sendJson(ws, { type: "status", status: "undo_ok" });
 }
@@ -914,6 +1031,24 @@ wss.on("connection", (ws, req) => {
             applySendTarget(nextTarget);
           } else {
             emitServerReady(ws);
+          }
+          break;
+        }
+        case "set_voice_translation": {
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
+          const requested = message.enabled;
+          const nextEnabled =
+            requested === "toggle" ? !voiceTranslation.isEnabled() : requested === true;
+          try {
+            applyVoiceTranslationEnabled(nextEnabled, { persist: true });
+            log("set_voice_translation", state.deviceId, nextEnabled);
+          } catch (error) {
+            const warning = error instanceof Error ? error.message : String(error);
+            sendJson(ws, { type: "warning", warning });
+            emitVoiceTranslationState(ws);
           }
           break;
         }

@@ -17,6 +17,7 @@
 #include "button.h"
 
 class Board;
+struct cJSON;
 class Display;
 class WebSocket;
 
@@ -51,6 +52,7 @@ private:
     TaskHandle_t connect_task_handle_ = nullptr;
     bool has_pending_transcript_ = false;
     std::string send_target_;         // received from server_ready: "claude_code" | "codex_exec" | "text_injector"
+    bool voice_translation_enabled_ = false;
     std::vector<int16_t> audio_frame_buffer_; // reused across StreamAudioFrame() calls
     std::deque<std::vector<int16_t>> preroll_frames_;
     enum class Phase {
@@ -115,6 +117,8 @@ private:
     NetworkState network_state_ = NetworkState::Offline;
     std::string status_text_;
     std::string transcript_text_;
+    std::string original_transcript_text_;
+    std::string translated_transcript_text_;
     std::string cli_status_text_;
     std::string cli_phase_text_;
     std::string latest_assistant_text_;
@@ -176,6 +180,7 @@ private:
     bool SendPttStop();
     bool SendAction(const char* action_type);
     bool SendSetMode(const char* mode);
+    bool SendVoiceTranslationEnabled(bool enabled);
     bool SendTodoCommand(const char* action, int index = 0, int completed = -1, const char* id = nullptr);
     VoiceMode DesiredVoiceModeForPage(Page page) const;
     bool SyncVoiceModeToPage(Page page);
@@ -185,6 +190,7 @@ private:
     void CapturePrerollFrame();
     bool FlushPrerollFrames();
     void HandleServerMessage(const char* data, size_t len);
+    void ApplyTranscriptDisplayPayload(cJSON* root, const char* fallback_text = nullptr);
     void RefreshBatteryStatus(bool force_update = false);
     void HandleScroll(int direction);
     void MoveTodoSelection(int direction);
@@ -196,6 +202,7 @@ private:
     std::string GetTodoMenuItemLabel(int item) const;
     void HandleTodoMenuInput(bool up_click, bool down_click, bool boot_press);
     void ExecuteTodoMenuItem(int item);
+    void ToggleVoiceTranslation();
     void EnterOfflineTodoMode(const std::string& message);
     void RequestReconnect(const std::string& message);
     void QueueOfflineTodoToggle(const TodoItem& item, bool completed);

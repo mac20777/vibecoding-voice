@@ -13,6 +13,12 @@ const elements = {
   sttProvider: document.querySelector("#stt-provider"),
   transcriptDeliveryMode: document.querySelector("#transcript-delivery-mode"),
   textInjectionMode: document.querySelector("#text-injection-mode"),
+  voiceTranslationEnabled: document.querySelector("#voice-translation-enabled"),
+  voiceTranslationApiKey: document.querySelector("#voice-translation-api-key"),
+  voiceTranslationModel: document.querySelector("#voice-translation-model"),
+  voiceTranslationBaseUrl: document.querySelector("#voice-translation-base-url"),
+  voiceTranslationTimeoutMs: document.querySelector("#voice-translation-timeout-ms"),
+  voiceTranslationPrompt: document.querySelector("#voice-translation-prompt"),
   openaiApiKey: document.querySelector("#openai-api-key"),
   openaiModel: document.querySelector("#openai-model"),
   volcengineAppKey: document.querySelector("#volcengine-app-key"),
@@ -168,10 +174,13 @@ function renderConfigSummary() {
       ? `${deliveryLabel(elements.transcriptDeliveryMode.value)} · ${injectionLabel(elements.textInjectionMode.value)}`
       : deliveryLabel(elements.transcriptDeliveryMode.value);
   elements.summaryProvider.textContent = providerLabel(elements.sttProvider.value);
-  elements.summaryProviderDetail.textContent =
+  const sttDetail =
     elements.sttProvider.value === "openai"
       ? `模型：${elements.openaiModel.value || "whisper-1"}`
       : "适合中文语音环境";
+  elements.summaryProviderDetail.textContent = elements.voiceTranslationEnabled.checked
+    ? `${sttDetail} · 翻译开启`
+    : sttDetail;
   elements.summaryLaunch.textContent = launchLabel({
     autoLaunch: elements.autoLaunch.checked,
     launchToTray: elements.launchToTray.checked
@@ -184,7 +193,14 @@ function renderConfigSummary() {
 function updateFormAffordances() {
   updateProviderVisibility();
   updateModeVisibility();
+  updateTranslationVisibility();
   renderConfigSummary();
+}
+
+function updateTranslationVisibility() {
+  document.querySelectorAll("[data-translation-config]").forEach((section) => {
+    section.classList.toggle("hidden", !elements.voiceTranslationEnabled.checked);
+  });
 }
 
 function collectFormPayload() {
@@ -194,6 +210,12 @@ function collectFormPayload() {
       sttProvider: elements.sttProvider.value,
       transcriptDeliveryMode: elements.transcriptDeliveryMode.value,
       textInjectionMode: elements.textInjectionMode.value,
+      voiceTranslationEnabled: elements.voiceTranslationEnabled.checked,
+      voiceTranslationApiKey: elements.voiceTranslationApiKey.value,
+      voiceTranslationModel: elements.voiceTranslationModel.value,
+      voiceTranslationBaseUrl: elements.voiceTranslationBaseUrl.value,
+      voiceTranslationTimeoutMs: elements.voiceTranslationTimeoutMs.value,
+      voiceTranslationPrompt: elements.voiceTranslationPrompt.value,
       openaiApiKey: elements.openaiApiKey.value,
       openaiModel: elements.openaiModel.value,
       volcengineAppKey: elements.volcengineAppKey.value,
@@ -217,6 +239,12 @@ function fillForm(form, desktopSettingsPath) {
   elements.sttProvider.value = form.sttProvider;
   elements.transcriptDeliveryMode.value = form.transcriptDeliveryMode;
   elements.textInjectionMode.value = form.textInjectionMode;
+  elements.voiceTranslationEnabled.checked = Boolean(form.voiceTranslationEnabled);
+  elements.voiceTranslationApiKey.value = form.voiceTranslationApiKey || "";
+  elements.voiceTranslationModel.value = form.voiceTranslationModel || "";
+  elements.voiceTranslationBaseUrl.value = form.voiceTranslationBaseUrl || "";
+  elements.voiceTranslationTimeoutMs.value = form.voiceTranslationTimeoutMs || "";
+  elements.voiceTranslationPrompt.value = form.voiceTranslationPrompt || "";
   elements.openaiApiKey.value = form.openaiApiKey || "";
   elements.openaiModel.value = form.openaiModel || "";
   elements.volcengineAppKey.value = form.volcengineAppKey || "";
@@ -432,6 +460,7 @@ elements.sttProvider.addEventListener("change", updateFormAffordances);
 elements.sendTarget.addEventListener("change", updateFormAffordances);
 elements.transcriptDeliveryMode.addEventListener("change", renderConfigSummary);
 elements.textInjectionMode.addEventListener("change", renderConfigSummary);
+elements.voiceTranslationEnabled.addEventListener("change", updateFormAffordances);
 elements.openaiModel.addEventListener("input", renderConfigSummary);
 elements.autoLaunch.addEventListener("change", renderConfigSummary);
 elements.launchToTray.addEventListener("change", renderConfigSummary);

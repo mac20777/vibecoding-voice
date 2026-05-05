@@ -151,6 +151,7 @@
           <div class="tab-strip" role="tablist" aria-label="设置分组">
             <button class="tab-btn is-active" type="button" data-tab-trigger="basics" aria-selected="true">基础</button>
             <button class="tab-btn" type="button" data-tab-trigger="speech" aria-selected="false">识别</button>
+            <button class="tab-btn" type="button" data-tab-trigger="translation" aria-selected="false">翻译</button>
             <button class="tab-btn" type="button" data-tab-trigger="workspace" aria-selected="false">工作区</button>
             <button class="tab-btn" type="button" data-tab-trigger="advanced" aria-selected="false">高级</button>
           </div>
@@ -218,6 +219,40 @@
                   <span class="field-label">设备共享密钥</span>
                   <input id="lan-shared-secret" name="lanSharedSecret" type="password" autocomplete="off" />
                 </label>
+              </div>
+            </section>
+
+            <!-- Translation Tab -->
+            <section class="settings-page hidden" data-tab-panel="translation">
+              <div class="form-grid">
+                <div class="toggle-row toggle-row-single">
+                  <label class="toggle-item">
+                    <input id="voice-translation-enabled" name="voiceTranslationEnabled" type="checkbox" />
+                    <span>开启中文转地道英文</span>
+                  </label>
+                </div>
+                <div class="provider-section" data-translation-config>
+                  <label class="field">
+                    <span class="field-label">DeepSeek API Key</span>
+                    <input id="voice-translation-api-key" name="voiceTranslationApiKey" type="password" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">翻译模型</span>
+                    <input id="voice-translation-model" name="voiceTranslationModel" type="text" placeholder="deepseek-chat" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">DeepSeek Base URL</span>
+                    <input id="voice-translation-base-url" name="voiceTranslationBaseUrl" type="text" placeholder="https://api.deepseek.com" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">超时毫秒</span>
+                    <input id="voice-translation-timeout-ms" name="voiceTranslationTimeoutMs" type="text" placeholder="12000" />
+                  </label>
+                  <label class="field field-full">
+                    <span class="field-label">翻译提示词</span>
+                    <textarea id="voice-translation-prompt" name="voiceTranslationPrompt" rows="5"></textarea>
+                  </label>
+                </div>
               </div>
             </section>
 
