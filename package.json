@@ -32,6 +32,7 @@
     "start": "node src/server.mjs",
     "doctor": "node src/server.mjs --doctor",
     "test": "node --test",
+    "test:reconnect": "node scripts/reconnect-smoke.mjs",
     "console": "node scripts/console.mjs",
     "vibe": "node scripts/vibe.mjs",
     "desktop:dev": "electron .",

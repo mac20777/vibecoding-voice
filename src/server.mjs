@@ -12,6 +12,7 @@ import { runDoctor } from "./doctor.mjs";
 import { startDiscoveryServer } from "./discovery-server.mjs";
 import { isFreshTimestamp, signHelloPayload, signaturesMatch } from "./lan-auth.mjs";
 import { getUserTodoListPath } from "./paths.mjs";
+import { createRuntimeLogger } from "./runtime-log.mjs";
 import { ClaudeSessionManager } from "./claude-session.mjs";
 import { CodexSessionManager } from "./codex-session.mjs";
 import { transcribePcm16Mono } from "./stt.mjs";
@@ -35,14 +36,11 @@ applyRateLimitSnapshot(readLatestRateLimits());
 
 const MIN_PLAUSIBLE_EPOCH_MS = Date.UTC(2020, 0, 1);
 const VALID_SEND_TARGETS = new Set(["text_injector", "codex_exec", "claude_code"]);
+const { log, logPath: runtimeLogPath } = createRuntimeLogger();
 
 function getVoiceMode(state) {
   const mode = String(state?.voiceMode || "").trim().toLowerCase();
   return VALID_VOICE_MODES.has(mode) ? mode : "normal";
-}
-
-function log(...args) {
-  console.log(new Date().toISOString(), ...args);
 }
 
 function printBanner() {
@@ -77,6 +75,7 @@ function printBanner() {
   if (config.discoveryEnabled) {
     console.log(`  discovery  udp://${config.bindHost}:${config.discoveryPort}`);
   }
+  console.log(`  log        ${runtimeLogPath}`);
   process.stderr.write(`  cwd        ${config.claudeCwd || process.cwd()} (VIBE_INVOKE_CWD=${process.env.VIBE_INVOKE_CWD || "(not set)"})\n`);
   console.log(`\nRun with --doctor to check your environment.\n`);
 }
@@ -1056,6 +1055,7 @@ wss.on("connection", (ws, req) => {
 
 server.listen(config.port, config.bindHost, () => {
   printBanner();
+  log("runtime log", runtimeLogPath);
   log(`server ready`);
 });
 

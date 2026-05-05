@@ -104,3 +104,32 @@ Desktop side showed the board reconnected:
 - On ESP32/lwIP, prefer non-blocking sockets plus `select()` for strict LAN discovery deadlines.
 - Always test reconnect with the service down for more than one retry cycle, not only quick restarts.
 
+## Follow-up Tooling
+
+The project now has extra diagnostics for this class of issue:
+
+```powershell
+npm run doctor
+```
+
+`doctor` reports:
+
+- WebSocket listener PID/process/path for `LAN_VOICE_PORT`.
+- Current LAN board/client connections, excluding localhost monitor connections.
+- UDP discovery endpoint PID/process/path for `LAN_DISCOVERY_PORT`.
+- Current runtime log path.
+
+Hardware reconnect smoke test:
+
+```powershell
+npm run test:reconnect -- --outage-sec 45 --restore-sec 30
+```
+
+Optional filters:
+
+```powershell
+npm run test:reconnect -- --device-ip 192.168.3.66
+npm run test:reconnect -- --service-exe "D:\Program Files\VibeCoding Voice\VibeCoding Voice.exe"
+```
+
+The smoke test stops `VibeCoding Voice`, waits for the outage window, starts it again, then polls `Get-NetTCPConnection` until a non-localhost board connection is established.

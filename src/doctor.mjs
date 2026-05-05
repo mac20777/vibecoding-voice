@@ -1,6 +1,13 @@
+import { execFile } from "node:child_process";
+import dgram from "node:dgram";
+import fs from "node:fs";
 import { createServer } from "node:net";
+import { promisify } from "node:util";
 
 import { isCliAvailable } from "./config.mjs";
+import { resolveRuntimeLogPath } from "./runtime-log.mjs";
+
+const execFileAsync = promisify(execFile);
 
 function ok(label) {
   console.log(`  \x1b[32m[✓]\x1b[0m ${label}`);
@@ -14,13 +21,176 @@ function warn(label) {
   console.log(`  \x1b[33m[~]\x1b[0m ${label}`);
 }
 
-function checkPort(port) {
+function checkTcpPort(port) {
   return new Promise((resolve) => {
     const server = createServer();
     server.once("error", () => resolve(false));
     server.once("listening", () => server.close(() => resolve(true)));
     server.listen(port, "127.0.0.1");
   });
+}
+
+function checkUdpPort(port) {
+  return new Promise((resolve) => {
+    const socket = dgram.createSocket("udp4");
+    socket.once("error", () => {
+      socket.close();
+      resolve(false);
+    });
+    socket.once("listening", () => socket.close(() => resolve(true)));
+    socket.bind(port, "0.0.0.0");
+  });
+}
+
+function asArray(value) {
+  if (!value) {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
+}
+
+function isLoopback(address) {
+  const text = String(address || "");
+  return text === "127.0.0.1" || text === "::1" || text === "::ffff:127.0.0.1";
+}
+
+function tcpStateName(state) {
+  const text = String(state || "").toLowerCase();
+  if (text === "2") {
+    return "listen";
+  }
+  if (text === "5") {
+    return "established";
+  }
+  return text;
+}
+
+async function readWindowsPortSnapshot({ tcpPort, udpPort }) {
+  if (process.platform !== "win32") {
+    return null;
+  }
+
+  const script = `
+$tcpPort = ${Number(tcpPort)}
+$udpPort = ${Number(udpPort)}
+$tcp = @(Get-NetTCPConnection -LocalPort $tcpPort -ErrorAction SilentlyContinue |
+  Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess)
+$udp = @(Get-NetUDPEndpoint -LocalPort $udpPort -ErrorAction SilentlyContinue |
+  Select-Object LocalAddress,LocalPort,OwningProcess)
+$pids = @($tcp.OwningProcess + $udp.OwningProcess | Where-Object { $_ -and $_ -ne 0 } | Select-Object -Unique)
+$processes = @($pids | ForEach-Object {
+  Get-Process -Id $_ -ErrorAction SilentlyContinue |
+    Select-Object Id,ProcessName,Path
+})
+[pscustomobject]@{
+  tcp = $tcp
+  udp = $udp
+  processes = $processes
+} | ConvertTo-Json -Depth 5
+`;
+
+  try {
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { timeout: 5000, windowsHide: true, maxBuffer: 1024 * 1024 }
+    );
+    const trimmed = stdout.trim();
+    return trimmed ? JSON.parse(trimmed) : null;
+  } catch (error) {
+    warn(`live port snapshot unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+function formatProcess(processes, pid) {
+  const processInfo = asArray(processes).find((entry) => Number(entry.Id) === Number(pid));
+  if (!processInfo) {
+    return `PID ${pid}`;
+  }
+  const path = processInfo.Path ? ` · ${processInfo.Path}` : "";
+  return `${processInfo.ProcessName} PID ${pid}${path}`;
+}
+
+function reportRuntimeLog() {
+  const logPath = resolveRuntimeLogPath();
+  try {
+    const stat = fs.statSync(logPath);
+    ok(`runtime log: ${logPath} (updated ${stat.mtime.toLocaleString()})`);
+  } catch {
+    warn(`runtime log not found yet: ${logPath}`);
+  }
+}
+
+async function reportLivePorts(config) {
+  const snapshot = await readWindowsPortSnapshot({
+    tcpPort: config.port,
+    udpPort: config.discoveryPort
+  });
+
+  if (!snapshot) {
+    const wsAvailable = await checkTcpPort(config.port);
+    if (wsAvailable) {
+      ok(`port ${config.port} available (WebSocket)`);
+    } else {
+      fail(`port ${config.port} in use — set LAN_VOICE_PORT to a free port`);
+      return { hasError: true };
+    }
+
+    if (config.discoveryEnabled) {
+      const udpAvailable = await checkUdpPort(config.discoveryPort);
+      if (udpAvailable) {
+        ok(`port ${config.discoveryPort} available (UDP discovery)`);
+      } else {
+        warn(`port ${config.discoveryPort} in use (UDP discovery)`);
+      }
+    }
+    return { hasError: false };
+  }
+
+  let hasError = false;
+  const tcpRows = asArray(snapshot.tcp);
+  const udpRows = asArray(snapshot.udp);
+  const listeners = tcpRows.filter((row) => tcpStateName(row.State) === "listen");
+  const established = tcpRows.filter((row) => tcpStateName(row.State) === "established");
+  const lanClients = established.filter((row) =>
+    row.RemoteAddress &&
+    row.RemoteAddress !== "0.0.0.0" &&
+    !isLoopback(row.RemoteAddress)
+  );
+
+  if (listeners.length > 0) {
+    for (const listener of listeners) {
+      ok(`WebSocket listening on ${listener.LocalAddress}:${listener.LocalPort} by ${formatProcess(snapshot.processes, listener.OwningProcess)}`);
+    }
+  } else if (await checkTcpPort(config.port)) {
+    ok(`port ${config.port} available (WebSocket server not running)`);
+  } else {
+    fail(`port ${config.port} in use but no listener details found`);
+    hasError = true;
+  }
+
+  if (lanClients.length > 0) {
+    for (const client of lanClients) {
+      ok(`board/client connected: ${client.RemoteAddress}:${client.RemotePort} -> ${client.LocalAddress}:${client.LocalPort}`);
+    }
+  } else {
+    warn(`no LAN board connection currently established on port ${config.port}`);
+  }
+
+  if (config.discoveryEnabled) {
+    if (udpRows.length > 0) {
+      for (const endpoint of udpRows) {
+        ok(`UDP discovery endpoint ${endpoint.LocalAddress}:${endpoint.LocalPort} by ${formatProcess(snapshot.processes, endpoint.OwningProcess)}`);
+      }
+    } else if (await checkUdpPort(config.discoveryPort)) {
+      ok(`port ${config.discoveryPort} available (UDP discovery server not running)`);
+    } else {
+      warn(`port ${config.discoveryPort} in use but no UDP endpoint details found`);
+    }
+  }
+
+  return { hasError };
 }
 
 function resolveSttLabel(config) {
@@ -98,23 +268,10 @@ export async function runDoctor(config) {
     warn("neither claude nor codex found — SEND_TARGET will fall back to text_injector");
   }
 
-  // Ports
-  const wsAvailable = await checkPort(config.port);
-  if (wsAvailable) {
-    ok(`port ${config.port} available (WebSocket)`);
-  } else {
-    fail(`port ${config.port} in use — set LAN_VOICE_PORT to a free port`);
-    hasError = true;
-  }
-
-  if (config.discoveryEnabled) {
-    const udpAvailable = await checkPort(config.discoveryPort);
-    if (udpAvailable) {
-      ok(`port ${config.discoveryPort} available (UDP discovery)`);
-    } else {
-      warn(`port ${config.discoveryPort} may be in use (UDP discovery) — set LAN_DISCOVERY_PORT or LAN_DISCOVERY_ENABLED=0`);
-    }
-  }
+  // Live ports / current device connection
+  const portReport = await reportLivePorts(config);
+  hasError = hasError || portReport.hasError;
+  reportRuntimeLog();
 
   // Summary
   const autoNote = config.sendTargetAuto ? " [auto-detected]" : "";
