@@ -2,6 +2,7 @@
 #define LAN_MIC_APP_H
 
 #include <atomic>
+#include <cstdint>
 #include <deque>
 #include <memory>
 #include <string>
@@ -166,6 +167,7 @@ private:
     std::string HmacSha256Hex(const std::vector<std::string>& parts) const;
     void EnterWifiSetupMode();
     void DisconnectWebSocket();
+    void EnterOfflineDeepSleep(const char* status_text, const char* hint_text, uint64_t timer_wakeup_us);
     bool IsPttPressed() const;
     bool IsNavButtonPressed(gpio_num_t gpio_num) const;
     bool SendJson(const char* json);

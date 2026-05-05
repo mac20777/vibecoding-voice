@@ -81,9 +81,11 @@ constexpr int64_t kTodoBootHoldMs = 600;
 constexpr uint32_t kConnectTaskStackSize = 6 * 1024;
 constexpr UBaseType_t kConnectTaskPriority = 2;
 // If no server connection is established within this window, enter deep sleep
-// to preserve battery.  BOOT button or a 5-minute timer wakes the board for
-// another retry cycle.  Pressing BOOT while disconnected resets this window.
+// to preserve battery.  BOOT wakes immediately; a timer wake periodically runs
+// a short retry window so the board can reconnect after the desktop returns.
 constexpr int64_t kNoConnectionSleepMs = 5LL * 60 * 1000;  // 5 minutes
+constexpr int64_t kOfflineTimerRetryAwakeMs = 60LL * 1000;  // 1 minute
+constexpr uint64_t kOfflineSleepRetryIntervalUs = 15ULL * 60 * 1000 * 1000;  // 15 minutes
 constexpr size_t kBodyCharsPerLine = 22;
 constexpr size_t kPromptVisibleLines = 3;
 constexpr size_t kReplyVisibleLines = 4;
@@ -128,6 +130,9 @@ constexpr uint8_t kBatteryIcon14x8[] = {
     0x80, 0x04,
     0xFF, 0xFC,
 };
+
+RTC_DATA_ATTR bool s_offline_auto_sleep_pending = false;
+RTC_DATA_ATTR uint32_t s_offline_auto_sleep_count = 0;
 
 std::vector<std::string> WrapUtf8Lines(const std::string& text, size_t max_chars, size_t max_lines = 0) {
     std::vector<std::string> lines;
@@ -944,6 +949,34 @@ void LanMicApp::DisconnectWebSocket() {
     }
     hello_sent_ = false;
     preroll_frames_.clear();
+}
+
+void LanMicApp::EnterOfflineDeepSleep(const char* status_text,
+                                      const char* hint_text,
+                                      uint64_t timer_wakeup_us) {
+    ESP_LOGW(kTag,
+             "Entering offline deep sleep: timer_us=%llu count=%lu",
+             static_cast<unsigned long long>(timer_wakeup_us),
+             static_cast<unsigned long>(s_offline_auto_sleep_count + 1));
+    DisconnectWebSocket();
+    board_.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+    s_offline_auto_sleep_pending = true;
+    s_offline_auto_sleep_count++;
+    has_pending_transcript_ = false;
+    todo_menu_open_ = false;
+    settings_editing_volume_ = false;
+    phase_ = Phase::Idle;
+    active_page_ = Page::Summary;
+    network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
+    status_text_ = status_text != nullptr ? status_text : "Low power";
+    hint_text_ = hint_text != nullptr ? hint_text : "BOOT wake";
+    UpdateDisplay();
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(BOOT_BUTTON_GPIO), 0);
+    if (timer_wakeup_us > 0) {
+        esp_sleep_enable_timer_wakeup(timer_wakeup_us);
+    }
+    esp_deep_sleep_start();
 }
 
 bool LanMicApp::IsPttPressed() const {
@@ -2669,6 +2702,22 @@ void LanMicApp::Run() {
         }
     }
 
+    const esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();
+    const bool offline_timer_wake =
+        s_offline_auto_sleep_pending && wake_cause == ESP_SLEEP_WAKEUP_TIMER;
+    const int64_t offline_sleep_grace_ms =
+        offline_timer_wake ? kOfflineTimerRetryAwakeMs : kNoConnectionSleepMs;
+    if (!offline_timer_wake && wake_cause != ESP_SLEEP_WAKEUP_TIMER) {
+        s_offline_auto_sleep_pending = false;
+        s_offline_auto_sleep_count = 0;
+    }
+    ESP_LOGI(kTag,
+             "Wake cause=%d offline_sleep_pending=%d offline_sleep_count=%lu sleep_grace_ms=%lld",
+             static_cast<int>(wake_cause),
+             s_offline_auto_sleep_pending ? 1 : 0,
+             static_cast<unsigned long>(s_offline_auto_sleep_count),
+             static_cast<long long>(offline_sleep_grace_ms));
+
     bool last_pressed = false;
     bool boot_press_consumed = false;
     int64_t boot_pressed_since_ms = 0;
@@ -2695,6 +2744,8 @@ void LanMicApp::Run() {
             reconnect_stuck_prompt_ = false;
             const bool server_connected = IsServerConnected();
             if (server_connected) {
+                s_offline_auto_sleep_pending = false;
+                s_offline_auto_sleep_count = 0;
                 reconnect_failure_count = 0;
                 boot_reconnect_pending_ = false;
                 boot_reconnect_failed_ = false;
@@ -2996,21 +3047,23 @@ void LanMicApp::Run() {
             UpdateDisplay();
         }
 
-        // Time-based sleep: if no connection has been established within
-        // kNoConnectionSleepMs, enter deep sleep to save battery.
-        if (!IsServerConnected() &&
+        // Time-based sleep: if the desktop service stays unavailable, enter
+        // deep sleep even from Offline Todo.  E-paper keeps the last image, and
+        // pending todo operations are already persisted before this point.
+        const bool can_sleep_disconnected =
+            !IsServerConnected() &&
             !connect_attempt_running_.load(std::memory_order_acquire) &&
-            !offline_todo_mode_ &&
-            (now_ms - disconnected_since_ms) >= kNoConnectionSleepMs) {
-            DisconnectWebSocket();
-            status_text_ = "No server";
-            hint_text_ = "Press BOOT to retry";
-            active_page_ = Page::Summary;
-            UpdateDisplay();
-            vTaskDelay(pdMS_TO_TICKS(800));
-            esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(BOOT_BUTTON_GPIO), 0);
-            esp_sleep_enable_timer_wakeup(5ULL * 60 * 1000 * 1000);  // 5 minutes
-            esp_deep_sleep_start();
+            !has_pending_transcript_ &&
+            !todo_menu_open_ &&
+            active_page_ != Page::Settings &&
+            phase_ != Phase::Recording &&
+            phase_ != Phase::Transcribing &&
+            phase_ != Phase::Running;
+        if (can_sleep_disconnected &&
+            (now_ms - disconnected_since_ms) >= offline_sleep_grace_ms) {
+            EnterOfflineDeepSleep(offline_timer_wake ? "Host sleeping" : "No server",
+                                  "BOOT wake / auto retry",
+                                  kOfflineSleepRetryIntervalUs);
         }
 
         if (IsServerConnected()) {

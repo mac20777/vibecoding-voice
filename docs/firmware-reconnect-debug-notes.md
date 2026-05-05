@@ -133,3 +133,15 @@ npm run test:reconnect -- --service-exe "D:\Program Files\VibeCoding Voice\VibeC
 ```
 
 The smoke test stops `VibeCoding Voice`, waits for the outage window, starts it again, then polls `Get-NetTCPConnection` until a non-localhost board connection is established.
+
+## Offline Power Behavior
+
+The board uses an e-paper display, so the screen image can remain visible while the MCU is asleep. To avoid overnight battery drain when the desktop service is off:
+
+- If the service stays unavailable for 5 minutes, firmware enters deep sleep even from Offline Todo mode.
+- BOOT wakes the board immediately.
+- A timer wakes the board every 15 minutes for a short reconnect window.
+- On timer wake, the board stays awake for 1 minute to retry Wi-Fi/discovery/WebSocket; if the service is still unavailable, it sleeps again.
+- Pending offline todo operations are persisted before sleep and can sync after the next successful connection.
+
+The important pitfall was that the old sleep condition required `!offline_todo_mode_`, while the reconnect UI entered `offline_todo_mode_` after disconnect. That made the intended 5-minute deep sleep path unreachable during real service outages.
