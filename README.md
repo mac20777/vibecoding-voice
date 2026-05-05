@@ -11,11 +11,13 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 **Voice-driven AI coding via a wireless ESP32 e-paper device — no microphone, no keyboard interruption, just push-to-talk.**
 
 > Now includes a Windows desktop app with tray mode, start-on-login, a local settings UI, and packaged installers, so non-technical users can use it without touching a terminal.
+>
+> Latest Zectrix 4.2" firmware package: `v2.2.3_zectrix-s3-epaper-4.2.zip`, with long-outage reconnect fixes and offline deep sleep support.
 
 `vibecoding-voice` is a two-part open-source project:
 
 1. **Host bridge** (this repo) — a Node.js server that runs on your PC. It receives push-to-talk audio from an ESP32 device over WebSocket, transcribes it, and either injects the text into the active Windows input field or drives a Codex / Claude Code CLI session.
-2. **ESP32 firmware** (`firmware/`) — runs on supported e-paper boards such as Zectrix S3 and Waveshare S3, and is intended to grow into a fully DIY ESP32-S3 hardware path as well. It handles Wi-Fi, push-to-talk recording, device-side confirmation UI, and renders live CLI output on the e-ink screen.
+2. **ESP32 firmware** (`firmware/`) — runs on supported e-paper boards such as Zectrix S3 and Waveshare S3, and is intended to grow into a fully DIY ESP32-S3 hardware path as well. It handles Wi-Fi, push-to-talk recording, device-side confirmation UI, resilient LAN reconnects, offline low-power sleep, and renders live CLI output on the e-ink screen.
 
 ### Why this project is useful
 
@@ -23,6 +25,7 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 - Choose between a developer-friendly CLI flow and a normal Windows desktop app for non-technical users
 - Keep the host bridge running in the background with tray controls, mode switching, and saved local settings
 - Project AI progress, transcript confirmation, and device pairing state back onto the e-paper screen
+- Recover cleanly when the desktop bridge is stopped and restarted, and preserve battery when the host stays offline
 
 ### Three working modes
 
@@ -78,6 +81,8 @@ Both boards use ESP32-S3 with onboard MEMS mic and push-button.
 - **Multi-segment accumulation** — hold BOOT to keep appending speech, UP to send, DN to undo the last segment
 - Device-side confirm flow: transcript shown first, explicit action required to send
 - UDP LAN host discovery — device finds the bridge automatically, no hardcoded IPs
+- Robust reconnect after desktop outages — discovery uses bounded non-blocking socket waits, cleans up stale WebSocket state, and can retry without rebooting the board
+- Offline low-power sleep — after a long host outage the e-paper board enters deep sleep, keeps the last screen image, wakes by BOOT, and periodically wakes for retry windows
 - HMAC-SHA256 authentication for both discovery and WebSocket handshake
 - NVS-persisted host pairing — reconnects to the last known server on reboot
 
@@ -279,7 +284,14 @@ Download the latest zip from [`firmware/releases/`](firmware/releases/), unzip, 
 
 ```powershell
 # Replace COMx with your board's serial port
-python -m esptool --chip esp32s3 -p COMx -b 460800 write_flash "@flash_args"
+python -m esptool --chip esp32s3 -p COMx -b 460800 --before default_reset --after hard_reset write_flash "@flash_args"
+```
+
+The current tested Zectrix 4.2" package is `v2.2.3_zectrix-s3-epaper-4.2.zip`.
+It also includes `merged-binary.bin` for single-file flashing:
+
+```powershell
+python -m esptool --chip esp32s3 -p COMx -b 460800 --before default_reset --after hard_reset write_flash 0x0 merged-binary.bin
 ```
 
 #### Option B: Build from source
@@ -459,11 +471,13 @@ node scripts/console.mjs
 **用无线 ESP32 电子墨水设备实现语音驱动的 AI 编程——无需抢占麦克风，无需中断键盘，按键说话即可。**
 
 > 现在已经带有 Windows 桌面版：支持托盘、自启动、本地设置界面和安装包，普通用户不用碰命令行也能直接用。
+>
+> 最新 Zectrix 4.2" 固件包：`v2.2.3_zectrix-s3-epaper-4.2.zip`，包含长时间断线后的自动重连修复和离线低功耗休眠支持。
 
 `vibecoding-voice` 是一个由两部分组成的开源项目：
 
 1. **主机桥接服务**（本仓库）— 运行在你电脑上的 Node.js 服务器。它通过 WebSocket 从 ESP32 设备接收按键说话（PTT）音频，调用语音识别将其转写，然后注入 Windows 当前输入框，或者驱动 Codex / Claude Code CLI 会话。
-2. **ESP32 固件**（`firmware/` 目录）— 可运行在 Zectrix S3、Waveshare S3 这类已支持的电子墨水屏开发板上，后续也会补一个完全 DIY 的 ESP32-S3 硬件方案。负责 Wi-Fi 连接、按键录音、设备端确认界面，并将 CLI 实时输出渲染到电子墨水屏上。
+2. **ESP32 固件**（`firmware/` 目录）— 可运行在 Zectrix S3、Waveshare S3 这类已支持的电子墨水屏开发板上，后续也会补一个完全 DIY 的 ESP32-S3 硬件方案。负责 Wi-Fi 连接、按键录音、设备端确认界面、可靠的局域网重连、离线低功耗休眠，并将 CLI 实时输出渲染到电子墨水屏上。
 
 ### 这个项目现在能解决什么问题
 
@@ -471,6 +485,7 @@ node scripts/console.mjs
 - 同时兼容开发者工作流和普通用户工作流：既可以用 CLI，也可以用桌面版
 - 主机桥接服务可以常驻后台，通过托盘、模式切换和本地设置页来管理
 - 设备端不仅能说话输入，还能在电子墨水屏上看到 AI 执行进度、转写确认和连接状态
+- 电脑服务关闭后再启动，设备可以自动恢复连接；电脑长时间关机或服务停止时，设备会进入低功耗休眠以保护电量
 
 ### 三种工作模式
 
@@ -525,6 +540,8 @@ node scripts/console.mjs
 - **多段语音累积** — 按住 BOOT 持续追加语音片段，UP 发送，DN 撤销上一段
 - 设备端确认流程：先显示转写内容，主动操作后才发送
 - UDP 局域网主机自动发现 — 设备自动找到桥接服务，无需写死 IP
+- 长时间断线后的可靠重连 — discovery 使用有超时边界的非阻塞 socket 等待，清理旧 WebSocket 状态，不需要重启板子也能继续重试
+- 离线低功耗休眠 — 主机长时间不可用后，电子墨水屏设备会进入 deep sleep，保留最后一屏，BOOT 可立即唤醒，并定期短暂唤醒重试连接
 - 发现回复和 WebSocket 握手均采用 HMAC-SHA256 签名认证
 - NVS 持久化主机配对信息 — 重启后自动重连上次配对的服务器
 
@@ -723,7 +740,14 @@ Todo 命令；它不会启动 Codex/Claude，也不会直接执行 CRUD。用户
 
 ```powershell
 # 将 COMx 替换为你的开发板串口号
-python -m esptool --chip esp32s3 -p COMx -b 460800 write_flash "@flash_args"
+python -m esptool --chip esp32s3 -p COMx -b 460800 --before default_reset --after hard_reset write_flash "@flash_args"
+```
+
+当前已验证的 Zectrix 4.2" 包是 `v2.2.3_zectrix-s3-epaper-4.2.zip`。
+压缩包里也包含 `merged-binary.bin`，可以用单文件方式烧录：
+
+```powershell
+python -m esptool --chip esp32s3 -p COMx -b 460800 --before default_reset --after hard_reset write_flash 0x0 merged-binary.bin
 ```
 
 #### 方案 B：从源码编译
