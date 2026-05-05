@@ -18,7 +18,15 @@ import { CodexSessionManager } from "./codex-session.mjs";
 import { transcribePcm16Mono } from "./stt.mjs";
 import { createTodoAssistant } from "./todo-assistant.mjs";
 import { createTodoService, VALID_VOICE_MODES } from "./todo-service.mjs";
-import { createVoiceTranslationService } from "./translation-service.mjs";
+import {
+  VOICE_TRANSLATION_TARGET_LANGUAGES,
+  createVoiceTranslationService,
+  getVoiceTranslationSendModeLabel,
+  getVoiceTranslationTargetLabel,
+  isVoiceTranslationSendModeMultiline,
+  normalizeVoiceTranslationSendMode,
+  normalizeVoiceTranslationTargetLanguage
+} from "./translation-service.mjs";
 import { injectText } from "./text-injector.mjs";
 
 const config = loadConfig();
@@ -97,13 +105,31 @@ function getTargetCwd(sendTarget) {
   return sendTarget === "claude_code" ? config.claudeCwd : config.codexCwd;
 }
 
+function getVoiceTranslationSendMode() {
+  return normalizeVoiceTranslationSendMode(
+    config.voiceTranslationSendMode,
+    config.voiceTranslationSendBilingual === true
+  );
+}
+
+function getVoiceTranslationTargetLanguage() {
+  return normalizeVoiceTranslationTargetLanguage(config.voiceTranslationTargetLanguage);
+}
+
 function emitServerReady(ws) {
+  const sendMode = getVoiceTranslationSendMode();
+  const targetLanguage = getVoiceTranslationTargetLanguage();
   sendJson(ws, {
     type: "server_ready",
     textInjectionMode: config.textInjectionMode,
     transcriptDeliveryMode: config.transcriptDeliveryMode,
     sendTarget: config.sendTarget,
     voiceTranslationEnabled: voiceTranslation.isEnabled(),
+    voiceTranslationTargetLanguage: targetLanguage,
+    voiceTranslationTargetLabel: getVoiceTranslationTargetLabel(targetLanguage),
+    voiceTranslationSendMode: sendMode,
+    voiceTranslationSendModeLabel: getVoiceTranslationSendModeLabel(sendMode),
+    voiceTranslationSendBilingual: isVoiceTranslationSendModeMultiline(sendMode),
     mode: getVoiceMode(ws.clientState),
     authRequired: Boolean(config.lanSharedSecret)
   });
@@ -330,8 +356,10 @@ function createClientState() {
     segmentActive: false,
     chunks: [],
     pendingSegments: [],
+    pendingTranslatedSegments: [],
     pendingOriginalSegments: [],
     pendingTranscript: "",
+    pendingTranslatedTranscript: "",
     pendingOriginalTranscript: "",
     pendingTransform: "none",
     pendingTodoIntent: null,
@@ -342,12 +370,21 @@ function createClientState() {
 
 function joinPendingSegments(segments) {
   const normalized = segments
-    .map((segment) => String(segment || "").replace(/\s+/g, " ").trim())
+    .map((segment) =>
+      String(segment || "")
+        .replace(/[ \t\f\v]+/g, " ")
+        .replace(/\r?\n[ \t]*/g, "\n")
+        .trim()
+    )
     .filter(Boolean);
 
   return normalized.reduce((combined, segment) => {
     if (!combined) {
       return segment;
+    }
+
+    if (combined.includes("\n") || segment.includes("\n")) {
+      return `${combined}\n\n${segment}`;
     }
 
     const endsWithPunctuation = /[。！？!?；;：:，,、.]$/.test(combined);
@@ -358,6 +395,7 @@ function joinPendingSegments(segments) {
 
 function updatePendingTranscript(state) {
   state.pendingTranscript = joinPendingSegments(state.pendingSegments);
+  state.pendingTranslatedTranscript = joinPendingSegments(state.pendingTranslatedSegments);
   state.pendingOriginalTranscript = joinPendingSegments(state.pendingOriginalSegments);
   return state.pendingTranscript;
 }
@@ -656,6 +694,7 @@ async function finalizeSegment(ws, state) {
       type: "status",
       status: hadPendingTranscript ? "empty_segment" : "transcript_empty",
       text: state.pendingTranscript,
+      translatedText: state.pendingTranslatedTranscript,
       originalText: state.pendingOriginalTranscript,
       transform: state.pendingTransform
     });
@@ -671,6 +710,8 @@ async function finalizeSegment(ws, state) {
     });
     state.pendingTranscript = "";
     state.pendingSegments = [];
+    state.pendingTranslatedTranscript = "";
+    state.pendingTranslatedSegments = [];
     state.pendingOriginalTranscript = "";
     state.pendingOriginalSegments = [];
     state.pendingTransform = "none";
@@ -681,16 +722,25 @@ async function finalizeSegment(ws, state) {
   const translationResult = await translateVoiceTranscript(ws, transcript);
   const translatedTranscript = translationResult.text;
   const transcriptTransform = translationResult.transform;
+  const sendTranscript = formatVoiceSendText({
+    originalText: transcript,
+    translatedText: translatedTranscript,
+    translations: translationResult.translations,
+    transform: transcriptTransform
+  });
 
   if (config.transcriptDeliveryMode === "confirm_on_device") {
-    state.pendingSegments.push(translatedTranscript);
+    state.pendingSegments.push(sendTranscript);
+    state.pendingTranslatedSegments.push(translatedTranscript);
     state.pendingOriginalSegments.push(transcript);
     state.pendingTransform = transcriptTransform;
     const pendingTranscript = updatePendingTranscript(state);
     sendJson(ws, {
       type: "transcript_final",
       text: pendingTranscript,
+      translatedText: state.pendingTranslatedTranscript,
       originalText: state.pendingOriginalTranscript,
+      targetLanguage: translationResult.targetLanguage,
       transform: state.pendingTransform,
       latencyMs: Date.now() - startedAt,
       requiresAction: true
@@ -699,7 +749,9 @@ async function finalizeSegment(ws, state) {
       type: "status",
       status: "awaiting_action",
       text: pendingTranscript,
+      translatedText: state.pendingTranslatedTranscript,
       originalText: state.pendingOriginalTranscript,
+      targetLanguage: translationResult.targetLanguage,
       transform: state.pendingTransform
     });
     return;
@@ -707,8 +759,11 @@ async function finalizeSegment(ws, state) {
 
   sendJson(ws, {
     type: "transcript_final",
-    text: translatedTranscript,
+    text: sendTranscript,
+    translatedText: translatedTranscript,
     originalText: transcript,
+    targetLanguage: translationResult.targetLanguage,
+    translations: translationResult.translations,
     transform: transcriptTransform,
     latencyMs: Date.now() - startedAt,
     requiresAction: false
@@ -722,11 +777,14 @@ async function finalizeSegment(ws, state) {
     sendJson(ws, {
       type: "status",
       status: "typed",
-      text: translatedTranscript,
+      text: sendTranscript,
+      translatedText: translatedTranscript,
       originalText: transcript,
+      targetLanguage: translationResult.targetLanguage,
+      translations: translationResult.translations,
       transform: transcriptTransform
     });
-    launchCodexPrompt(translatedTranscript);
+    launchCodexPrompt(sendTranscript);
     return;
   }
 
@@ -738,29 +796,42 @@ async function finalizeSegment(ws, state) {
     sendJson(ws, {
       type: "status",
       status: "typed",
-      text: translatedTranscript,
+      text: sendTranscript,
+      translatedText: translatedTranscript,
       originalText: transcript,
+      targetLanguage: translationResult.targetLanguage,
+      translations: translationResult.translations,
       transform: transcriptTransform
     });
-    launchClaudePrompt(translatedTranscript);
+    launchClaudePrompt(sendTranscript);
     return;
   }
 
-  await dispatchPrompt(translatedTranscript);
+  await dispatchPrompt(sendTranscript);
   state.pendingTranscript = "";
   sendJson(ws, {
     type: "status",
     status: "typed",
-    text: translatedTranscript,
+    text: sendTranscript,
+    translatedText: translatedTranscript,
     originalText: transcript,
+    targetLanguage: translationResult.targetLanguage,
+    translations: translationResult.translations,
     transform: transcriptTransform
   });
 }
 
 function emitVoiceTranslationState(ws) {
+  const sendMode = getVoiceTranslationSendMode();
+  const targetLanguage = getVoiceTranslationTargetLanguage();
   sendJson(ws, {
     type: "voice_translation_state",
-    enabled: voiceTranslation.isEnabled()
+    enabled: voiceTranslation.isEnabled(),
+    targetLanguage,
+    targetLabel: getVoiceTranslationTargetLabel(targetLanguage),
+    sendMode,
+    sendModeLabel: getVoiceTranslationSendModeLabel(sendMode),
+    sendBilingual: isVoiceTranslationSendModeMultiline(sendMode)
   });
 }
 
@@ -786,6 +857,81 @@ function applyVoiceTranslationEnabled(enabled, { persist = false } = {}) {
   }
 }
 
+function applyVoiceTranslationSendBilingual(enabled, { persist = false } = {}) {
+  config.voiceTranslationSendBilingual = Boolean(enabled);
+  config.voiceTranslationSendMode = enabled ? "bilingual" : "target";
+
+  if (persist) {
+    writeUserConfigValues({
+      VOICE_TRANSLATION_SEND_MODE: config.voiceTranslationSendMode,
+      VOICE_TRANSLATION_SEND_BILINGUAL: config.voiceTranslationSendBilingual ? "1" : null
+    });
+  }
+
+  broadcastServerReady();
+  for (const client of wss.clients) {
+    if (client.readyState === WebSocket.OPEN && client.clientState?.authenticated) {
+      emitVoiceTranslationState(client);
+    }
+  }
+}
+
+function applyVoiceTranslationTargetLanguage(language, { persist = false } = {}) {
+  config.voiceTranslationTargetLanguage = normalizeVoiceTranslationTargetLanguage(language);
+  voiceTranslation = createVoiceTranslationService(config);
+
+  if (persist) {
+    writeUserConfigValues({
+      VOICE_TRANSLATION_TARGET_LANGUAGE: config.voiceTranslationTargetLanguage
+    });
+  }
+
+  broadcastServerReady();
+  for (const client of wss.clients) {
+    if (client.readyState === WebSocket.OPEN && client.clientState?.authenticated) {
+      emitVoiceTranslationState(client);
+    }
+  }
+}
+
+function applyVoiceTranslationSendMode(sendMode, { persist = false } = {}) {
+  config.voiceTranslationSendMode = normalizeVoiceTranslationSendMode(
+    sendMode,
+    config.voiceTranslationSendBilingual === true
+  );
+  config.voiceTranslationSendBilingual = isVoiceTranslationSendModeMultiline(
+    config.voiceTranslationSendMode
+  );
+
+  if (persist) {
+    writeUserConfigValues({
+      VOICE_TRANSLATION_SEND_MODE: config.voiceTranslationSendMode,
+      VOICE_TRANSLATION_SEND_BILINGUAL: config.voiceTranslationSendBilingual ? "1" : null
+    });
+  }
+
+  broadcastServerReady();
+  for (const client of wss.clients) {
+    if (client.readyState === WebSocket.OPEN && client.clientState?.authenticated) {
+      emitVoiceTranslationState(client);
+    }
+  }
+}
+
+function getVoiceTranslationRequestLanguages() {
+  const targetLanguage = getVoiceTranslationTargetLanguage();
+  const sendMode = getVoiceTranslationSendMode();
+  const languages = new Set([targetLanguage]);
+  if (sendMode === "zh_en") {
+    languages.add("english");
+  } else if (sendMode === "all") {
+    for (const language of VOICE_TRANSLATION_TARGET_LANGUAGES) {
+      languages.add(language);
+    }
+  }
+  return [...languages];
+}
+
 async function translateVoiceTranscript(ws, transcript) {
   if (!voiceTranslation.isEnabled()) {
     return { text: transcript, transform: "none" };
@@ -793,18 +939,70 @@ async function translateVoiceTranscript(ws, transcript) {
 
   sendJson(ws, { type: "status", status: "translating", text: transcript });
   try {
-    const translated = await voiceTranslation.translate(transcript);
+    const targetLanguage = getVoiceTranslationTargetLanguage();
+    const requestLanguages = getVoiceTranslationRequestLanguages();
+    const translations = {};
+    await Promise.all(
+      requestLanguages.map(async (language) => {
+        translations[language] = await voiceTranslation.translate(transcript, {
+          targetLanguage: language
+        });
+      })
+    );
+    const translated = translations[targetLanguage] || translations.english || transcript;
     log("voice translation", {
       from: transcript.slice(0, 80),
+      targetLanguage,
+      sendMode: getVoiceTranslationSendMode(),
       to: translated.slice(0, 80)
     });
-    return { text: translated, transform: "translation" };
+    return {
+      text: translated,
+      translations,
+      targetLanguage,
+      transform: "translation"
+    };
   } catch (error) {
     const warning = error instanceof Error ? error.message : String(error);
     log("voice translation error", warning);
     sendJson(ws, { type: "warning", warning: `Translation failed: ${warning}` });
     return { text: transcript, transform: "none" };
   }
+}
+
+function joinUniqueVoiceLines(lines) {
+  const normalized = [];
+  for (const line of lines) {
+    const text = String(line || "").trim();
+    if (!text || normalized.includes(text)) {
+      continue;
+    }
+    normalized.push(text);
+  }
+  return normalized.join("\n");
+}
+
+function formatVoiceSendText({ originalText, translatedText, translations = {}, transform }) {
+  const original = String(originalText || "").trim();
+  const translated = String(translatedText || "").trim();
+  if (transform === "translation" && original) {
+    const sendMode = getVoiceTranslationSendMode();
+    if (sendMode === "all") {
+      return joinUniqueVoiceLines([
+        original,
+        translations.english,
+        translations.korean,
+        translations.japanese
+      ]);
+    }
+    if (sendMode === "zh_en") {
+      return joinUniqueVoiceLines([original, translations.english || translated]);
+    }
+    if (sendMode === "bilingual") {
+      return joinUniqueVoiceLines([original, translated]);
+    }
+  }
+  return translated || original;
 }
 
 async function dispatchPrompt(prompt) {
@@ -859,6 +1057,9 @@ async function sendPendingTranscript(ws, state) {
 
   state.pendingTranscript = "";
   state.pendingSegments = [];
+  const translatedTranscript = String(state.pendingTranslatedTranscript || "").trim();
+  state.pendingTranslatedTranscript = "";
+  state.pendingTranslatedSegments = [];
   const originalTranscript = String(state.pendingOriginalTranscript || "").trim();
   const transform = String(state.pendingTransform || "none").trim() || "none";
   state.pendingOriginalTranscript = "";
@@ -873,6 +1074,7 @@ async function sendPendingTranscript(ws, state) {
     type: "status",
     status: "typed",
     text: transcript,
+    translatedText: translatedTranscript,
     originalText: originalTranscript,
     transform
   });
@@ -896,6 +1098,7 @@ function undoPendingTranscript(ws, state) {
   }
 
   state.pendingSegments.pop();
+  state.pendingTranslatedSegments.pop();
   state.pendingOriginalSegments.pop();
   const transcript = updatePendingTranscript(state);
   if (transcript) {
@@ -903,6 +1106,7 @@ function undoPendingTranscript(ws, state) {
       type: "status",
       status: "awaiting_action",
       text: transcript,
+      translatedText: state.pendingTranslatedTranscript,
       originalText: state.pendingOriginalTranscript,
       transform: state.pendingTransform
     });
@@ -910,6 +1114,7 @@ function undoPendingTranscript(ws, state) {
   }
 
   state.pendingOriginalTranscript = "";
+  state.pendingTranslatedTranscript = "";
   state.pendingTransform = "none";
   sendJson(ws, { type: "transcript_cleared" });
   sendJson(ws, { type: "status", status: "undo_ok" });
@@ -1050,6 +1255,41 @@ wss.on("connection", (ws, req) => {
             sendJson(ws, { type: "warning", warning });
             emitVoiceTranslationState(ws);
           }
+          break;
+        }
+        case "set_voice_translation_send_bilingual": {
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
+          const requested = message.enabled;
+          const nextEnabled =
+            requested === "toggle" ? !config.voiceTranslationSendBilingual : requested === true;
+          applyVoiceTranslationSendBilingual(nextEnabled, { persist: true });
+          log("set_voice_translation_send_bilingual", state.deviceId, nextEnabled);
+          break;
+        }
+        case "set_voice_translation_target_language": {
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
+          const language = normalizeVoiceTranslationTargetLanguage(message.language);
+          applyVoiceTranslationTargetLanguage(language, { persist: true });
+          log("set_voice_translation_target_language", state.deviceId, language);
+          break;
+        }
+        case "set_voice_translation_send_mode": {
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
+          const sendMode = normalizeVoiceTranslationSendMode(
+            message.mode,
+            config.voiceTranslationSendBilingual === true
+          );
+          applyVoiceTranslationSendMode(sendMode, { persist: true });
+          log("set_voice_translation_send_mode", state.deviceId, sendMode);
           break;
         }
         case "set_cli_cwd": {

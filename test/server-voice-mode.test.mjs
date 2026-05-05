@@ -345,6 +345,195 @@ test("server translates live voice transcript before device confirmation", async
   assert.equal(translationRequest.body.messages[1].content, "帮我把这个功能做得更稳一点");
 });
 
+test("server can send bilingual Chinese and English translation text", async (t) => {
+  const port = await getFreePort();
+  const appDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-translation-bilingual-"));
+  const translationServer = createHttpServer((req, res) => {
+    req.resume();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: "Make this feature more robust."
+          }
+        }
+      ]
+    }));
+  });
+
+  await new Promise((resolve, reject) => {
+    translationServer.once("error", reject);
+    translationServer.listen(0, "127.0.0.1", resolve);
+  });
+  const translationPort = translationServer.address().port;
+
+  const server = spawn(process.execPath, ["src/server.mjs"], {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      APPDATA: appDataRoot,
+      LAN_SHARED_SECRET: "",
+      LAN_DISCOVERY_ENABLED: "0",
+      LAN_VOICE_BIND: "127.0.0.1",
+      LAN_VOICE_PORT: String(port),
+      MOCK_TRANSCRIPT: "帮我把这个功能做得更稳一点",
+      SEND_TARGET: "text_injector",
+      DRY_RUN_TEXT_INJECTION: "1",
+      TRANSCRIPT_DELIVERY_MODE: "confirm_on_device",
+      VOICE_TRANSLATION_ENABLED: "1",
+      VOICE_TRANSLATION_SEND_BILINGUAL: "1",
+      VOICE_TRANSLATION_API_KEY: "translation-key",
+      VOICE_TRANSLATION_BASE_URL: `http://127.0.0.1:${translationPort}`,
+      VOICE_TRANSLATION_MODEL: "deepseek-chat"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  t.after(async () => {
+    await stopServer(server);
+    await new Promise((resolve) => translationServer.close(resolve));
+    fs.rmSync(appDataRoot, { recursive: true, force: true });
+  });
+
+  const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
+  const messages = createMessageCollector(ws);
+  t.after(() => closeWebSocket(ws));
+
+  ws.send(JSON.stringify({ type: "hello", deviceId: "translation-bilingual-board" }));
+  await messages.waitFor((message) => message.type === "hello_ack");
+  await messages.waitFor(
+    (message) =>
+      message.type === "server_ready" &&
+      message.voiceTranslationEnabled === true &&
+      message.voiceTranslationSendBilingual === true
+  );
+
+  ws.send(JSON.stringify({ type: "ptt_start", ts: Date.now() }));
+  ws.send(Buffer.from([0x00, 0x00]), { binary: true });
+  ws.send(JSON.stringify({ type: "ptt_stop", ts: Date.now() }));
+
+  const expected = "帮我把这个功能做得更稳一点\nMake this feature more robust.";
+  const finalMessage = await messages.waitFor((message) => message.type === "transcript_final");
+  assert.equal(finalMessage.text, expected);
+  assert.equal(finalMessage.translatedText, "Make this feature more robust.");
+  assert.equal(finalMessage.originalText, "帮我把这个功能做得更稳一点");
+  assert.equal(finalMessage.transform, "translation");
+
+  ws.send(JSON.stringify({ type: "action_send" }));
+  const typed = await messages.waitFor((message) => message.type === "status" && message.status === "typed");
+  assert.equal(typed.text, expected);
+  assert.equal(typed.translatedText, "Make this feature more robust.");
+});
+
+test("server can send Chinese, English, Korean, and Japanese together", async (t) => {
+  const port = await getFreePort();
+  const appDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-translation-all-"));
+  const translationRequests = [];
+  const translations = {
+    English: "Make this feature more robust.",
+    Korean: "이 기능을 더 안정적으로 만들어 주세요.",
+    Japanese: "この機能をもっと安定させてください。"
+  };
+  const translationServer = createHttpServer((req, res) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      const parsed = JSON.parse(body);
+      const prompt = parsed.messages[0].content;
+      const language = Object.keys(translations).find((candidate) =>
+        prompt.includes(`Target language: ${candidate}`)
+      );
+      translationRequests.push(language);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: translations[language]
+            }
+          }
+        ]
+      }));
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    translationServer.once("error", reject);
+    translationServer.listen(0, "127.0.0.1", resolve);
+  });
+  const translationPort = translationServer.address().port;
+
+  const server = spawn(process.execPath, ["src/server.mjs"], {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      APPDATA: appDataRoot,
+      LAN_SHARED_SECRET: "",
+      LAN_DISCOVERY_ENABLED: "0",
+      LAN_VOICE_BIND: "127.0.0.1",
+      LAN_VOICE_PORT: String(port),
+      MOCK_TRANSCRIPT: "帮我把这个功能做得更稳一点",
+      SEND_TARGET: "text_injector",
+      DRY_RUN_TEXT_INJECTION: "1",
+      TRANSCRIPT_DELIVERY_MODE: "confirm_on_device",
+      VOICE_TRANSLATION_ENABLED: "1",
+      VOICE_TRANSLATION_TARGET_LANGUAGE: "korean",
+      VOICE_TRANSLATION_SEND_MODE: "all",
+      VOICE_TRANSLATION_API_KEY: "translation-key",
+      VOICE_TRANSLATION_BASE_URL: `http://127.0.0.1:${translationPort}`,
+      VOICE_TRANSLATION_MODEL: "deepseek-chat"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  t.after(async () => {
+    await stopServer(server);
+    await new Promise((resolve) => translationServer.close(resolve));
+    fs.rmSync(appDataRoot, { recursive: true, force: true });
+  });
+
+  const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
+  const messages = createMessageCollector(ws);
+  t.after(() => closeWebSocket(ws));
+
+  ws.send(JSON.stringify({ type: "hello", deviceId: "translation-all-board" }));
+  await messages.waitFor((message) => message.type === "hello_ack");
+  await messages.waitFor(
+    (message) =>
+      message.type === "server_ready" &&
+      message.voiceTranslationEnabled === true &&
+      message.voiceTranslationTargetLanguage === "korean" &&
+      message.voiceTranslationSendMode === "all" &&
+      message.voiceTranslationSendBilingual === true
+  );
+
+  ws.send(JSON.stringify({ type: "ptt_start", ts: Date.now() }));
+  ws.send(Buffer.from([0x00, 0x00]), { binary: true });
+  ws.send(JSON.stringify({ type: "ptt_stop", ts: Date.now() }));
+
+  const expected = [
+    "帮我把这个功能做得更稳一点",
+    "Make this feature more robust.",
+    "이 기능을 더 안정적으로 만들어 주세요.",
+    "この機能をもっと安定させてください。"
+  ].join("\n");
+  const finalMessage = await messages.waitFor((message) => message.type === "transcript_final");
+  assert.equal(finalMessage.text, expected);
+  assert.equal(finalMessage.translatedText, "이 기능을 더 안정적으로 만들어 주세요.");
+  assert.equal(finalMessage.originalText, "帮我把这个功能做得更稳一点");
+  assert.equal(finalMessage.transform, "translation");
+  assert.deepEqual(new Set(translationRequests), new Set(["English", "Korean", "Japanese"]));
+
+  ws.send(JSON.stringify({ type: "action_send" }));
+  const typed = await messages.waitFor((message) => message.type === "status" && message.status === "typed");
+  assert.equal(typed.text, expected);
+  assert.equal(typed.translatedText, "이 기능을 더 안정적으로 만들어 주세요.");
+});
+
 test("server falls back to original transcript when voice translation fails", async (t) => {
   const port = await getFreePort();
   const appDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-translation-fallback-"));

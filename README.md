@@ -12,17 +12,17 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 
 > Now includes a Windows desktop app with tray mode, start-on-login, a local settings UI, and packaged installers, so non-technical users can use it without touching a terminal.
 >
-> Latest Zectrix 4.2" firmware package: `v2.2.4_zectrix-s3-epaper-4.2.zip`, with long-outage reconnect fixes, offline deep sleep support, and Chinese-to-English voice translation confirmation.
+> Latest Zectrix 4.2" firmware package: `v2.2.6_zectrix-s3-epaper-4.2.zip`, with long-outage reconnect fixes, offline deep sleep support, Chinese-to-English/Korean/Japanese voice translation confirmation, and selectable target / Chinese+English / all-language send modes.
 
 `vibecoding-voice` is a two-part open-source project:
 
-1. **Host bridge** (this repo) — a Node.js server that runs on your PC. It receives push-to-talk audio from an ESP32 device over WebSocket, transcribes it, can optionally translate Chinese speech into idiomatic English through DeepSeek, and either injects the text into the active Windows input field or drives a Codex / Claude Code CLI session.
-2. **ESP32 firmware** (`firmware/`) — runs on supported e-paper boards such as Zectrix S3 and Waveshare S3, and is intended to grow into a fully DIY ESP32-S3 hardware path as well. It handles Wi-Fi, push-to-talk recording, bilingual device-side confirmation UI, resilient LAN reconnects, offline low-power sleep, and renders live CLI output on the e-ink screen.
+1. **Host bridge** (this repo) — a Node.js server that runs on your PC. It receives push-to-talk audio from an ESP32 device over WebSocket, transcribes it, can optionally translate Chinese speech into English, Korean, or Japanese through DeepSeek, and either injects the text into the active Windows input field or drives a Codex / Claude Code CLI session.
+2. **ESP32 firmware** (`firmware/`) — runs on supported e-paper boards such as Zectrix S3 and Waveshare S3, and is intended to grow into a fully DIY ESP32-S3 hardware path as well. It handles Wi-Fi, push-to-talk recording, multilingual device-side confirmation UI, resilient LAN reconnects, offline low-power sleep, and renders live CLI output on the e-ink screen.
 
 ### Why this project is useful
 
 - Talk to Codex, Claude Code, or any active Windows input box through a dedicated ESP32 push-to-talk device
-- Speak Chinese and send polished English, with the board showing the Chinese original above the English translation before you confirm
+- Speak Chinese and send polished English, Korean, Japanese, or a combined Chinese + English/Korean/Japanese block, with the board showing the Chinese original above the selected translation before you confirm
 - Choose between a developer-friendly CLI flow and a normal Windows desktop app for non-technical users
 - Keep the host bridge running in the background with tray controls, mode switching, and saved local settings
 - Project AI progress, transcript confirmation, and device pairing state back onto the e-paper screen
@@ -77,7 +77,7 @@ Both boards use ESP32-S3 with onboard MEMS mic and push-button.
 - Local desktop settings UI with grouped tabs for mode, speech provider, workspace, and advanced options
 - Managed `codex exec --json` session bridge
 - Managed `claude -p --output-format stream-json` session bridge
-- Optional Chinese-to-idiomatic-English voice translation through DeepSeek, configurable in the desktop app and confirmed on the board as `Chinese` / `English` before send
+- Optional Chinese-to-English/Korean/Japanese voice translation through DeepSeek, configurable in the desktop app and confirmed on the board as `Chinese` / selected target language before send, with send modes for target-only, Chinese + target, Chinese + English, or Chinese + English + Korean + Japanese
 - **Todo List page** with local persistence and page-based voice CRUD for simple plans
 - Live CLI status, prompt/reply summary, log tail, and quota snapshot projected to e-paper
 - **Multi-segment accumulation** — hold BOOT to keep appending speech, UP to send, DN to undo the last segment
@@ -181,11 +181,15 @@ VOICE_TRANSLATION_ENABLED=1
 VOICE_TRANSLATION_API_KEY=your-deepseek-api-key
 VOICE_TRANSLATION_MODEL=deepseek-chat
 VOICE_TRANSLATION_BASE_URL=https://api.deepseek.com
-VOICE_TRANSLATION_PROMPT=Translate the user's Chinese voice transcript into natural, idiomatic English. Return only the English translation.
+VOICE_TRANSLATION_PROMPT=Translate the user's Chinese voice transcript into the selected target language. Return only the translated text.
+VOICE_TRANSLATION_TARGET_LANGUAGE=english
+VOICE_TRANSLATION_SEND_MODE=target
+VOICE_TRANSLATION_SEND_BILINGUAL=0
 ```
 
-On the board, use the safer menu path: switch to the Live page, hold `UP`, select `English: On` / `English: Off` with `UP` / `DN`, then press `BOOT` to confirm. There is no single-click shortcut for this toggle, so accidental mode changes are less likely.
-When translation is enabled, the board's confirmation screen shows `Chinese` in the upper prompt area and the translated `English` text in the lower reply area; pressing `UP` sends the English text.
+On the board, use the safer menu path: switch to the Live page, hold `UP`, select `Translate: On` / `Translate: Off` with `UP` / `DN`, then press `BOOT` to confirm. There is no single-click shortcut for this toggle, so accidental mode changes are less likely.
+Use the adjacent `Lang: English/Korean/Japanese` and `Send: Target/CN+Target/CN+EN/All` menu items, or the desktop Translation tab, to choose the board display language and whether `UP` sends only the target translation, Chinese + target, Chinese + English, or a four-line Chinese + English + Korean + Japanese result without prefixes.
+When translation is enabled, the board's confirmation screen shows `Chinese` in the upper prompt area and the selected translated language in the lower reply area.
 
 If you're using Volcengine Ark and are not sure which recording recognition model / resource to use, start here:
 [Volcengine Ark Recording Recognition](https://console.volcengine.com/ark/region:ark+cn-beijing/tts/recordingRecognition)
@@ -436,7 +440,10 @@ Screen footer shows `BOOT Add · UP Send · DN Undo` when a transcript is pendin
 | `VOICE_TRANSLATION_MODEL` | `deepseek-chat` | DeepSeek chat model |
 | `VOICE_TRANSLATION_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible DeepSeek base URL |
 | `VOICE_TRANSLATION_TIMEOUT_MS` | `12000` | Translation request timeout |
-| `VOICE_TRANSLATION_PROMPT` | built-in | Prompt used to translate Chinese speech into idiomatic English |
+| `VOICE_TRANSLATION_PROMPT` | built-in | Prompt used to translate Chinese speech into the selected target language |
+| `VOICE_TRANSLATION_TARGET_LANGUAGE` | `english` | Board display target: `english`, `korean`, or `japanese` |
+| `VOICE_TRANSLATION_SEND_MODE` | `target` | Send mode: `target`, `bilingual` (Chinese + target), `zh_en` (Chinese + English), or `all` (Chinese + English + Korean + Japanese) |
+| `VOICE_TRANSLATION_SEND_BILINGUAL` | `0` | Legacy compatibility flag; `1` maps to `VOICE_TRANSLATION_SEND_MODE=bilingual` when no explicit send mode is set |
 
 #### CLI Session
 
@@ -498,17 +505,17 @@ node scripts/console.mjs
 
 > 现在已经带有 Windows 桌面版：支持托盘、自启动、本地设置界面和安装包，普通用户不用碰命令行也能直接用。
 >
-> 最新 Zectrix 4.2" 固件包：`v2.2.4_zectrix-s3-epaper-4.2.zip`，包含长时间断线后的自动重连修复、离线低功耗休眠，以及中文语音转英文的板端双语确认。
+> 最新 Zectrix 4.2" 固件包：`v2.2.6_zectrix-s3-epaper-4.2.zip`，包含长时间断线后的自动重连修复、离线低功耗休眠、中文语音转英语/韩语/日语的板端确认，以及只发目标语言 / 中英 / 中英韩日发送模式切换。
 
 `vibecoding-voice` 是一个由两部分组成的开源项目：
 
-1. **主机桥接服务**（本仓库）— 运行在你电脑上的 Node.js 服务器。它通过 WebSocket 从 ESP32 设备接收按键说话（PTT）音频，调用语音识别将其转写，也可以通过 DeepSeek 把中文语音翻译成地道英文，然后注入 Windows 当前输入框，或者驱动 Codex / Claude Code CLI 会话。
-2. **ESP32 固件**（`firmware/` 目录）— 可运行在 Zectrix S3、Waveshare S3 这类已支持的电子墨水屏开发板上，后续也会补一个完全 DIY 的 ESP32-S3 硬件方案。负责 Wi-Fi 连接、按键录音、设备端双语确认界面、可靠的局域网重连、离线低功耗休眠，并将 CLI 实时输出渲染到电子墨水屏上。
+1. **主机桥接服务**（本仓库）— 运行在你电脑上的 Node.js 服务器。它通过 WebSocket 从 ESP32 设备接收按键说话（PTT）音频，调用语音识别将其转写，也可以通过 DeepSeek 把中文语音翻译成英语、韩语或日语，然后注入 Windows 当前输入框，或者驱动 Codex / Claude Code CLI 会话。
+2. **ESP32 固件**（`firmware/` 目录）— 可运行在 Zectrix S3、Waveshare S3 这类已支持的电子墨水屏开发板上，后续也会补一个完全 DIY 的 ESP32-S3 硬件方案。负责 Wi-Fi 连接、按键录音、设备端多语言确认界面、可靠的局域网重连、离线低功耗休眠，并将 CLI 实时输出渲染到电子墨水屏上。
 
 ### 这个项目现在能解决什么问题
 
 - 用一个独立的 ESP32 按键语音设备，把指令发给 Codex、Claude Code，或者直接发到 Windows 当前输入框
-- 可以中文说、英文发：设备确认页上半区显示中文原文，下半区显示英文译文，确认后发送英文
+- 可以中文说，发送英语、韩语、日语，或者一次发送中文 + 英语/韩语/日语；设备确认页上半区显示中文原文，下半区显示选中的译文
 - 同时兼容开发者工作流和普通用户工作流：既可以用 CLI，也可以用桌面版
 - 主机桥接服务可以常驻后台，通过托盘、模式切换和本地设置页来管理
 - 设备端不仅能说话输入，还能在电子墨水屏上看到 AI 执行进度、转写确认和连接状态
@@ -562,7 +569,7 @@ node scripts/console.mjs
 - 带本地设置界面：按“基础 / 识别 / 工作区 / 高级”分组管理配置
 - 托管 `codex exec --json` 会话
 - 托管 `claude -p --output-format stream-json` 会话
-- 可选中文转地道英文翻译：中文语音先经 DeepSeek 翻译，桌面端可配置提示词，板子上以 `Chinese` / `English` 双区确认后再发送
+- 可选中文转英语/韩语/日语翻译：中文语音先经 DeepSeek 翻译，桌面端可配置提示词，板子上以 `Chinese` / 目标语言双区确认，可切换只发目标语言、中 + 目标、中英，或中英韩日一起发送
 - **Todo List 页面**：本地持久化待办，按当前页面决定语音进入 Todo 还是 Live coding
 - 将 CLI 状态、提示/回复摘要、日志末行、配额快照实时投影到电子墨水屏
 - **多段语音累积** — 按住 BOOT 持续追加语音片段，UP 发送，DN 撤销上一段
@@ -659,18 +666,22 @@ TRANSCRIPT_DELIVERY_MODE=confirm_on_device
 LAN_SHARED_SECRET=替换为一个足够长的随机密钥
 ```
 
-中文转地道英文翻译可以在桌面端“翻译”页开启，也可以用环境变量配置：
+中文翻译可以在桌面端“翻译”页开启，也可以用环境变量配置：
 
 ```env
 VOICE_TRANSLATION_ENABLED=1
 VOICE_TRANSLATION_API_KEY=你的-deepseek-api-key
 VOICE_TRANSLATION_MODEL=deepseek-chat
 VOICE_TRANSLATION_BASE_URL=https://api.deepseek.com
-VOICE_TRANSLATION_PROMPT=Translate the user's Chinese voice transcript into natural, idiomatic English. Return only the English translation.
+VOICE_TRANSLATION_PROMPT=Translate the user's Chinese voice transcript into the selected target language. Return only the translated text.
+VOICE_TRANSLATION_TARGET_LANGUAGE=english
+VOICE_TRANSLATION_SEND_MODE=target
+VOICE_TRANSLATION_SEND_BILINGUAL=0
 ```
 
-板子上也可以切换：先到 Live 页面，长按 `UP` 打开菜单，用 `UP` / `DN` 选中 `English: On` / `English: Off`，再按 `BOOT` 确认。这个开关没有做成单击快捷键，避免录音或翻页时误触。
-翻译开启后，板子的确认页上半区标题为 `Chinese`，显示你刚说的中文原文；下半区标题为 `English`，显示将要发送的英文译文。按 `UP` 发送的是英文。
+板子上也可以切换：先到 Live 页面，长按 `UP` 打开菜单，用 `UP` / `DN` 选中 `Translate: On` / `Translate: Off`，再按 `BOOT` 确认。这个开关没有做成单击快捷键，避免录音或翻页时误触。
+旁边的 `Lang: English/Korean/Japanese` 和 `Send: Target/CN+Target/CN+EN/All` 菜单项，或桌面端“翻译”页，可以控制板子下半区显示哪种译文，以及按 `UP` 时只发送目标语言、中 + 目标、中英，还是发送“不带前缀的四行文本”：中文、英语、韩语、日语。
+翻译开启后，板子的确认页上半区标题为 `Chinese`，显示你刚说的中文原文；下半区标题为当前目标语言，显示对应译文。
 
 如果你用的是火山引擎 Ark，但不确定该选哪个录音识别模型或 `VOLCENGINE_RESOURCE_ID`，可以从这里开始：
 [火山引擎 Ark 录音识别页面](https://console.volcengine.com/ark/region:ark+cn-beijing/tts/recordingRecognition)
@@ -913,12 +924,15 @@ LAN_SHARED_SECRET=你的密钥
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `VOICE_TRANSLATION_ENABLED` | `0` | 在 Live 页面发送前，把语音转写结果先翻译成英文 |
+| `VOICE_TRANSLATION_ENABLED` | `0` | 在 Live 页面发送前，把语音转写结果先翻译成目标语言 |
 | `VOICE_TRANSLATION_API_KEY` | — | DeepSeek API Key；未设置时会回退到 `DEEPSEEK_API_KEY` 或 `TODO_INTENT_API_KEY` |
 | `VOICE_TRANSLATION_MODEL` | `deepseek-chat` | DeepSeek chat 模型 |
 | `VOICE_TRANSLATION_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible DeepSeek base URL |
 | `VOICE_TRANSLATION_TIMEOUT_MS` | `12000` | 翻译请求超时时间 |
-| `VOICE_TRANSLATION_PROMPT` | 内置提示词 | 控制“中文语音转地道英文”的翻译风格 |
+| `VOICE_TRANSLATION_PROMPT` | 内置提示词 | 控制“中文语音转目标语言”的翻译风格 |
+| `VOICE_TRANSLATION_TARGET_LANGUAGE` | `english` | 板端显示目标：`english`、`korean` 或 `japanese` |
+| `VOICE_TRANSLATION_SEND_MODE` | `target` | 发送模式：`target`、`bilingual`（中文 + 目标）、`zh_en`（中文 + 英语）、`all`（中文 + 英语 + 韩语 + 日语） |
+| `VOICE_TRANSLATION_SEND_BILINGUAL` | `0` | 兼容旧版本的开关；未显式设置发送模式时，`1` 等价于 `VOICE_TRANSLATION_SEND_MODE=bilingual` |
 
 #### CLI 会话
 

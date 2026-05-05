@@ -19,6 +19,8 @@ const elements = {
   voiceTranslationBaseUrl: document.querySelector("#voice-translation-base-url"),
   voiceTranslationTimeoutMs: document.querySelector("#voice-translation-timeout-ms"),
   voiceTranslationPrompt: document.querySelector("#voice-translation-prompt"),
+  voiceTranslationTargetLanguage: document.querySelector("#voice-translation-target-language"),
+  voiceTranslationSendMode: document.querySelector("#voice-translation-send-mode"),
   openaiApiKey: document.querySelector("#openai-api-key"),
   openaiModel: document.querySelector("#openai-model"),
   volcengineAppKey: document.querySelector("#volcengine-app-key"),
@@ -105,6 +107,29 @@ function windowBehaviorLabel({ closeToTray }) {
   return closeToTray ? "关闭窗口时最小化到托盘" : "关闭窗口后仍保留界面";
 }
 
+function translationTargetLabel(language) {
+  if (language === "korean") {
+    return "韩语";
+  }
+  if (language === "japanese") {
+    return "日语";
+  }
+  return "英语";
+}
+
+function translationSendModeLabel(mode) {
+  if (mode === "all") {
+    return "中文+英韩日";
+  }
+  if (mode === "zh_en") {
+    return "中文+英语";
+  }
+  if (mode === "bilingual") {
+    return "中文+目标语言";
+  }
+  return "只发目标语言";
+}
+
 function statusClass(status) {
   if (status === "running") {
     return "status-running";
@@ -178,9 +203,14 @@ function renderConfigSummary() {
     elements.sttProvider.value === "openai"
       ? `模型：${elements.openaiModel.value || "whisper-1"}`
       : "适合中文语音环境";
-  elements.summaryProviderDetail.textContent = elements.voiceTranslationEnabled.checked
-    ? `${sttDetail} · 翻译开启`
-    : sttDetail;
+  if (elements.voiceTranslationEnabled.checked) {
+    elements.summaryProviderDetail.textContent =
+      `${sttDetail} · 翻译开启 · ` +
+      `目标：${translationTargetLabel(elements.voiceTranslationTargetLanguage.value)} · ` +
+      translationSendModeLabel(elements.voiceTranslationSendMode.value);
+  } else {
+    elements.summaryProviderDetail.textContent = sttDetail;
+  }
   elements.summaryLaunch.textContent = launchLabel({
     autoLaunch: elements.autoLaunch.checked,
     launchToTray: elements.launchToTray.checked
@@ -216,6 +246,8 @@ function collectFormPayload() {
       voiceTranslationBaseUrl: elements.voiceTranslationBaseUrl.value,
       voiceTranslationTimeoutMs: elements.voiceTranslationTimeoutMs.value,
       voiceTranslationPrompt: elements.voiceTranslationPrompt.value,
+      voiceTranslationTargetLanguage: elements.voiceTranslationTargetLanguage.value,
+      voiceTranslationSendMode: elements.voiceTranslationSendMode.value,
       openaiApiKey: elements.openaiApiKey.value,
       openaiModel: elements.openaiModel.value,
       volcengineAppKey: elements.volcengineAppKey.value,
@@ -245,6 +277,8 @@ function fillForm(form, desktopSettingsPath) {
   elements.voiceTranslationBaseUrl.value = form.voiceTranslationBaseUrl || "";
   elements.voiceTranslationTimeoutMs.value = form.voiceTranslationTimeoutMs || "";
   elements.voiceTranslationPrompt.value = form.voiceTranslationPrompt || "";
+  elements.voiceTranslationTargetLanguage.value = form.voiceTranslationTargetLanguage || "english";
+  elements.voiceTranslationSendMode.value = form.voiceTranslationSendMode || "target";
   elements.openaiApiKey.value = form.openaiApiKey || "";
   elements.openaiModel.value = form.openaiModel || "";
   elements.volcengineAppKey.value = form.volcengineAppKey || "";
@@ -461,6 +495,8 @@ elements.sendTarget.addEventListener("change", updateFormAffordances);
 elements.transcriptDeliveryMode.addEventListener("change", renderConfigSummary);
 elements.textInjectionMode.addEventListener("change", renderConfigSummary);
 elements.voiceTranslationEnabled.addEventListener("change", updateFormAffordances);
+elements.voiceTranslationTargetLanguage.addEventListener("change", renderConfigSummary);
+elements.voiceTranslationSendMode.addEventListener("change", renderConfigSummary);
 elements.openaiModel.addEventListener("input", renderConfigSummary);
 elements.autoLaunch.addEventListener("change", renderConfigSummary);
 elements.launchToTray.addEventListener("change", renderConfigSummary);

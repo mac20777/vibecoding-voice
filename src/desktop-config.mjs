@@ -1,6 +1,10 @@
 import { detectConfiguredSttProvider, getConfigIssues } from "./config.mjs";
 import { normalizeDesktopSettings } from "./desktop-settings.mjs";
-import { DEFAULT_VOICE_TRANSLATION_PROMPT } from "./translation-service.mjs";
+import {
+  DEFAULT_VOICE_TRANSLATION_PROMPT,
+  normalizeVoiceTranslationSendMode,
+  normalizeVoiceTranslationTargetLanguage
+} from "./translation-service.mjs";
 
 const VALID_SEND_TARGETS = new Set(["text_injector", "codex_exec", "claude_code"]);
 const VALID_STT_PROVIDERS = new Set(["volcengine", "openai"]);
@@ -16,6 +20,10 @@ function normalizeOptionalText(value) {
 }
 
 export function buildDesktopFormState(config, desktopSettings = {}) {
+  const voiceTranslationSendMode = normalizeVoiceTranslationSendMode(
+    config.voiceTranslationSendMode,
+    config.voiceTranslationSendBilingual === true
+  );
   return {
     sendTarget: normalizeChoice(config.sendTarget, "text_injector", VALID_SEND_TARGETS),
     sttProvider: normalizeChoice(detectConfiguredSttProvider(config), "volcengine", VALID_STT_PROVIDERS),
@@ -37,6 +45,11 @@ export function buildDesktopFormState(config, desktopSettings = {}) {
     voiceTranslationBaseUrl: String(config.voiceTranslationBaseUrl || "https://api.deepseek.com"),
     voiceTranslationTimeoutMs: String(config.voiceTranslationTimeoutMs || "12000"),
     voiceTranslationPrompt: String(config.voiceTranslationPrompt || DEFAULT_VOICE_TRANSLATION_PROMPT),
+    voiceTranslationTargetLanguage: normalizeVoiceTranslationTargetLanguage(
+      config.voiceTranslationTargetLanguage
+    ),
+    voiceTranslationSendMode,
+    voiceTranslationSendBilingual: voiceTranslationSendMode !== "target",
     lanSharedSecret: String(config.lanSharedSecret || ""),
     codexCwd: String(config.codexCwd || ""),
     claudeCwd: String(config.claudeCwd || ""),
@@ -57,6 +70,10 @@ export function buildDesktopFormState(config, desktopSettings = {}) {
 export function buildUserConfigUpdates(formState = {}) {
   const sendTarget = normalizeChoice(formState.sendTarget, "text_injector", VALID_SEND_TARGETS);
   const sttProvider = normalizeChoice(formState.sttProvider, "volcengine", VALID_STT_PROVIDERS);
+  const voiceTranslationSendMode = normalizeVoiceTranslationSendMode(
+    formState.voiceTranslationSendMode,
+    formState.voiceTranslationSendBilingual === true
+  );
 
   return {
     SEND_TARGET: sendTarget,
@@ -90,6 +107,12 @@ export function buildUserConfigUpdates(formState = {}) {
     VOICE_TRANSLATION_PROMPT: formState.voiceTranslationEnabled
       ? normalizeOptionalText(formState.voiceTranslationPrompt) || DEFAULT_VOICE_TRANSLATION_PROMPT
       : null,
+    VOICE_TRANSLATION_TARGET_LANGUAGE: formState.voiceTranslationEnabled
+      ? normalizeVoiceTranslationTargetLanguage(formState.voiceTranslationTargetLanguage)
+      : null,
+    VOICE_TRANSLATION_SEND_MODE: formState.voiceTranslationEnabled ? voiceTranslationSendMode : null,
+    VOICE_TRANSLATION_SEND_BILINGUAL:
+      formState.voiceTranslationEnabled && voiceTranslationSendMode !== "target" ? "1" : null,
     LAN_SHARED_SECRET: normalizeOptionalText(formState.lanSharedSecret),
     CODEX_CWD: normalizeOptionalText(formState.codexCwd),
     CLAUDE_CWD: normalizeOptionalText(formState.claudeCwd),

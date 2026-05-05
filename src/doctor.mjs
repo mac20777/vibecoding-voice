@@ -6,6 +6,11 @@ import { promisify } from "node:util";
 
 import { isCliAvailable } from "./config.mjs";
 import { resolveRuntimeLogPath } from "./runtime-log.mjs";
+import {
+  getVoiceTranslationSendModeLabel,
+  getVoiceTranslationTargetLabel,
+  normalizeVoiceTranslationSendMode
+} from "./translation-service.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -225,8 +230,9 @@ function resolveVoiceTranslationLabel(config) {
   if (!config.voiceTranslationEnabled) {
     return { label: "off", valid: true };
   }
+  const targetLabel = getVoiceTranslationTargetLabel(config.voiceTranslationTargetLanguage);
   return config.voiceTranslationApiKey
-    ? { label: `deepseek · ${config.voiceTranslationModel}`, valid: true }
+    ? { label: `deepseek · ${config.voiceTranslationModel} · ${targetLabel}`, valid: true }
     : { label: "deepseek — VOICE_TRANSLATION_API_KEY missing", valid: false };
 }
 
@@ -294,7 +300,14 @@ export async function runDoctor(config) {
   const autoNote = config.sendTargetAuto ? " [auto-detected]" : "";
   console.log(`\n  Target: \x1b[1m${config.sendTarget}\x1b[0m${autoNote}`);
   console.log(`  Delivery: \x1b[1m${config.transcriptDeliveryMode}\x1b[0m`);
-  console.log(`  Translation: \x1b[1m${config.voiceTranslationEnabled ? "on" : "off"}\x1b[0m`);
+  const sendMode = normalizeVoiceTranslationSendMode(
+    config.voiceTranslationSendMode,
+    config.voiceTranslationSendBilingual
+  );
+  const translationMode = config.voiceTranslationEnabled
+    ? `on · ${getVoiceTranslationTargetLabel(config.voiceTranslationTargetLanguage)} · ${getVoiceTranslationSendModeLabel(sendMode)}`
+    : "off";
+  console.log(`  Translation: \x1b[1m${translationMode}\x1b[0m`);
   console.log(`  Inject: \x1b[1m${config.textInjectionMode}\x1b[0m`);
   if (hasError) {
     console.log('  \x1b[31mSome checks failed — fix the issues above before starting. Run "vibe config" if needed.\x1b[0m\n');

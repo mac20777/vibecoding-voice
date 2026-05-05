@@ -43,6 +43,8 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
       voiceTranslationBaseUrl: "https://api.deepseek.com",
       voiceTranslationTimeoutMs: 12000,
       voiceTranslationPrompt: "Translate to idiomatic English.",
+      voiceTranslationTargetLanguage: "korean",
+      voiceTranslationSendMode: "all",
       lanSharedSecret: "secret",
       codexCwd: "D:/codex",
       claudeCwd: "D:/claude",
@@ -70,6 +72,9 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
   assert.equal(formState.voiceTranslationEnabled, true);
   assert.equal(formState.voiceTranslationApiKey, "translation-key");
   assert.equal(formState.voiceTranslationPrompt, "Translate to idiomatic English.");
+  assert.equal(formState.voiceTranslationTargetLanguage, "korean");
+  assert.equal(formState.voiceTranslationSendMode, "all");
+  assert.equal(formState.voiceTranslationSendBilingual, true);
   assert.deepEqual(formState.overrideFiles, ["D:/github/app/.env"]);
   assert.deepEqual(formState.desktopSettings, {
     autoLaunch: true,
@@ -94,6 +99,8 @@ test("buildUserConfigUpdates normalizes desktop form payload into env values", (
     voiceTranslationBaseUrl: "https://api.deepseek.com",
     voiceTranslationTimeoutMs: "12000",
     voiceTranslationPrompt: "Translate to idiomatic English.",
+    voiceTranslationTargetLanguage: "japanese",
+    voiceTranslationSendMode: "zh_en",
     lanSharedSecret: "",
     codexCwd: "D:/workspace",
     claudeCwd: "",
@@ -117,6 +124,9 @@ test("buildUserConfigUpdates normalizes desktop form payload into env values", (
     VOICE_TRANSLATION_BASE_URL: "https://api.deepseek.com",
     VOICE_TRANSLATION_TIMEOUT_MS: "12000",
     VOICE_TRANSLATION_PROMPT: "Translate to idiomatic English.",
+    VOICE_TRANSLATION_TARGET_LANGUAGE: "japanese",
+    VOICE_TRANSLATION_SEND_MODE: "zh_en",
+    VOICE_TRANSLATION_SEND_BILINGUAL: "1",
     LAN_SHARED_SECRET: null,
     CODEX_CWD: "D:/workspace",
     CLAUDE_CWD: null,

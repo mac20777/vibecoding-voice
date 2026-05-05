@@ -55,3 +55,37 @@ test("VoiceTranslationService is a no-op when disabled", async () => {
   assert.equal(await service.translate("你好"), "你好");
   assert.equal(service.label(), "off");
 });
+
+test("VoiceTranslationService can translate to a requested target language", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    assert.match(body.messages[0].content, /Target language: Korean/);
+    assert.match(body.messages[0].content, /native Korean/);
+    return new Response(JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: "이 기능을 더 안정적으로 만들어 주세요."
+          }
+        }
+      ]
+    }));
+  };
+
+  const service = createVoiceTranslationService({
+    voiceTranslationEnabled: true,
+    voiceTranslationApiKey: "test-key",
+    voiceTranslationTargetLanguage: "english",
+    voiceTranslationTimeoutMs: 1000
+  });
+
+  assert.equal(
+    await service.translate("帮我把这个功能做得更稳一点", { targetLanguage: "korean" }),
+    "이 기능을 더 안정적으로 만들어 주세요."
+  );
+});

@@ -3,7 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { getUserConfigPath, projectRoot } from "./paths.mjs";
-import { DEFAULT_VOICE_TRANSLATION_PROMPT } from "./translation-service.mjs";
+import {
+  DEFAULT_VOICE_TRANSLATION_PROMPT,
+  normalizeVoiceTranslationSendMode,
+  normalizeVoiceTranslationTargetLanguage
+} from "./translation-service.mjs";
 
 const INITIAL_ENV_KEYS = new Set(Object.keys(process.env));
 let appliedConfigKeys = new Set();
@@ -338,6 +342,10 @@ export function loadConfig(options = {}) {
     process.env.DEEPSEEK_API_KEY ||
     process.env.TODO_INTENT_API_KEY ||
     "";
+  const voiceTranslationSendMode = normalizeVoiceTranslationSendMode(
+    process.env.VOICE_TRANSLATION_SEND_MODE,
+    process.env.VOICE_TRANSLATION_SEND_BILINGUAL === "1"
+  );
 
   return {
     bindHost: process.env.LAN_VOICE_BIND || "0.0.0.0",
@@ -373,6 +381,11 @@ export function loadConfig(options = {}) {
     voiceTranslationBaseUrl: process.env.VOICE_TRANSLATION_BASE_URL || "https://api.deepseek.com",
     voiceTranslationTimeoutMs: Number(process.env.VOICE_TRANSLATION_TIMEOUT_MS || "12000"),
     voiceTranslationPrompt: process.env.VOICE_TRANSLATION_PROMPT || DEFAULT_VOICE_TRANSLATION_PROMPT,
+    voiceTranslationTargetLanguage: normalizeVoiceTranslationTargetLanguage(
+      process.env.VOICE_TRANSLATION_TARGET_LANGUAGE || "english"
+    ),
+    voiceTranslationSendMode,
+    voiceTranslationSendBilingual: voiceTranslationSendMode !== "target",
     dryRunTextInjection: process.env.DRY_RUN_TEXT_INJECTION === "1",
     codexCommand,
     codexCwd: resolveCodexCwd(),

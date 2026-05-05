@@ -53,6 +53,9 @@ private:
     bool has_pending_transcript_ = false;
     std::string send_target_;         // received from server_ready: "claude_code" | "codex_exec" | "text_injector"
     bool voice_translation_enabled_ = false;
+    std::string voice_translation_target_language_ = "english";
+    std::string voice_translation_send_mode_ = "target";
+    bool voice_translation_send_bilingual_ = false;
     std::vector<int16_t> audio_frame_buffer_; // reused across StreamAudioFrame() calls
     std::deque<std::vector<int16_t>> preroll_frames_;
     enum class Phase {
@@ -181,6 +184,9 @@ private:
     bool SendAction(const char* action_type);
     bool SendSetMode(const char* mode);
     bool SendVoiceTranslationEnabled(bool enabled);
+    bool SendVoiceTranslationSendBilingual(bool enabled);
+    bool SendVoiceTranslationTargetLanguage(const char* language);
+    bool SendVoiceTranslationSendMode(const char* mode);
     bool SendTodoCommand(const char* action, int index = 0, int completed = -1, const char* id = nullptr);
     VoiceMode DesiredVoiceModeForPage(Page page) const;
     bool SyncVoiceModeToPage(Page page);
@@ -203,6 +209,14 @@ private:
     void HandleTodoMenuInput(bool up_click, bool down_click, bool boot_press);
     void ExecuteTodoMenuItem(int item);
     void ToggleVoiceTranslation();
+    void CycleVoiceTranslationTargetLanguage();
+    void CycleVoiceTranslationSendMode();
+    std::string NormalizeVoiceTranslationTargetLanguage(const char* language) const;
+    std::string NormalizeVoiceTranslationSendMode(const char* mode, bool fallback_bilingual = false) const;
+    const char* GetVoiceTranslationTargetLabel() const;
+    const char* GetVoiceTranslationSendLabel() const;
+    const char* GetNextVoiceTranslationTargetLanguage() const;
+    const char* GetNextVoiceTranslationSendMode() const;
     void EnterOfflineTodoMode(const std::string& message);
     void RequestReconnect(const std::string& message);
     void QueueOfflineTodoToggle(const TodoItem& item, bool completed);

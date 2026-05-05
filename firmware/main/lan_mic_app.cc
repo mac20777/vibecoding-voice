@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cerrno>
+#include <cctype>
 #include <cstring>
 #include <cstdio>
 #include <fcntl.h>
@@ -1081,6 +1082,33 @@ bool LanMicApp::SendVoiceTranslationEnabled(bool enabled) {
     return SendJson(message);
 }
 
+bool LanMicApp::SendVoiceTranslationSendBilingual(bool enabled) {
+    char message[128];
+    snprintf(message,
+             sizeof(message),
+             "{\"type\":\"set_voice_translation_send_bilingual\",\"enabled\":%s}",
+             enabled ? "true" : "false");
+    return SendJson(message);
+}
+
+bool LanMicApp::SendVoiceTranslationTargetLanguage(const char* language) {
+    char message[128];
+    snprintf(message,
+             sizeof(message),
+             "{\"type\":\"set_voice_translation_target_language\",\"language\":\"%s\"}",
+             language != nullptr ? language : "english");
+    return SendJson(message);
+}
+
+bool LanMicApp::SendVoiceTranslationSendMode(const char* mode) {
+    char message[128];
+    snprintf(message,
+             sizeof(message),
+             "{\"type\":\"set_voice_translation_send_mode\",\"mode\":\"%s\"}",
+             mode != nullptr ? mode : "target");
+    return SendJson(message);
+}
+
 bool LanMicApp::SendTodoCommand(const char* action, int index, int completed, const char* id) {
     char message[384];
     char id_part[96] = "";
@@ -1203,19 +1231,22 @@ bool LanMicApp::FlushPrerollFrames() {
 
 void LanMicApp::ApplyTranscriptDisplayPayload(cJSON* root, const char* fallback_text) {
     const char* text_value = root != nullptr ? GetJsonString(root, "text") : nullptr;
+    const char* translated_value = root != nullptr ? GetJsonString(root, "translatedText") : nullptr;
     const char* original_value = root != nullptr ? GetJsonString(root, "originalText") : nullptr;
     const char* transform_value = root != nullptr ? GetJsonString(root, "transform") : nullptr;
+    const char* display_translation =
+        translated_value != nullptr && translated_value[0] != '\0' ? translated_value : text_value;
     const bool is_translation =
         transform_value != nullptr &&
         std::strcmp(transform_value, "translation") == 0 &&
-        text_value != nullptr &&
-        text_value[0] != '\0' &&
+        display_translation != nullptr &&
+        display_translation[0] != '\0' &&
         original_value != nullptr &&
         original_value[0] != '\0';
 
     if (is_translation) {
         original_transcript_text_ = original_value;
-        translated_transcript_text_ = text_value;
+        translated_transcript_text_ = display_translation;
         transcript_text_ = original_transcript_text_;
         return;
     }
@@ -1276,6 +1307,16 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
             }
         }
         voice_translation_enabled_ = GetJsonBool(root, "voiceTranslationEnabled", voice_translation_enabled_);
+        const char* target_language = GetJsonString(root, "voiceTranslationTargetLanguage");
+        if (target_language != nullptr) {
+            voice_translation_target_language_ = NormalizeVoiceTranslationTargetLanguage(target_language);
+        }
+        const bool fallback_bilingual =
+            GetJsonBool(root, "voiceTranslationSendBilingual", voice_translation_send_bilingual_);
+        const char* send_mode = GetJsonString(root, "voiceTranslationSendMode");
+        voice_translation_send_mode_ =
+            NormalizeVoiceTranslationSendMode(send_mode, fallback_bilingual);
+        voice_translation_send_bilingual_ = voice_translation_send_mode_ != "target";
         const char* mode = GetJsonString(root, "mode");
         if (mode != nullptr) {
             voice_mode_ = strcmp(mode, "todo") == 0 ? VoiceMode::Todo : VoiceMode::Normal;
@@ -1295,8 +1336,20 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         }
     } else if (strcmp(type, "voice_translation_state") == 0) {
         voice_translation_enabled_ = GetJsonBool(root, "enabled", voice_translation_enabled_);
-        status_text_ = voice_translation_enabled_ ? "English On" : "English Off";
-        hint_text_ = voice_translation_enabled_ ? "Chinese -> English" : "Send transcript";
+        const char* target_language = GetJsonString(root, "targetLanguage");
+        if (target_language != nullptr) {
+            voice_translation_target_language_ = NormalizeVoiceTranslationTargetLanguage(target_language);
+        }
+        const bool fallback_bilingual =
+            GetJsonBool(root, "sendBilingual", voice_translation_send_bilingual_);
+        const char* send_mode = GetJsonString(root, "sendMode");
+        voice_translation_send_mode_ =
+            NormalizeVoiceTranslationSendMode(send_mode, fallback_bilingual);
+        voice_translation_send_bilingual_ = voice_translation_send_mode_ != "target";
+        status_text_ = voice_translation_enabled_ ? "Translate On" : "Translate Off";
+        hint_text_ = voice_translation_enabled_
+            ? std::string(GetVoiceTranslationTargetLabel()) + " | " + GetVoiceTranslationSendLabel()
+            : "Send transcript";
     } else if (strcmp(type, "todo_state") == 0) {
         cJSON* items = cJSON_GetObjectItemCaseSensitive(root, "items");
         cJSON* selected_index = cJSON_GetObjectItemCaseSensitive(root, "selectedIndex");
@@ -1911,6 +1964,92 @@ void LanMicApp::CloseTodoMenu() {
     UpdateDisplay();
 }
 
+std::string LanMicApp::NormalizeVoiceTranslationTargetLanguage(const char* language) const {
+    std::string value = language != nullptr ? language : "";
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    if (value == "korean" || value == "ko" || value == "kr") {
+        return "korean";
+    }
+    if (value == "japanese" || value == "ja" || value == "jp") {
+        return "japanese";
+    }
+    return "english";
+}
+
+std::string LanMicApp::NormalizeVoiceTranslationSendMode(const char* mode, bool fallback_bilingual) const {
+    std::string value = mode != nullptr ? mode : "";
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    std::replace(value.begin(), value.end(), '-', '_');
+    std::replace(value.begin(), value.end(), ' ', '_');
+    if (value == "all" || value == "multi" || value == "multilingual" ||
+        value == "zh_en_ko_ja" || value == "cn_en_ko_ja") {
+        return "all";
+    }
+    if (value == "zh_en" || value == "cn_en" || value == "chinese_english" ||
+        value == "chinese_and_english") {
+        return "zh_en";
+    }
+    if (value == "bilingual" || value == "both" || value == "cn_target" ||
+        value == "zh_target" || value == "original_target" || value == "chinese_target") {
+        return "bilingual";
+    }
+    if (value == "target" || value == "target_only" || value == "translation" ||
+        value == "translated") {
+        return "target";
+    }
+    return fallback_bilingual ? "bilingual" : "target";
+}
+
+const char* LanMicApp::GetVoiceTranslationTargetLabel() const {
+    if (voice_translation_target_language_ == "korean") {
+        return "Korean";
+    }
+    if (voice_translation_target_language_ == "japanese") {
+        return "Japanese";
+    }
+    return "English";
+}
+
+const char* LanMicApp::GetVoiceTranslationSendLabel() const {
+    if (voice_translation_send_mode_ == "all") {
+        return "All";
+    }
+    if (voice_translation_send_mode_ == "zh_en") {
+        return "CN+EN";
+    }
+    if (voice_translation_send_mode_ == "bilingual") {
+        return "CN+Target";
+    }
+    return "Target";
+}
+
+const char* LanMicApp::GetNextVoiceTranslationTargetLanguage() const {
+    if (voice_translation_target_language_ == "english") {
+        return "korean";
+    }
+    if (voice_translation_target_language_ == "korean") {
+        return "japanese";
+    }
+    return "english";
+}
+
+const char* LanMicApp::GetNextVoiceTranslationSendMode() const {
+    if (voice_translation_send_mode_ == "target") {
+        return "bilingual";
+    }
+    if (voice_translation_send_mode_ == "bilingual") {
+        return "zh_en";
+    }
+    if (voice_translation_send_mode_ == "zh_en") {
+        return "all";
+    }
+    return "target";
+}
+
 int LanMicApp::GetTodoMenuItemCount() const {
     if (todo_menu_kind_ == TodoMenuKind::RestartConfirm) {
         return 2;
@@ -1922,7 +2061,7 @@ int LanMicApp::GetTodoMenuItemCount() const {
         return 3;
     }
     if (todo_menu_kind_ == TodoMenuKind::Live) {
-        return 6;
+        return 8;
     }
     return 6;
 }
@@ -1959,14 +2098,18 @@ std::string LanMicApp::GetTodoMenuItemLabel(int item) const {
             case 0:
                 return "Go Todo";
             case 1:
-                return voice_translation_enabled_ ? "English: On" : "English: Off";
+                return voice_translation_enabled_ ? "Translate: On" : "Translate: Off";
             case 2:
-                return "Reconnect host";
+                return std::string("Lang: ") + GetVoiceTranslationTargetLabel();
             case 3:
-                return "Restart device";
+                return std::string("Send: ") + GetVoiceTranslationSendLabel();
             case 4:
-                return "Settings";
+                return "Reconnect host";
             case 5:
+                return "Restart device";
+            case 6:
+                return "Settings";
+            case 7:
                 return "Back";
             default:
                 return "";
@@ -2093,17 +2236,25 @@ void LanMicApp::ExecuteTodoMenuItem(int item) {
                 CloseTodoMenu();
                 return;
             case 2:
+                CycleVoiceTranslationTargetLanguage();
                 CloseTodoMenu();
-                RequestReconnect("Refreshing host...");
                 return;
             case 3:
-                restart_device();
+                CycleVoiceTranslationSendMode();
+                CloseTodoMenu();
                 return;
             case 4:
                 CloseTodoMenu();
-                EnterSettings();
+                RequestReconnect("Refreshing host...");
                 return;
             case 5:
+                restart_device();
+                return;
+            case 6:
+                CloseTodoMenu();
+                EnterSettings();
+                return;
+            case 7:
             default:
                 CloseTodoMenu();
                 return;
@@ -2175,8 +2326,53 @@ void LanMicApp::ToggleVoiceTranslation() {
         return;
     }
 
-    status_text_ = next_enabled ? "English On" : "English Off";
+    status_text_ = next_enabled ? "Translate On" : "Translate Off";
     hint_text_ = next_enabled ? "Waiting server..." : "Waiting server...";
+    UpdateDisplay();
+}
+
+void LanMicApp::CycleVoiceTranslationTargetLanguage() {
+    if (!IsServerConnected()) {
+        status_text_ = "No server";
+        hint_text_ = "Reconnect first";
+        UpdateDisplay();
+        return;
+    }
+
+    const char* next_language = GetNextVoiceTranslationTargetLanguage();
+    if (!SendVoiceTranslationTargetLanguage(next_language)) {
+        status_text_ = "Toggle failed";
+        hint_text_ = "Try again";
+        UpdateDisplay();
+        return;
+    }
+
+    voice_translation_target_language_ = NormalizeVoiceTranslationTargetLanguage(next_language);
+    status_text_ = std::string("Lang ") + GetVoiceTranslationTargetLabel();
+    hint_text_ = "Waiting server...";
+    UpdateDisplay();
+}
+
+void LanMicApp::CycleVoiceTranslationSendMode() {
+    if (!IsServerConnected()) {
+        status_text_ = "No server";
+        hint_text_ = "Reconnect first";
+        UpdateDisplay();
+        return;
+    }
+
+    const char* next_mode = GetNextVoiceTranslationSendMode();
+    if (!SendVoiceTranslationSendMode(next_mode)) {
+        status_text_ = "Toggle failed";
+        hint_text_ = "Try again";
+        UpdateDisplay();
+        return;
+    }
+
+    voice_translation_send_mode_ = NormalizeVoiceTranslationSendMode(next_mode, false);
+    voice_translation_send_bilingual_ = voice_translation_send_mode_ != "target";
+    status_text_ = std::string("Send ") + GetVoiceTranslationSendLabel();
+    hint_text_ = "Waiting server...";
     UpdateDisplay();
 }
 
@@ -2425,9 +2621,12 @@ std::string LanMicApp::BuildPromptBody() const {
         case NetworkState::Server:
             return active_page_ == Page::Todo
                 ? "Todo voice mode\nHold UP for menu"
-                : std::string("Live coding mode\nEnglish: ") +
+                : std::string("Live coding mode\nTranslate: ") +
                     (voice_translation_enabled_ ? "On" : "Off") +
-                    "\nHold UP for menu";
+                    "\n" +
+                    GetVoiceTranslationTargetLabel() +
+                    " | " +
+                    GetVoiceTranslationSendLabel();
         case NetworkState::Wifi:
             return "Finding server...";
         case NetworkState::Config:
@@ -2645,7 +2844,7 @@ void LanMicApp::UpdateDisplay() {
                 y += kLineHeight;
             }
 
-            texts.push_back({showing_translation ? "English" : "Reply", 12, kReplyTitleY, 16});
+            texts.push_back({showing_translation ? GetVoiceTranslationTargetLabel() : "Reply", 12, kReplyTitleY, 16});
             texts.push_back({single_line(cli_status_text_.empty() ? std::string(GetToolLabel()) + " idle" : cli_status_text_, 16), 228, kReplyTitleY, 16});
 
             const auto reply_lines = WrapText(BuildReplyBody(), kBodyCharsPerLine);

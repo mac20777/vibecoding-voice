@@ -228,10 +228,27 @@
                 <div class="toggle-row toggle-row-single">
                   <label class="toggle-item">
                     <input id="voice-translation-enabled" name="voiceTranslationEnabled" type="checkbox" />
-                    <span>开启中文转地道英文</span>
+                    <span>开启中文翻译</span>
                   </label>
                 </div>
                 <div class="provider-section" data-translation-config>
+                  <label class="field">
+                    <span class="field-label">板子显示目标语言</span>
+                    <select id="voice-translation-target-language" name="voiceTranslationTargetLanguage">
+                      <option value="english">英语</option>
+                      <option value="korean">韩语</option>
+                      <option value="japanese">日语</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">发送格式</span>
+                    <select id="voice-translation-send-mode" name="voiceTranslationSendMode">
+                      <option value="target">只发送目标语言</option>
+                      <option value="bilingual">中文 + 目标语言</option>
+                      <option value="zh_en">只输出中文和英语</option>
+                      <option value="all">输出中文、英语、韩语、日语</option>
+                    </select>
+                  </label>
                   <label class="field">
                     <span class="field-label">DeepSeek API Key</span>
                     <input id="voice-translation-api-key" name="voiceTranslationApiKey" type="password" autocomplete="off" />
