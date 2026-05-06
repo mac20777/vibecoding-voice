@@ -209,6 +209,7 @@ private:
     void HandleTodoMenuInput(bool up_click, bool down_click, bool boot_press);
     void ExecuteTodoMenuItem(int item);
     void ToggleVoiceTranslation();
+    void ToggleEnglishVoiceShortcut();
     void CycleVoiceTranslationTargetLanguage();
     void CycleVoiceTranslationSendMode();
     std::string NormalizeVoiceTranslationTargetLanguage(const char* language) const;

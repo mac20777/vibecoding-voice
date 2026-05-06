@@ -12,7 +12,16 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 
 > Now includes a Windows desktop app with tray mode, start-on-login, a local settings UI, and packaged installers, so non-technical users can use it without touching a terminal.
 >
-> Latest Zectrix 4.2" firmware package: `v2.2.6_zectrix-s3-epaper-4.2.zip`, with long-outage reconnect fixes, offline deep sleep support, Chinese-to-English/Korean/Japanese voice translation confirmation, and selectable target / Chinese+English / all-language send modes.
+> Latest Zectrix 4.2" firmware package: `v2.2.7_zectrix-s3-epaper-4.2.zip`, with long-outage reconnect fixes, offline deep sleep support, Chinese-to-English/Korean/Japanese voice translation confirmation, selectable target / Chinese+English / all-language send modes, and a DN double-click English-output shortcut.
+
+### New in v2.2.7
+
+- **DN double-click English shortcut**: on the Live page, double-click `DN` to toggle Chinese speech -> English-only output; double-click `DN` again to return to normal transcript output.
+- **Multilingual voice translation**: speak Chinese and translate to English, Korean, or Japanese through DeepSeek.
+- **Selectable send formats**: send only the target translation, Chinese + target language, Chinese + English, or Chinese + English + Korean + Japanese.
+- **Board and desktop controls**: switch translation, target language, and send mode from either the e-paper board's Live menu or the Windows desktop Translation tab.
+- **Clean output**: multilingual send output is plain text without `Chinese:` / `English:` labels, so the receiving app gets only the content you asked for.
+- **Packaged hardware release**: firmware package `v2.2.7_zectrix-s3-epaper-4.2.zip` includes the updated board menu, multilingual confirmation display, and shortcut behavior.
 
 `vibecoding-voice` is a two-part open-source project:
 
@@ -188,6 +197,7 @@ VOICE_TRANSLATION_SEND_BILINGUAL=0
 ```
 
 On the board, use the safer menu path: switch to the Live page, hold `UP`, select `Translate: On` / `Translate: Off` with `UP` / `DN`, then press `BOOT` to confirm. There is no single-click shortcut for this toggle, so accidental mode changes are less likely.
+For the common "speak Chinese, output English" flow, double-click `DN` on the Live page. The first double-click enables English target-only output; the next double-click disables translation and returns to normal transcript output.
 Use the adjacent `Lang: English/Korean/Japanese` and `Send: Target/CN+Target/CN+EN/All` menu items, or the desktop Translation tab, to choose the board display language and whether `UP` sends only the target translation, Chinese + target, Chinese + English, or a four-line Chinese + English + Korean + Japanese result without prefixes.
 When translation is enabled, the board's confirmation screen shows `Chinese` in the upper prompt area and the selected translated language in the lower reply area.
 
@@ -380,6 +390,7 @@ To re-enter config mode later: hold **UP + DOWN** until the screen clears.
 | UP / DN click | Idle on Todo page | Move Todo selection |
 | UP / DN click | Page menu open | Move menu selection with wrap-around |
 | UP double click | Idle on Todo / Live page | Toggle Todo / Live page |
+| DN double click | Idle on Live page | Toggle Chinese speech -> English-only output |
 | Hold UP + DN | Any | Re-enter Wi-Fi setup mode |
 
 Screen footer shows `BOOT Add · UP Send · DN Undo` when a transcript is pending.
@@ -505,7 +516,16 @@ node scripts/console.mjs
 
 > 现在已经带有 Windows 桌面版：支持托盘、自启动、本地设置界面和安装包，普通用户不用碰命令行也能直接用。
 >
-> 最新 Zectrix 4.2" 固件包：`v2.2.6_zectrix-s3-epaper-4.2.zip`，包含长时间断线后的自动重连修复、离线低功耗休眠、中文语音转英语/韩语/日语的板端确认，以及只发目标语言 / 中英 / 中英韩日发送模式切换。
+> 最新 Zectrix 4.2" 固件包：`v2.2.7_zectrix-s3-epaper-4.2.zip`，包含长时间断线后的自动重连修复、离线低功耗休眠、中文语音转英语/韩语/日语的板端确认、只发目标语言 / 中英 / 中英韩日发送模式切换，以及 DN 双击英文输出快捷开关。
+
+### v2.2.7 更新内容
+
+- **DN 双击英文快捷开关**：Live 页面空闲时，双击 `DN` 切换到“中文说话，只输出英文”；再次双击 `DN` 关闭翻译，回到普通转写输出。
+- **多语言语音翻译**：中文说话，经 DeepSeek 翻译成英语、韩语或日语。
+- **可选发送格式**：可以只发送目标语言，也可以发送中文 + 目标语言、中文 + 英语，或中文 + 英语 + 韩语 + 日语。
+- **板子和桌面端都能切换**：电子墨水屏设备的 Live 菜单和 Windows 桌面端“翻译”页都可以切换翻译开关、目标语言和发送格式。
+- **输出更干净**：多语言发送内容不再带 `Chinese:` / `English:` 这类前缀，接收端只会拿到纯文本内容。
+- **已打包硬件版本**：`v2.2.7_zectrix-s3-epaper-4.2.zip` 固件包已包含新的板端菜单、多语言确认界面和快捷键行为。
 
 `vibecoding-voice` 是一个由两部分组成的开源项目：
 
@@ -680,6 +700,7 @@ VOICE_TRANSLATION_SEND_BILINGUAL=0
 ```
 
 板子上也可以切换：先到 Live 页面，长按 `UP` 打开菜单，用 `UP` / `DN` 选中 `Translate: On` / `Translate: Off`，再按 `BOOT` 确认。这个开关没有做成单击快捷键，避免录音或翻页时误触。
+常用的“中文说话、英文输出”流程可以直接在 Live 页面双击 `DN`：第一次双击会开启“只输出英文”，再次双击会关闭翻译，回到普通转写输出。
 旁边的 `Lang: English/Korean/Japanese` 和 `Send: Target/CN+Target/CN+EN/All` 菜单项，或桌面端“翻译”页，可以控制板子下半区显示哪种译文，以及按 `UP` 时只发送目标语言、中 + 目标、中英，还是发送“不带前缀的四行文本”：中文、英语、韩语、日语。
 翻译开启后，板子的确认页上半区标题为 `Chinese`，显示你刚说的中文原文；下半区标题为当前目标语言，显示对应译文。
 
@@ -869,6 +890,7 @@ LAN_SHARED_SECRET=你的密钥
 | UP / DN 单击 | Todo 页空闲态 | 移动待办选中项 |
 | UP / DN 单击 | 页面菜单打开时 | 循环移动菜单选中项 |
 | UP 双击 | Todo / Live 页空闲态 | 快速切换 Todo / Live 页面 |
+| DN 双击 | Live 页空闲态 | 切换“中文说话，只输出英文” |
 | 按住 UP + DN | 任意 | 重新进入 Wi-Fi 配网模式 |
 
 有待发送内容时屏幕底部显示：`BOOT Add · UP Send · DN Undo`

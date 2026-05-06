@@ -2331,6 +2331,51 @@ void LanMicApp::ToggleVoiceTranslation() {
     UpdateDisplay();
 }
 
+void LanMicApp::ToggleEnglishVoiceShortcut() {
+    if (!IsServerConnected()) {
+        status_text_ = "No server";
+        hint_text_ = "Reconnect first";
+        UpdateDisplay();
+        return;
+    }
+
+    const bool english_target_only =
+        voice_translation_enabled_ &&
+        voice_translation_target_language_ == "english" &&
+        voice_translation_send_mode_ == "target";
+
+    if (english_target_only) {
+        if (!SendVoiceTranslationEnabled(false)) {
+            status_text_ = "Toggle failed";
+            hint_text_ = "Try again";
+            UpdateDisplay();
+            return;
+        }
+        voice_translation_enabled_ = false;
+        status_text_ = "Normal input";
+        hint_text_ = "Send transcript";
+        UpdateDisplay();
+        return;
+    }
+
+    if (!SendVoiceTranslationTargetLanguage("english") ||
+        !SendVoiceTranslationSendMode("target") ||
+        !SendVoiceTranslationEnabled(true)) {
+        status_text_ = "Toggle failed";
+        hint_text_ = "Try again";
+        UpdateDisplay();
+        return;
+    }
+
+    voice_translation_enabled_ = true;
+    voice_translation_target_language_ = "english";
+    voice_translation_send_mode_ = "target";
+    voice_translation_send_bilingual_ = false;
+    status_text_ = "English output";
+    hint_text_ = "Speak Chinese";
+    UpdateDisplay();
+}
+
 void LanMicApp::CycleVoiceTranslationTargetLanguage() {
     if (!IsServerConnected()) {
         status_text_ = "No server";
@@ -2596,7 +2641,7 @@ std::string LanMicApp::GetFooterText() const {
                                         : "UP/DN Nav | BOOT OK | HoldUP Back";
     }
     if (active_page_ == Page::Summary) {
-        return "Hold UP Menu | Hold Live";
+        return "DNx2 English | HoldUP Menu";
     }
     if (active_page_ == Page::Todo) {
         return IsServerConnected()
@@ -3215,7 +3260,7 @@ void LanMicApp::Run() {
         const bool up_double_click = up_double_clicked_.exchange(false);
         const bool down_double_click = down_double_clicked_.exchange(false);
         const bool up_click = up_clicked_.exchange(false) || (todo_menu_open_ && up_double_click);
-        const bool down_click = down_clicked_.exchange(false) || down_double_click;
+        const bool down_single_click = down_clicked_.exchange(false);
 
         if (up_double_click &&
             !todo_menu_open_ &&
@@ -3226,6 +3271,18 @@ void LanMicApp::Run() {
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
+
+        if (down_double_click &&
+            !todo_menu_open_ &&
+            !has_pending_transcript_ &&
+            active_page_ == Page::Summary &&
+            (phase_ == Phase::Idle || phase_ == Phase::Error)) {
+            ToggleEnglishVoiceShortcut();
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+
+        const bool down_click = down_single_click || down_double_click;
 
         if (active_page_ == Page::Settings) {
             const bool pressed_now = IsPttPressed();
