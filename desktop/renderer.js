@@ -52,8 +52,32 @@ const elements = {
   saveSettingsButton: document.querySelector("#save-settings-button"),
   openConfigFolderButton: document.querySelector("#open-config-folder-button"),
   pickCodexCwdButton: document.querySelector("#pick-codex-cwd-button"),
-  pickClaudeCwdButton: document.querySelector("#pick-claude-cwd-button")
+  pickClaudeCwdButton: document.querySelector("#pick-claude-cwd-button"),
+  localMicButton: document.querySelector("#local-mic-button"),
+  localMicButtonLabel: document.querySelector("#local-mic-button-label"),
+  localMicSendButton: document.querySelector("#local-mic-send-button"),
+  localMicUndoButton: document.querySelector("#local-mic-undo-button"),
+  localMicState: document.querySelector("#local-mic-state"),
+  localMicHint: document.querySelector("#local-mic-hint"),
+  localMicHoldKey: document.querySelector("#local-mic-hold-key"),
+  localMicSendKey: document.querySelector("#local-mic-send-key"),
+  localMicUndoKey: document.querySelector("#local-mic-undo-key"),
+  captureLocalMicHoldKeyButton: document.querySelector("#capture-local-mic-hold-key-button"),
+  resetLocalMicHoldKeyButton: document.querySelector("#reset-local-mic-hold-key-button"),
+  captureLocalMicSendKeyButton: document.querySelector("#capture-local-mic-send-key-button"),
+  resetLocalMicSendKeyButton: document.querySelector("#reset-local-mic-send-key-button"),
+  captureLocalMicUndoKeyButton: document.querySelector("#capture-local-mic-undo-key-button"),
+  resetLocalMicUndoKeyButton: document.querySelector("#reset-local-mic-undo-key-button"),
+  localMicActivity: document.querySelector("#local-mic-activity"),
+  localMicDb: document.querySelector("#local-mic-db"),
+  localMicBars: [...document.querySelectorAll("[data-local-mic-bar]")]
 };
+
+const DEFAULT_LOCAL_MIC_HOLD_KEY = "F8";
+const DEFAULT_LOCAL_MIC_SEND_KEY = "F9";
+const DEFAULT_LOCAL_MIC_UNDO_KEY = "F10";
+const LOCAL_MIC_SAMPLE_RATE = 16000;
+const SOCKET_READY_TIMEOUT_MS = 7000;
 
 const liveState = {
   transcript: "",
@@ -67,8 +91,32 @@ const appState = {
   bootstrap: null,
   service: null,
   socket: null,
+  socketReady: false,
   reconnectTimer: null,
   socketPort: null
+};
+
+const localMic = {
+  stream: null,
+  context: null,
+  source: null,
+  processor: null,
+  holdKey: DEFAULT_LOCAL_MIC_HOLD_KEY,
+  sendKey: DEFAULT_LOCAL_MIC_SEND_KEY,
+  undoKey: DEFAULT_LOCAL_MIC_UNDO_KEY,
+  recording: false,
+  starting: false,
+  stopping: false,
+  stopAfterStart: false,
+  awaitingAction: false,
+  sessionActive: false,
+  capturingHotkey: null,
+  globalHotkeysReady: false,
+  activeHotkeyCode: null,
+  level: 0,
+  db: null,
+  status: "idle",
+  error: ""
 };
 
 function modeLabel(mode) {
@@ -160,6 +208,415 @@ function serviceStatusLabel(status) {
     return "异常";
   }
   return "已停止";
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function displayHotkey(hotkey) {
+  return String(hotkey || "").replace(/\+/g, " + ");
+}
+
+function eventToHotkey(event) {
+  const code = event.code || "";
+  const key = event.key || "";
+  const ignoredCodes = new Set([
+    "AltLeft",
+    "AltRight",
+    "ControlLeft",
+    "ControlRight",
+    "MetaLeft",
+    "MetaRight",
+    "ShiftLeft",
+    "ShiftRight"
+  ]);
+
+  if (ignoredCodes.has(code) || ["Alt", "Control", "Meta", "Shift"].includes(key)) {
+    return null;
+  }
+
+  const parts = [];
+  if (event.ctrlKey) {
+    parts.push("Ctrl");
+  }
+  if (event.altKey) {
+    parts.push("Alt");
+  }
+  if (event.shiftKey) {
+    parts.push("Shift");
+  }
+  if (event.metaKey) {
+    parts.push("Meta");
+  }
+
+  parts.push(normalizeShortcutKey(code, key));
+  return parts.join("+");
+}
+
+function normalizeShortcutKey(code, key) {
+  if (/^Key[A-Z]$/.test(code)) {
+    return code.slice(3);
+  }
+  if (/^Digit[0-9]$/.test(code)) {
+    return code.slice(5);
+  }
+  if (/^Numpad[0-9]$/.test(code)) {
+    return code;
+  }
+  if (code === "Space") {
+    return "Space";
+  }
+  if (code) {
+    return code;
+  }
+  return String(key || "").toUpperCase();
+}
+
+function isEditableTarget(target) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+}
+
+function normalizeUiHotkey(hotkey, fallback) {
+  return String(hotkey || fallback).replace(/\s+/g, "");
+}
+
+function setLocalMicHotkeys(settings = {}) {
+  localMic.holdKey = normalizeUiHotkey(settings.localMicHoldKey, DEFAULT_LOCAL_MIC_HOLD_KEY);
+  localMic.sendKey = normalizeUiHotkey(settings.localMicSendKey, DEFAULT_LOCAL_MIC_SEND_KEY);
+  localMic.undoKey = normalizeUiHotkey(settings.localMicUndoKey, DEFAULT_LOCAL_MIC_UNDO_KEY);
+  elements.localMicHoldKey.value = displayHotkey(localMic.holdKey);
+  elements.localMicSendKey.value = displayHotkey(localMic.sendKey);
+  elements.localMicUndoKey.value = displayHotkey(localMic.undoKey);
+  renderLocalMic();
+}
+
+function setLocalMicStatus(status, error = "") {
+  localMic.status = status;
+  localMic.error = error;
+  renderLocalMic();
+}
+
+function localMicStatusText() {
+  if (localMic.capturingHotkey) {
+    return { state: "录入中", hint: "按下新的快捷键" };
+  }
+  if (localMic.status === "connecting") {
+    return { state: "准备中", hint: "正在连接本地服务和麦克风" };
+  }
+  if (localMic.status === "recording") {
+    return { state: "录音中", hint: `松开 ${displayHotkey(localMic.holdKey)} 结束` };
+  }
+  if (localMic.status === "transcribing") {
+    return { state: "识别中", hint: "正在提交给语音识别服务" };
+  }
+  if (localMic.status === "awaiting_action") {
+    return { state: "待确认", hint: "点击发送或撤销" };
+  }
+  if (localMic.status === "error") {
+    return { state: "异常", hint: localMic.error || "麦克风不可用" };
+  }
+  return {
+    state: "待命",
+    hint: `${localMic.globalHotkeysReady ? "后台可用" : "窗口内可用"} · 按住 ${displayHotkey(localMic.holdKey)} 录音`
+  };
+}
+
+function renderLocalMic() {
+  const { state, hint } = localMicStatusText();
+  elements.localMicState.textContent = state;
+  elements.localMicHint.textContent = hint;
+  elements.localMicButtonLabel.textContent = localMic.recording
+    ? "松开结束"
+    : `按住 ${displayHotkey(localMic.holdKey)}`;
+  elements.localMicButton.classList.toggle("is-recording", localMic.recording);
+  elements.localMicButton.disabled = localMic.starting || localMic.stopping || localMic.capturingHotkey;
+  elements.localMicSendButton.disabled = !localMic.awaitingAction || localMic.recording || localMic.starting;
+  elements.localMicUndoButton.disabled = !localMic.awaitingAction || localMic.recording || localMic.starting;
+  elements.localMicSendButton.textContent = `发送 ${displayHotkey(localMic.sendKey)}`;
+  elements.localMicUndoButton.textContent = `撤销 ${displayHotkey(localMic.undoKey)}`;
+  elements.captureLocalMicHoldKeyButton.textContent = localMic.capturingHotkey === "hold" ? "等待" : "录入";
+  elements.captureLocalMicSendKeyButton.textContent = localMic.capturingHotkey === "send" ? "等待" : "录入";
+  elements.captureLocalMicUndoKeyButton.textContent = localMic.capturingHotkey === "undo" ? "等待" : "录入";
+  elements.localMicActivity.textContent = localMic.recording
+    ? "Recording"
+    : localMic.status === "transcribing"
+      ? "STT"
+      : localMic.status === "awaiting_action"
+        ? "Confirm"
+        : "Idle";
+  elements.localMicDb.textContent = localMic.db === null ? "-- dB" : `${Math.round(localMic.db)} dB`;
+
+  const baseLevel = localMic.recording ? Math.max(localMic.level, 0.04) : 0.04;
+  const multipliers = [0.42, 0.72, 1, 0.86, 0.66, 0.48, 0.32, 0.24];
+  elements.localMicBars.forEach((bar, index) => {
+    const height = Math.max(8, Math.min(100, baseLevel * multipliers[index] * 100));
+    bar.style.height = `${height}%`;
+  });
+}
+
+function sendBridgeJson(message) {
+  if (!appState.socket || appState.socket.readyState !== WebSocket.OPEN || !appState.socketReady) {
+    throw new Error("本地服务还没有连接。");
+  }
+  appState.socket.send(JSON.stringify(message));
+}
+
+async function ensureBridgeSocketReady() {
+  let service = appState.service || appState.bootstrap?.service;
+  if (!service || (service.status !== "running" && service.status !== "starting")) {
+    const bootstrap = await window.vibeApp.startService();
+    appState.bootstrap = bootstrap;
+    appState.service = bootstrap.service;
+    service = bootstrap.service;
+    renderService();
+  }
+
+  if (!service || service.status === "needs_setup" || service.status === "error") {
+    throw new Error(service?.message || "本地服务未就绪。");
+  }
+
+  connectLiveSocket();
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < SOCKET_READY_TIMEOUT_MS) {
+    if (appState.socket && appState.socket.readyState === WebSocket.OPEN && appState.socketReady) {
+      return appState.socket;
+    }
+    await delay(80);
+  }
+
+  throw new Error("连接本地服务超时。");
+}
+
+function cleanupLocalAudio() {
+  if (localMic.processor) {
+    localMic.processor.disconnect();
+    localMic.processor.onaudioprocess = null;
+    localMic.processor = null;
+  }
+  if (localMic.source) {
+    localMic.source.disconnect();
+    localMic.source = null;
+  }
+  if (localMic.stream) {
+    localMic.stream.getTracks().forEach((track) => track.stop());
+    localMic.stream = null;
+  }
+  if (localMic.context) {
+    void localMic.context.close().catch(() => {});
+    localMic.context = null;
+  }
+  localMic.level = 0;
+  localMic.db = null;
+}
+
+function floatToPcm16(samples) {
+  const output = new Int16Array(samples.length);
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, samples[index]));
+    output[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+  }
+  return output;
+}
+
+function resampleToPcm16(samples, inputRate) {
+  if (!samples.length) {
+    return new Int16Array(0);
+  }
+  if (inputRate === LOCAL_MIC_SAMPLE_RATE) {
+    return floatToPcm16(samples);
+  }
+
+  const ratio = inputRate / LOCAL_MIC_SAMPLE_RATE;
+  const outputLength = Math.max(1, Math.floor(samples.length / ratio));
+  const output = new Int16Array(outputLength);
+  for (let index = 0; index < outputLength; index += 1) {
+    const sourceIndex = index * ratio;
+    const left = Math.floor(sourceIndex);
+    const right = Math.min(left + 1, samples.length - 1);
+    const fraction = sourceIndex - left;
+    const sample = samples[left] + (samples[right] - samples[left]) * fraction;
+    const clamped = Math.max(-1, Math.min(1, sample));
+    output[index] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+  }
+  return output;
+}
+
+function updateLocalMicLevel(samples) {
+  if (!samples.length) {
+    localMic.level = 0;
+    localMic.db = null;
+    return;
+  }
+
+  let sum = 0;
+  for (const sample of samples) {
+    sum += sample * sample;
+  }
+  const rms = Math.sqrt(sum / samples.length);
+  const db = 20 * Math.log10(Math.max(rms, 0.00001));
+  localMic.db = db;
+  localMic.level = Math.max(0, Math.min(1, (db + 60) / 60));
+  renderLocalMic();
+}
+
+function handleLocalMicAudio(event) {
+  const output = event.outputBuffer.getChannelData(0);
+  output.fill(0);
+
+  if (!localMic.recording || !appState.socket || appState.socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  const input = event.inputBuffer.getChannelData(0);
+  updateLocalMicLevel(input);
+  const pcm = resampleToPcm16(input, localMic.context?.sampleRate || event.inputBuffer.sampleRate);
+  if (pcm.byteLength > 0) {
+    appState.socket.send(pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength));
+  }
+}
+
+async function startLocalMicRecording() {
+  if (localMic.recording || localMic.starting) {
+    return;
+  }
+
+  let sentStart = false;
+  localMic.starting = true;
+  localMic.stopAfterStart = false;
+  localMic.awaitingAction = false;
+  localMic.sessionActive = true;
+  setLocalMicStatus("connecting");
+
+  try {
+    await ensureBridgeSocketReady();
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("当前环境不支持浏览器麦克风采集。");
+    }
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) {
+      throw new Error("当前环境不支持 Web Audio。");
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      },
+      video: false
+    });
+    const context = new AudioContextCtor();
+    const source = context.createMediaStreamSource(stream);
+    const processor = context.createScriptProcessor(4096, 1, 1);
+
+    localMic.stream = stream;
+    localMic.context = context;
+    localMic.source = source;
+    localMic.processor = processor;
+
+    processor.onaudioprocess = handleLocalMicAudio;
+    sendBridgeJson({ type: "ptt_start", source: "desktop_mic" });
+    sentStart = true;
+    localMic.recording = true;
+    source.connect(processor);
+    processor.connect(context.destination);
+    await context.resume();
+    setLocalMicStatus("recording");
+
+    if (localMic.stopAfterStart) {
+      void stopLocalMicRecording();
+    }
+  } catch (error) {
+    if (sentStart) {
+      try {
+        sendBridgeJson({ type: "ptt_stop", source: "desktop_mic" });
+      } catch {
+        // ignore best-effort segment cleanup failures
+      }
+    }
+    cleanupLocalAudio();
+    localMic.sessionActive = false;
+    setLocalMicStatus("error", error instanceof Error ? error.message : String(error));
+  } finally {
+    localMic.starting = false;
+    renderLocalMic();
+  }
+}
+
+async function stopLocalMicRecording({ sendStop = true } = {}) {
+  if (localMic.starting && !localMic.recording) {
+    localMic.stopAfterStart = true;
+    return;
+  }
+  if (!localMic.recording || localMic.stopping) {
+    return;
+  }
+
+  localMic.stopping = true;
+  localMic.recording = false;
+  cleanupLocalAudio();
+  setLocalMicStatus(sendStop ? "transcribing" : "error", sendStop ? "" : "本地服务连接已断开。");
+
+  try {
+    if (sendStop) {
+      sendBridgeJson({ type: "ptt_stop", source: "desktop_mic" });
+    } else {
+      localMic.sessionActive = false;
+    }
+  } catch (error) {
+    localMic.sessionActive = false;
+    setLocalMicStatus("error", error instanceof Error ? error.message : String(error));
+  } finally {
+    localMic.stopping = false;
+    renderLocalMic();
+  }
+}
+
+async function sendLocalMicAction(type) {
+  try {
+    sendBridgeJson({ type });
+    localMic.awaitingAction = false;
+    localMic.sessionActive = false;
+    setLocalMicStatus("idle");
+  } catch (error) {
+    setLocalMicStatus("error", error instanceof Error ? error.message : String(error));
+  }
+}
+
+function finishLocalMicSessionFromBridge(message) {
+  if (!localMic.sessionActive) {
+    return;
+  }
+
+  if (message.type === "transcript_final") {
+    localMic.awaitingAction = message.requiresAction === true;
+    localMic.sessionActive = localMic.awaitingAction;
+    setLocalMicStatus(localMic.awaitingAction ? "awaiting_action" : "idle");
+    return;
+  }
+
+  if (message.type === "status") {
+    if (message.status === "transcribing") {
+      setLocalMicStatus("transcribing");
+      return;
+    }
+    if (message.status === "awaiting_action") {
+      localMic.awaitingAction = true;
+      localMic.sessionActive = true;
+      setLocalMicStatus("awaiting_action");
+      return;
+    }
+    if (["typed", "empty_segment", "transcript_empty"].includes(message.status)) {
+      localMic.awaitingAction = false;
+      localMic.sessionActive = false;
+      setLocalMicStatus("idle");
+    }
+  }
 }
 
 function setActiveTab(tabName) {
@@ -261,7 +718,10 @@ function collectFormPayload() {
     desktopSettings: {
       autoLaunch: elements.autoLaunch.checked,
       launchToTray: elements.launchToTray.checked,
-      closeToTray: elements.closeToTray.checked
+      closeToTray: elements.closeToTray.checked,
+      localMicHoldKey: localMic.holdKey,
+      localMicSendKey: localMic.sendKey,
+      localMicUndoKey: localMic.undoKey
     }
   };
 }
@@ -289,6 +749,7 @@ function fillForm(form, desktopSettingsPath) {
   elements.autoLaunch.checked = Boolean(form.desktopSettings?.autoLaunch);
   elements.launchToTray.checked = Boolean(form.desktopSettings?.launchToTray);
   elements.closeToTray.checked = Boolean(form.desktopSettings?.closeToTray);
+  setLocalMicHotkeys(form.desktopSettings);
   elements.codexSkipGitRepoCheck.checked = Boolean(form.codexSkipGitRepoCheck);
   elements.claudeDangerouslySkipPermissions.checked = Boolean(form.claudeDangerouslySkipPermissions);
   elements.userConfigPath.textContent = form.userConfigPath || "";
@@ -347,9 +808,13 @@ function renderLive() {
 
 function resetLiveConnection() {
   if (appState.socket) {
+    if (localMic.recording || localMic.starting) {
+      void stopLocalMicRecording({ sendStop: false });
+    }
     appState.socket.close();
     appState.socket = null;
   }
+  appState.socketReady = false;
   appState.socketPort = null;
   if (appState.reconnectTimer) {
     clearTimeout(appState.reconnectTimer);
@@ -368,7 +833,15 @@ function scheduleReconnect() {
 }
 
 function handleBridgeMessage(message) {
+  finishLocalMicSessionFromBridge(message);
+
+  if (message.type === "hello_ack") {
+    appState.socketReady = true;
+    return;
+  }
+
   if (message.type === "server_ready") {
+    appState.socketReady = true;
     liveState.cliStatus = `已连接 · ${modeLabel(message.sendTarget)}`;
     if (message.sendTarget) {
       elements.serviceMode.textContent = modeLabel(message.sendTarget);
@@ -435,6 +908,7 @@ function connectLiveSocket() {
   const socket = new WebSocket(`ws://127.0.0.1:${port}`);
   appState.socket = socket;
   appState.socketPort = port;
+  appState.socketReady = false;
 
   socket.addEventListener("open", () => {
     socket.send(JSON.stringify({ type: "hello", deviceId: "desktop-window", boardType: "desktop-window" }));
@@ -453,6 +927,10 @@ function connectLiveSocket() {
     if (appState.socket === socket) {
       appState.socket = null;
       appState.socketPort = null;
+      appState.socketReady = false;
+    }
+    if (localMic.recording || localMic.starting) {
+      void stopLocalMicRecording({ sendStop: false });
     }
     liveState.cliStatus = "连接已断开";
     renderService();
@@ -469,6 +947,10 @@ async function refreshBootstrap() {
   const bootstrap = await window.vibeApp.getBootstrap();
   appState.bootstrap = bootstrap;
   appState.service = bootstrap.service;
+  if (bootstrap.globalHotkeys) {
+    localMic.globalHotkeysReady = Boolean(bootstrap.globalHotkeys.ready);
+    setLocalMicHotkeys(bootstrap.globalHotkeys.settings || bootstrap.form.desktopSettings);
+  }
   fillForm(bootstrap.form, bootstrap.desktopSettingsPath);
   renderNotices(bootstrap.form);
   renderService();
@@ -483,6 +965,54 @@ async function chooseDirectory(targetInput) {
     updateFormAffordances();
   }
 }
+
+function handleGlobalHotkey(payload = {}) {
+  if (payload.type === "status") {
+    localMic.globalHotkeysReady = Boolean(payload.ready);
+    if (payload.settings) {
+      setLocalMicHotkeys(payload.settings);
+    }
+    renderLocalMic();
+    return;
+  }
+  if (payload.type === "record_start") {
+    void startLocalMicRecording();
+    return;
+  }
+  if (payload.type === "record_stop") {
+    void stopLocalMicRecording();
+    return;
+  }
+  if (payload.type === "action_send" && localMic.awaitingAction) {
+    void sendLocalMicAction("action_send");
+    return;
+  }
+  if (payload.type === "action_undo" && localMic.awaitingAction) {
+    void sendLocalMicAction("action_undo");
+  }
+}
+
+async function persistLocalMicHotkeys(patch = {}) {
+  setLocalMicHotkeys({
+    localMicHoldKey: patch.localMicHoldKey || localMic.holdKey,
+    localMicSendKey: patch.localMicSendKey || localMic.sendKey,
+    localMicUndoKey: patch.localMicUndoKey || localMic.undoKey
+  });
+  const bootstrap = await window.vibeApp.updateDesktopSettings({
+    localMicHoldKey: localMic.holdKey,
+    localMicSendKey: localMic.sendKey,
+    localMicUndoKey: localMic.undoKey
+  });
+  appState.bootstrap = bootstrap;
+  appState.service = bootstrap.service;
+  if (bootstrap.globalHotkeys) {
+    localMic.globalHotkeysReady = Boolean(bootstrap.globalHotkeys.ready);
+  }
+  renderService();
+  renderLocalMic();
+}
+
+let localMicPointerActive = false;
 
 elements.tabButtons.forEach((button) => {
   button.addEventListener("click", () => {
@@ -552,11 +1082,144 @@ elements.openConfigFolderButton.addEventListener("click", async () => {
 elements.pickCodexCwdButton.addEventListener("click", () => chooseDirectory(elements.codexCwd));
 elements.pickClaudeCwdButton.addEventListener("click", () => chooseDirectory(elements.claudeCwd));
 
+function beginHotkeyCapture(target) {
+  localMic.capturingHotkey = target;
+  const input = target === "send"
+    ? elements.localMicSendKey
+    : target === "undo"
+      ? elements.localMicUndoKey
+      : elements.localMicHoldKey;
+  input.value = "按下新的快捷键...";
+  input.focus();
+  renderLocalMic();
+}
+
+function persistCapturedHotkey(hotkey) {
+  const target = localMic.capturingHotkey;
+  localMic.capturingHotkey = null;
+  if (target === "send") {
+    void persistLocalMicHotkeys({ localMicSendKey: hotkey });
+    return;
+  }
+  if (target === "undo") {
+    void persistLocalMicHotkeys({ localMicUndoKey: hotkey });
+    return;
+  }
+  void persistLocalMicHotkeys({ localMicHoldKey: hotkey });
+}
+
+elements.captureLocalMicHoldKeyButton.addEventListener("click", () => beginHotkeyCapture("hold"));
+elements.captureLocalMicSendKeyButton.addEventListener("click", () => beginHotkeyCapture("send"));
+elements.captureLocalMicUndoKeyButton.addEventListener("click", () => beginHotkeyCapture("undo"));
+
+elements.resetLocalMicHoldKeyButton.addEventListener("click", () => {
+  localMic.capturingHotkey = null;
+  void persistLocalMicHotkeys({ localMicHoldKey: DEFAULT_LOCAL_MIC_HOLD_KEY });
+});
+
+elements.resetLocalMicSendKeyButton.addEventListener("click", () => {
+  localMic.capturingHotkey = null;
+  void persistLocalMicHotkeys({ localMicSendKey: DEFAULT_LOCAL_MIC_SEND_KEY });
+});
+
+elements.resetLocalMicUndoKeyButton.addEventListener("click", () => {
+  localMic.capturingHotkey = null;
+  void persistLocalMicHotkeys({ localMicUndoKey: DEFAULT_LOCAL_MIC_UNDO_KEY });
+});
+
+elements.localMicButton.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0 || localMic.capturingHotkey) {
+    return;
+  }
+  event.preventDefault();
+  localMicPointerActive = true;
+  void startLocalMicRecording();
+});
+
+window.addEventListener("pointerup", () => {
+  if (!localMicPointerActive) {
+    return;
+  }
+  localMicPointerActive = false;
+  void stopLocalMicRecording();
+});
+
+window.addEventListener("pointercancel", () => {
+  if (!localMicPointerActive) {
+    return;
+  }
+  localMicPointerActive = false;
+  void stopLocalMicRecording();
+});
+
+elements.localMicSendButton.addEventListener("click", () => {
+  void sendLocalMicAction("action_send");
+});
+
+elements.localMicUndoButton.addEventListener("click", () => {
+  void sendLocalMicAction("action_undo");
+});
+
+document.addEventListener("keydown", (event) => {
+  const hotkey = eventToHotkey(event);
+  if (localMic.capturingHotkey) {
+    if (!hotkey) {
+      return;
+    }
+    event.preventDefault();
+    persistCapturedHotkey(hotkey);
+    return;
+  }
+
+  if (localMic.globalHotkeysReady || !hotkey || event.repeat || isEditableTarget(event.target)) {
+    return;
+  }
+  if (hotkey !== localMic.holdKey) {
+    if (hotkey === localMic.sendKey && localMic.awaitingAction) {
+      event.preventDefault();
+      void sendLocalMicAction("action_send");
+      return;
+    }
+    if (hotkey === localMic.undoKey && localMic.awaitingAction) {
+      event.preventDefault();
+      void sendLocalMicAction("action_undo");
+    }
+    return;
+  }
+
+  event.preventDefault();
+  localMic.activeHotkeyCode = event.code;
+  void startLocalMicRecording();
+});
+
+document.addEventListener("keyup", (event) => {
+  if (localMic.globalHotkeysReady) {
+    return;
+  }
+  if (!localMic.activeHotkeyCode || event.code !== localMic.activeHotkeyCode) {
+    return;
+  }
+  event.preventDefault();
+  localMic.activeHotkeyCode = null;
+  void stopLocalMicRecording();
+});
+
+window.addEventListener("blur", () => {
+  localMicPointerActive = false;
+  localMic.activeHotkeyCode = null;
+  if (!localMic.globalHotkeysReady && (localMic.recording || localMic.starting)) {
+    void stopLocalMicRecording();
+  }
+});
+
 window.vibeApp.onState((payload) => {
   appState.service = payload.service;
   renderService();
   connectLiveSocket();
 });
 
+window.vibeApp.onGlobalHotkey(handleGlobalHotkey);
+
 setActiveTab("basics");
+renderLocalMic();
 await refreshBootstrap();

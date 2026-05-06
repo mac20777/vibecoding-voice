@@ -10,7 +10,7 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 
 **Voice-driven AI coding via a wireless ESP32 e-paper device — speak naturally, confirm on the e-paper screen, and send text to Inject, Codex, or Claude without keyboard interruption.**
 
-> Now includes a Windows desktop app with tray mode, start-on-login, a local settings UI, and packaged installers, so non-technical users can use it without touching a terminal.
+> Now includes a Windows desktop app with tray mode, start-on-login, local USB microphone push-to-talk, a local settings UI, and packaged installers, so non-technical users can use it without touching a terminal.
 >
 > Latest Zectrix 4.2" firmware package: `v2.2.7_zectrix-s3-epaper-4.2.zip`, with long-outage reconnect fixes, offline deep sleep support, Chinese-to-English/Korean/Japanese voice translation confirmation, selectable target / Chinese+English / all-language send modes, and a DN double-click English-output shortcut.
 
@@ -33,6 +33,7 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 - Talk to Codex, Claude Code, or any active Windows input box through a dedicated ESP32 push-to-talk device
 - Speak Chinese and send polished English, Korean, Japanese, or a combined Chinese + English/Korean/Japanese block, with the board showing the Chinese original above the selected translation before you confirm
 - Choose between a developer-friendly CLI flow and a normal Windows desktop app for non-technical users
+- Use either the ESP32 board microphone or a PC/USB microphone from the Windows app; the desktop mic supports global press-and-hold recording shortcuts
 - Keep the host bridge running in the background with tray controls, mode switching, and saved local settings
 - Project AI progress, transcript confirmation, and device pairing state back onto the e-paper screen
 - Recover cleanly when the desktop bridge is stopped and restarted, and preserve battery when the host stays offline
@@ -83,7 +84,8 @@ Both boards use ESP32-S3 with onboard MEMS mic and push-button.
 - STT via Volcengine Flash ASR or OpenAI Whisper
 - Windows text injection via clipboard (Ctrl+V)
 - Windows desktop app with tray icon, start on login, hidden launch, close-to-tray behavior, and packaged installer output
-- Local desktop settings UI with grouped tabs for mode, speech provider, workspace, and advanced options
+- Local desktop settings UI with grouped tabs for mode, speech provider, USB mic hotkey, workspace, and advanced options
+- PC/USB microphone capture in the Windows app, including configurable global shortcuts for press-and-hold recording, send, and undo in confirm mode
 - Managed `codex exec --json` session bridge
 - Managed `claude -p --output-format stream-json` session bridge
 - Optional Chinese-to-English/Korean/Japanese voice translation through DeepSeek, configurable in the desktop app and confirmed on the board as `Chinese` / selected target language before send, with send modes for target-only, Chinese + target, Chinese + English, or Chinese + English + Korean + Japanese
@@ -138,6 +140,9 @@ If you want a normal desktop app instead of a terminal window, this repo now inc
 - close-to-tray background behavior
 - a local settings window for `config.env`
 - grouped settings tabs for basic use, speech provider, workspace, and advanced options
+- local PC/USB microphone recording using the same STT, translation, and send pipeline as the board
+- configurable global shortcuts in the Speech tab: hold `F8` to record, press `F9` to send, and press `F10` to undo
+- desktop send/undo buttons when transcript delivery is set to confirm before sending
 - live status and recent activity view
 - packaged Windows installer output
 
@@ -514,7 +519,7 @@ node scripts/console.mjs
 
 **用无线 ESP32 电子墨水设备实现语音驱动的 AI 编程——无需抢占麦克风，无需中断键盘，按键说话即可。**
 
-> 现在已经带有 Windows 桌面版：支持托盘、自启动、本地设置界面和安装包，普通用户不用碰命令行也能直接用。
+> 现在已经带有 Windows 桌面版：支持托盘、自启动、本机 USB 麦克风按住说话、本地设置界面和安装包，普通用户不用碰命令行也能直接用。
 >
 > 最新 Zectrix 4.2" 固件包：`v2.2.7_zectrix-s3-epaper-4.2.zip`，包含长时间断线后的自动重连修复、离线低功耗休眠、中文语音转英语/韩语/日语的板端确认、只发目标语言 / 中英 / 中英韩日发送模式切换，以及 DN 双击英文输出快捷开关。
 
@@ -537,6 +542,7 @@ node scripts/console.mjs
 - 用一个独立的 ESP32 按键语音设备，把指令发给 Codex、Claude Code，或者直接发到 Windows 当前输入框
 - 可以中文说，发送英语、韩语、日语，或者一次发送中文 + 英语/韩语/日语；设备确认页上半区显示中文原文，下半区显示选中的译文
 - 同时兼容开发者工作流和普通用户工作流：既可以用 CLI，也可以用桌面版
+- 既可以用 ESP32 板载麦克风，也可以直接用 Windows 桌面版采集电脑/USB 麦克风；桌面麦克风支持后台全局按住录音快捷键
 - 主机桥接服务可以常驻后台，通过托盘、模式切换和本地设置页来管理
 - 设备端不仅能说话输入，还能在电子墨水屏上看到 AI 执行进度、转写确认和连接状态
 - 电脑服务关闭后再启动，设备可以自动恢复连接；电脑长时间关机或服务停止时，设备会进入低功耗休眠以保护电量
@@ -586,7 +592,8 @@ node scripts/console.mjs
 - 语音识别支持火山引擎闪速 ASR 或 OpenAI Whisper
 - 通过剪贴板（Ctrl+V）注入 Windows 文本
 - 带 Windows 桌面版：支持托盘图标、开机自启、隐藏启动、关闭后驻留托盘和安装包
-- 带本地设置界面：按“基础 / 识别 / 工作区 / 高级”分组管理配置
+- 带本地设置界面：按“基础 / 识别 / 工作区 / 高级”分组管理配置，也可以设置 USB 麦克风录音、发送、撤销快捷键
+- Windows 桌面版可直接采集电脑/USB 麦克风，并在设备确认模式下提供桌面发送/撤销按钮和全局快捷键
 - 托管 `codex exec --json` 会话
 - 托管 `claude -p --output-format stream-json` 会话
 - 可选中文转英语/韩语/日语翻译：中文语音先经 DeepSeek 翻译，桌面端可配置提示词，板子上以 `Chinese` / 目标语言双区确认，可切换只发目标语言、中 + 目标、中英，或中英韩日一起发送
@@ -641,6 +648,9 @@ npm install
 - 关闭窗口后最小化到托盘
 - 本地设置窗口，直接编辑 `config.env`
 - 按标签页分组的设置中心
+- 本机电脑/USB 麦克风录音，复用和板子相同的语音识别、翻译和发送链路
+- 在“识别”页设置全局快捷键，默认后台也可按住 `F8` 录音、松开提交，按 `F9` 发送，按 `F10` 撤销
+- 设备确认模式下，也可以在桌面端点击发送或撤销
 - 最近活动和服务状态面板
 - 打包成 Windows 安装包
 

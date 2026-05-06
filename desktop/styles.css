@@ -225,27 +225,19 @@ body {
   color: var(--on-surface-variant);
 }
 
-.mic-badge {
-  position: relative;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: var(--surface-highest);
-  border: 1px solid rgba(109, 221, 255, 0.2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.mic-record-btn {
   color: var(--primary);
-  margin-left: 4px;
+  border-color: rgba(109, 221, 255, 0.25);
 }
-.mic-badge::before {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  border-radius: 50%;
-  background: var(--primary-glow);
-  filter: blur(6px);
-  animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+
+.mic-record-btn.is-recording {
+  background: rgba(109, 221, 255, 0.12);
+  border-color: rgba(109, 221, 255, 0.55);
+  box-shadow: 0 0 16px rgba(109, 221, 255, 0.12);
+}
+
+.mic-confirm-btn {
+  padding-inline: 10px;
 }
 
 /* ─── App Layout ─────────────────────────────────────────────────────── */
@@ -404,7 +396,7 @@ body {
 
 .status-cards {
   display: grid;
-  grid-template-columns: 200px 1fr;
+  grid-template-columns: 200px 220px 1fr;
   gap: 12px;
 }
 
@@ -431,6 +423,14 @@ body {
   font-size: 18px;
   font-weight: 600;
   color: var(--on-surface);
+}
+
+.card-detail {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--on-surface-variant);
+  overflow-wrap: anywhere;
 }
 
 .status-card-wide {
@@ -620,6 +620,20 @@ select {
   grid-template-columns: 1fr auto;
   gap: 8px;
   align-items: start;
+}
+
+.hotkey-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.field-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--outline);
 }
 
 .pick-btn {
@@ -930,6 +944,9 @@ select {
 /* ─── Responsive ─────────────────────────────────────────────────────── */
 @media (max-width: 1100px) {
   .sidebar { width: 220px; }
+  .topnav-left { gap: 12px; }
+  .nav-btn { padding-inline: 9px; }
+  .status-cards { grid-template-columns: 180px 200px 1fr; }
 }
 
 @media (max-width: 880px) {
@@ -937,11 +954,13 @@ select {
   .status-cards { grid-template-columns: 1fr; }
   .pulse-body { grid-template-columns: 1fr 1fr; }
   .waveform-col { display: none; }
+  .mic-confirm-btn { display: none; }
 }
 
 @media (max-width: 640px) {
   .nav-chips { display: none; }
   .form-grid-2 { grid-template-columns: 1fr; }
+  .hotkey-row { grid-template-columns: 1fr; }
   .toggle-row { grid-template-columns: 1fr; }
   .pulse-body { grid-template-columns: 1fr; }
   .log-col:last-of-type { display: none; }

@@ -15,5 +15,11 @@ contextBridge.exposeInMainWorld("vibeApp", {
       return;
     }
     ipcRenderer.on("desktop:state", (_event, payload) => callback(payload));
+  },
+  onGlobalHotkey: (callback) => {
+    if (typeof callback !== "function") {
+      return;
+    }
+    ipcRenderer.on("desktop:global-hotkey", (_event, payload) => callback(payload));
   }
 });

@@ -63,12 +63,15 @@
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
           </svg>
         </button>
-        <div class="mic-badge">
+        <button id="local-mic-button" class="nav-btn mic-record-btn" type="button" title="按住按钮或快捷键录音">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
             <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" />
           </svg>
-        </div>
+          <span id="local-mic-button-label">按住 F8</span>
+        </button>
+        <button id="local-mic-send-button" class="nav-btn mic-confirm-btn" type="button" disabled>发送 F9</button>
+        <button id="local-mic-undo-button" class="nav-btn mic-confirm-btn" type="button" disabled>撤销 F10</button>
       </div>
     </nav>
 
@@ -127,6 +130,11 @@
             <article class="status-card">
               <span class="card-label">当前模式</span>
               <strong id="service-mode" class="card-value">Inject</strong>
+            </article>
+            <article class="status-card">
+              <span class="card-label">USB 麦克风</span>
+              <strong id="local-mic-state" class="card-value">待命</strong>
+              <p id="local-mic-hint" class="card-detail">按住 F8 录音</p>
             </article>
             <article class="status-card status-card-wide">
               <div class="notice-stack">
@@ -219,6 +227,33 @@
                   <span class="field-label">设备共享密钥</span>
                   <input id="lan-shared-secret" name="lanSharedSecret" type="password" autocomplete="off" />
                 </label>
+                <div class="provider-section">
+                  <label class="field">
+                    <span class="field-label">本机 USB 麦克风按住录音快捷键</span>
+                    <div class="hotkey-row">
+                      <input id="local-mic-hold-key" name="localMicHoldKey" type="text" readonly />
+                      <button id="capture-local-mic-hold-key-button" class="pick-btn" type="button">录入</button>
+                      <button id="reset-local-mic-hold-key-button" class="pick-btn" type="button">F8</button>
+                    </div>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">确认发送快捷键</span>
+                    <div class="hotkey-row">
+                      <input id="local-mic-send-key" name="localMicSendKey" type="text" readonly />
+                      <button id="capture-local-mic-send-key-button" class="pick-btn" type="button">录入</button>
+                      <button id="reset-local-mic-send-key-button" class="pick-btn" type="button">F9</button>
+                    </div>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">确认撤销快捷键</span>
+                    <div class="hotkey-row">
+                      <input id="local-mic-undo-key" name="localMicUndoKey" type="text" readonly />
+                      <button id="capture-local-mic-undo-key-button" class="pick-btn" type="button">录入</button>
+                      <button id="reset-local-mic-undo-key-button" class="pick-btn" type="button">F10</button>
+                    </div>
+                  </label>
+                  <p class="field-note field-full">这些快捷键是全局快捷键，APP 在后台时也可用；录音键按住开始，松开后自动提交识别。</p>
+                </div>
               </div>
             </section>
 
@@ -378,20 +413,20 @@
           <pre id="service-log-tail" class="log-box">等待启动。</pre>
         </div>
         <div class="waveform-col">
-          <span class="waveform-label">Input Level</span>
+          <span class="waveform-label">USB Mic</span>
           <div class="waveform">
-            <div class="bar" style="height:20%"></div>
-            <div class="bar" style="height:40%"></div>
-            <div class="bar bar-bright" style="height:80%"></div>
-            <div class="bar bar-secondary" style="height:100%"></div>
-            <div class="bar bar-bright" style="height:60%"></div>
-            <div class="bar" style="height:30%"></div>
-            <div class="bar" style="height:15%"></div>
-            <div class="bar bar-dim" style="height:10%"></div>
+            <div class="bar" data-local-mic-bar style="height:8%"></div>
+            <div class="bar" data-local-mic-bar style="height:8%"></div>
+            <div class="bar bar-bright" data-local-mic-bar style="height:8%"></div>
+            <div class="bar bar-secondary" data-local-mic-bar style="height:8%"></div>
+            <div class="bar bar-bright" data-local-mic-bar style="height:8%"></div>
+            <div class="bar" data-local-mic-bar style="height:8%"></div>
+            <div class="bar" data-local-mic-bar style="height:8%"></div>
+            <div class="bar bar-dim" data-local-mic-bar style="height:8%"></div>
           </div>
           <div class="waveform-footer">
-            <span class="waveform-active">Active</span>
-            <span class="waveform-db">-12dB</span>
+            <span id="local-mic-activity" class="waveform-active">Idle</span>
+            <span id="local-mic-db" class="waveform-db">-- dB</span>
           </div>
         </div>
       </div>

@@ -9,19 +9,28 @@ test("normalizeDesktopSettings applies safe defaults", () => {
   assert.deepEqual(normalizeDesktopSettings(), {
     autoLaunch: false,
     launchToTray: false,
-    closeToTray: false
+    closeToTray: false,
+    localMicHoldKey: "F8",
+    localMicSendKey: "F9",
+    localMicUndoKey: "F10"
   });
 
   assert.deepEqual(
     normalizeDesktopSettings({
       autoLaunch: true,
       launchToTray: true,
-      closeToTray: false
+      closeToTray: false,
+      localMicHoldKey: "Ctrl+Alt+M",
+      localMicSendKey: "F11",
+      localMicUndoKey: "Ctrl+Backspace"
     }),
     {
       autoLaunch: true,
       launchToTray: true,
-      closeToTray: false
+      closeToTray: false,
+      localMicHoldKey: "Ctrl+Alt+M",
+      localMicSendKey: "F11",
+      localMicUndoKey: "Ctrl+Backspace"
     }
   );
 });
@@ -60,7 +69,10 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
     {
       autoLaunch: true,
       launchToTray: true,
-      closeToTray: false
+      closeToTray: false,
+      localMicHoldKey: "Ctrl+Shift+Space",
+      localMicSendKey: "F9",
+      localMicUndoKey: "F10"
     }
   );
 
@@ -79,7 +91,10 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
   assert.deepEqual(formState.desktopSettings, {
     autoLaunch: true,
     launchToTray: true,
-    closeToTray: false
+    closeToTray: false,
+    localMicHoldKey: "Ctrl+Shift+Space",
+    localMicSendKey: "F9",
+    localMicUndoKey: "F10"
   });
 });
 

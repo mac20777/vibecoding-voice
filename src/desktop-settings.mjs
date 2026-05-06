@@ -6,7 +6,10 @@ import { getUserConfigDir } from "./paths.mjs";
 export const DEFAULT_DESKTOP_SETTINGS = Object.freeze({
   autoLaunch: false,
   launchToTray: false,
-  closeToTray: false
+  closeToTray: false,
+  localMicHoldKey: "F8",
+  localMicSendKey: "F9",
+  localMicUndoKey: "F10"
 });
 
 export function getDesktopSettingsPath() {
@@ -17,8 +20,19 @@ export function normalizeDesktopSettings(value = {}) {
   return {
     autoLaunch: value.autoLaunch === true,
     launchToTray: value.launchToTray === true,
-    closeToTray: value.closeToTray === true
+    closeToTray: value.closeToTray === true,
+    localMicHoldKey: normalizeLocalMicHotkey(value.localMicHoldKey, DEFAULT_DESKTOP_SETTINGS.localMicHoldKey),
+    localMicSendKey: normalizeLocalMicHotkey(value.localMicSendKey, DEFAULT_DESKTOP_SETTINGS.localMicSendKey),
+    localMicUndoKey: normalizeLocalMicHotkey(value.localMicUndoKey, DEFAULT_DESKTOP_SETTINGS.localMicUndoKey)
   };
+}
+
+function normalizeLocalMicHotkey(value, fallback) {
+  const normalized = String(value || "").replace(/\s+/g, "");
+  if (!normalized || normalized.length > 64) {
+    return fallback;
+  }
+  return normalized;
 }
 
 export function loadDesktopSettings() {
