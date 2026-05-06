@@ -8,14 +8,24 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 
 ## English
 
-**Voice-driven AI coding via a wireless ESP32 e-paper device — speak naturally, confirm on the e-paper screen, and send text to Inject, Codex, or Claude without keyboard interruption.**
+**Voice-driven AI coding through either a wireless ESP32 e-paper device or a PC/USB microphone — speak naturally and send text to Inject, Codex, or Claude without keyboard interruption.**
 
 > Now includes a Windows desktop app with tray mode, start-on-login, local USB microphone push-to-talk, a local settings UI, and packaged installers, so non-technical users can use it without touching a terminal.
 >
 > Latest Zectrix 4.2" firmware package: `v2.2.7_zectrix-s3-epaper-4.2.zip`, with long-outage reconnect fixes, offline deep sleep support, Chinese-to-English/Korean/Japanese voice translation confirmation, selectable target / Chinese+English / all-language send modes, and a DN double-click English-output shortcut.
 
+### New: PC/USB Microphone Mode
+
+`vibecoding-voice` now works even without the ESP32 board. The Windows desktop app can use a normal PC microphone or USB microphone as a second voice input device, then sends the audio through the same STT, translation, confirmation, and Inject / Codex / Claude pipeline.
+
+- **Global push-to-talk**: hold `F8` anywhere on Windows to record, release to transcribe and submit.
+- **Desktop confirm shortcuts**: press `F9` to send or `F10` to undo when confirmation is enabled.
+- **Configurable keys**: change record / send / undo shortcuts from the desktop app's Speech tab.
+- **Same backend path**: desktop mic audio is streamed as 16 kHz PCM over WebSocket, just like the board firmware, so existing STT and translation settings still apply.
+
 ### New in v2.2.7
 
+- **PC/USB microphone input**: the Windows desktop app can now act as a local push-to-talk microphone device with global shortcuts.
 - **DN double-click English shortcut**: on the Live page, double-click `DN` to toggle Chinese speech -> English-only output; double-click `DN` again to return to normal transcript output.
 - **Multilingual voice translation**: speak Chinese and translate to English, Korean, or Japanese through DeepSeek.
 - **Selectable send formats**: send only the target translation, Chinese + target language, Chinese + English, or Chinese + English + Korean + Japanese.
@@ -23,9 +33,9 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 - **Clean output**: multilingual send output is plain text without `Chinese:` / `English:` labels, so the receiving app gets only the content you asked for.
 - **Packaged hardware release**: firmware package `v2.2.7_zectrix-s3-epaper-4.2.zip` includes the updated board menu, multilingual confirmation display, and shortcut behavior.
 
-`vibecoding-voice` is a two-part open-source project:
+`vibecoding-voice` is an open-source voice bridge with two input paths:
 
-1. **Host bridge** (this repo) — a Node.js server that runs on your PC. It receives push-to-talk audio from an ESP32 device over WebSocket, transcribes it, can optionally translate Chinese speech into English, Korean, or Japanese through DeepSeek, and either injects the text into the active Windows input field or drives a Codex / Claude Code CLI session.
+1. **Windows desktop / host bridge** (this repo) — a Node.js + Electron app that can use either a local PC/USB microphone or audio from an ESP32 device, transcribe it, optionally translate Chinese speech into English, Korean, or Japanese through DeepSeek, and either inject the text into the active Windows input field or drive a Codex / Claude Code CLI session.
 2. **ESP32 firmware** (`firmware/`) — runs on supported e-paper boards such as Zectrix S3 and Waveshare S3, and is intended to grow into a fully DIY ESP32-S3 hardware path as well. It handles Wi-Fi, push-to-talk recording, multilingual device-side confirmation UI, resilient LAN reconnects, offline low-power sleep, and renders live CLI output on the e-ink screen.
 
 ### Why this project is useful
@@ -517,14 +527,24 @@ node scripts/console.mjs
 
 ## 中文
 
-**用无线 ESP32 电子墨水设备实现语音驱动的 AI 编程——无需抢占麦克风，无需中断键盘，按键说话即可。**
+**通过无线 ESP32 电子墨水设备，或者直接通过电脑/USB 麦克风，实现语音驱动的 AI 编程——无需中断键盘，按键说话即可。**
 
 > 现在已经带有 Windows 桌面版：支持托盘、自启动、本机 USB 麦克风按住说话、本地设置界面和安装包，普通用户不用碰命令行也能直接用。
 >
 > 最新 Zectrix 4.2" 固件包：`v2.2.7_zectrix-s3-epaper-4.2.zip`，包含长时间断线后的自动重连修复、离线低功耗休眠、中文语音转英语/韩语/日语的板端确认、只发目标语言 / 中英 / 中英韩日发送模式切换，以及 DN 双击英文输出快捷开关。
 
+### 新增：PC/USB 麦克风输入
+
+现在即使没有 ESP32 板子，也可以直接使用 `vibecoding-voice`。Windows 桌面版可以把普通电脑麦克风或 USB 麦克风作为第二种语音输入设备，录到的音频会进入同一套语音识别、翻译、确认和 Inject / Codex / Claude 发送链路。
+
+- **后台全局按住说话**：在 Windows 任意窗口按住 `F8` 录音，松开后自动转写并提交。
+- **桌面确认快捷键**：开启确认模式时，按 `F9` 发送，按 `F10` 撤销。
+- **快捷键可配置**：录音 / 发送 / 撤销三个快捷键都可以在桌面端“识别”页修改。
+- **复用同一套后端**：桌面麦克风音频同样以 16 kHz PCM 通过 WebSocket 发送，和板子固件走同一套 STT 与翻译配置。
+
 ### v2.2.7 更新内容
 
+- **PC/USB 麦克风输入**：Windows 桌面版现在可以作为本地按住说话麦克风设备，并支持后台全局快捷键。
 - **DN 双击英文快捷开关**：Live 页面空闲时，双击 `DN` 切换到“中文说话，只输出英文”；再次双击 `DN` 关闭翻译，回到普通转写输出。
 - **多语言语音翻译**：中文说话，经 DeepSeek 翻译成英语、韩语或日语。
 - **可选发送格式**：可以只发送目标语言，也可以发送中文 + 目标语言、中文 + 英语，或中文 + 英语 + 韩语 + 日语。
@@ -532,9 +552,9 @@ node scripts/console.mjs
 - **输出更干净**：多语言发送内容不再带 `Chinese:` / `English:` 这类前缀，接收端只会拿到纯文本内容。
 - **已打包硬件版本**：`v2.2.7_zectrix-s3-epaper-4.2.zip` 固件包已包含新的板端菜单、多语言确认界面和快捷键行为。
 
-`vibecoding-voice` 是一个由两部分组成的开源项目：
+`vibecoding-voice` 是一个支持两种语音输入路径的开源项目：
 
-1. **主机桥接服务**（本仓库）— 运行在你电脑上的 Node.js 服务器。它通过 WebSocket 从 ESP32 设备接收按键说话（PTT）音频，调用语音识别将其转写，也可以通过 DeepSeek 把中文语音翻译成英语、韩语或日语，然后注入 Windows 当前输入框，或者驱动 Codex / Claude Code CLI 会话。
+1. **Windows 桌面端 / 主机桥接服务**（本仓库）— 运行在你电脑上的 Node.js + Electron 应用。它既可以直接采集电脑/USB 麦克风，也可以通过 WebSocket 从 ESP32 设备接收按键说话（PTT）音频，调用语音识别将其转写，也可以通过 DeepSeek 把中文语音翻译成英语、韩语或日语，然后注入 Windows 当前输入框，或者驱动 Codex / Claude Code CLI 会话。
 2. **ESP32 固件**（`firmware/` 目录）— 可运行在 Zectrix S3、Waveshare S3 这类已支持的电子墨水屏开发板上，后续也会补一个完全 DIY 的 ESP32-S3 硬件方案。负责 Wi-Fi 连接、按键录音、设备端多语言确认界面、可靠的局域网重连、离线低功耗休眠，并将 CLI 实时输出渲染到电子墨水屏上。
 
 ### 这个项目现在能解决什么问题
