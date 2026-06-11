@@ -193,27 +193,39 @@ export function isCliAvailable(command) {
   }
 }
 
-function autoDetectSendTarget(claudeCommand, codexCommand) {
-  if (isCliAvailable(claudeCommand)) {
+function autoDetectSendTarget(claudeCommand, codexCommand, cliAvailable = isCliAvailable) {
+  if (cliAvailable(claudeCommand)) {
     return { sendTarget: "claude_code", sendTargetAuto: true };
   }
-  if (isCliAvailable(codexCommand)) {
+  if (cliAvailable(codexCommand)) {
     return { sendTarget: "codex_exec", sendTargetAuto: true };
   }
   return { sendTarget: "text_injector", sendTargetAuto: true };
 }
 
-export function resolveSendTarget(sendTargetEnv, { desktopMode = false, claudeCommand, codexCommand } = {}) {
+export function resolveSendTarget(
+  sendTargetEnv,
+  {
+    desktopMode = false,
+    claudeCommand,
+    codexCommand,
+    platform = process.platform,
+    cliAvailable = isCliAvailable
+  } = {}
+) {
   const explicitSendTarget = String(sendTargetEnv || "").trim();
   if (explicitSendTarget) {
     return { sendTarget: explicitSendTarget, sendTargetAuto: false };
   }
 
   if (desktopMode) {
+    if (platform !== "win32") {
+      return autoDetectSendTarget(claudeCommand, codexCommand, cliAvailable);
+    }
     return { sendTarget: "text_injector", sendTargetAuto: false };
   }
 
-  return autoDetectSendTarget(claudeCommand, codexCommand);
+  return autoDetectSendTarget(claudeCommand, codexCommand, cliAvailable);
 }
 
 export function detectConfiguredSttProvider(config) {

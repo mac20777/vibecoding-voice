@@ -154,12 +154,28 @@ test("resolveSendTarget defaults desktop mode to inject", () => {
   const resolved = resolveSendTarget("", {
     desktopMode: true,
     claudeCommand: "claude",
-    codexCommand: "codex"
+    codexCommand: "codex",
+    platform: "win32"
   });
 
   assert.deepEqual(resolved, {
     sendTarget: "text_injector",
     sendTargetAuto: false
+  });
+});
+
+test("resolveSendTarget auto-detects CLI target in Linux desktop mode", () => {
+  const resolved = resolveSendTarget("", {
+    desktopMode: true,
+    claudeCommand: "claude",
+    codexCommand: "codex",
+    platform: "linux",
+    cliAvailable: (command) => command === "codex"
+  });
+
+  assert.deepEqual(resolved, {
+    sendTarget: "codex_exec",
+    sendTargetAuto: true
   });
 });
 

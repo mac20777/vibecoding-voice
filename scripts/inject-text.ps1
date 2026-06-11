@@ -1,14 +1,22 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$TextBase64,
+    [string]$TextBase64 = "",
 
-    [ValidateSet("type_only", "type_and_enter")]
+    [ValidateSet("type_only", "type_and_enter", "enter_only")]
     [string]$Mode = "type_only"
 )
 
 $ErrorActionPreference = "Stop"
 
 Add-Type -AssemblyName System.Windows.Forms
+
+if ($Mode -eq "enter_only") {
+    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+    return
+}
+
+if (-not $TextBase64) {
+    return
+}
 
 $text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($TextBase64))
 

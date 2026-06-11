@@ -1,5 +1,6 @@
 const elements = {
   statusPill: document.querySelector("#status-pill"),
+  footerServiceStatus: document.querySelector("#footer-service-status"),
   serviceMode: document.querySelector("#service-mode"),
   servicePort: document.querySelector("#service-port"),
   cliStatus: document.querySelector("#cli-status"),
@@ -314,14 +315,16 @@ function localMicStatusText() {
     return { state: "识别中", hint: "正在提交给语音识别服务" };
   }
   if (localMic.status === "awaiting_action") {
-    return { state: "待确认", hint: "点击发送或撤销" };
+    return { state: "待确认", hint: `按 ${displayHotkey(localMic.sendKey)} 发送，${displayHotkey(localMic.undoKey)} 撤销` };
   }
   if (localMic.status === "error") {
     return { state: "异常", hint: localMic.error || "麦克风不可用" };
   }
   return {
     state: "待命",
-    hint: `${localMic.globalHotkeysReady ? "后台可用" : "窗口内可用"} · 按住 ${displayHotkey(localMic.holdKey)} 录音`
+    hint:
+      `${localMic.globalHotkeysReady ? "后台可用" : "窗口内可用"} · ` +
+      `按住 ${displayHotkey(localMic.holdKey)} 输入，${displayHotkey(localMic.sendKey)} 发送`
   };
 }
 
@@ -334,7 +337,8 @@ function renderLocalMic() {
     : `按住 ${displayHotkey(localMic.holdKey)}`;
   elements.localMicButton.classList.toggle("is-recording", localMic.recording);
   elements.localMicButton.disabled = localMic.starting || localMic.stopping || localMic.capturingHotkey;
-  elements.localMicSendButton.disabled = !localMic.awaitingAction || localMic.recording || localMic.starting;
+  elements.localMicSendButton.disabled =
+    localMic.recording || localMic.starting || localMic.stopping || localMic.capturingHotkey;
   elements.localMicUndoButton.disabled = !localMic.awaitingAction || localMic.recording || localMic.starting;
   elements.localMicSendButton.textContent = `发送 ${displayHotkey(localMic.sendKey)}`;
   elements.localMicUndoButton.textContent = `撤销 ${displayHotkey(localMic.undoKey)}`;
@@ -520,7 +524,12 @@ async function startLocalMicRecording() {
     localMic.processor = processor;
 
     processor.onaudioprocess = handleLocalMicAudio;
-    sendBridgeJson({ type: "ptt_start", source: "desktop_mic" });
+    sendBridgeJson({
+      type: "ptt_start",
+      source: "desktop_mic",
+      transcriptDeliveryMode: "immediate",
+      textInjectionMode: "type_only"
+    });
     sentStart = true;
     localMic.recording = true;
     source.connect(processor);
@@ -588,6 +597,31 @@ async function sendLocalMicAction(type) {
   }
 }
 
+async function submitLocalMicInput() {
+  if (localMic.recording || localMic.starting || localMic.stopping || localMic.capturingHotkey) {
+    return;
+  }
+
+  try {
+    await ensureBridgeSocketReady();
+    sendBridgeJson({ type: "action_submit", source: "desktop_mic" });
+    localMic.awaitingAction = false;
+    localMic.sessionActive = false;
+    setLocalMicStatus("idle");
+  } catch (error) {
+    setLocalMicStatus("error", error instanceof Error ? error.message : String(error));
+  }
+}
+
+function sendOrSubmitLocalMic() {
+  if (localMic.awaitingAction) {
+    void sendLocalMicAction("action_send");
+    return;
+  }
+
+  void submitLocalMicInput();
+}
+
 function finishLocalMicSessionFromBridge(message) {
   if (!localMic.sessionActive) {
     return;
@@ -631,6 +665,32 @@ function setActiveTab(tabName) {
     panel.classList.toggle("hidden", !isActive);
     panel.classList.toggle("is-active", isActive);
   });
+}
+
+function activateSideNav(targetName) {
+  const normalized = String(targetName || "overview").trim();
+  const targetToTab = {
+    integrations: "speech",
+    settings: "basics",
+    workspace: "workspace",
+    hotkeys: "speech"
+  };
+
+  if (targetToTab[normalized]) {
+    setActiveTab(targetToTab[normalized]);
+    updateFormAffordances();
+  }
+
+  const activeSideTarget = normalized === "logs" ? "transcript" : normalized;
+  document.querySelectorAll(".side-nav-item").forEach((button) => {
+    button.classList.toggle("is-active", button.getAttribute("data-side-target") === activeSideTarget);
+  });
+
+  const sectionName = ["hotkeys", "integrations"].includes(normalized) ? "settings" : normalized;
+  const section = document.querySelector(`[data-section="${sectionName}"]`);
+  if (section) {
+    section.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
 }
 
 function updateProviderVisibility() {
@@ -787,6 +847,7 @@ function renderService() {
 
   elements.statusPill.textContent = serviceStatusLabel(service.status);
   elements.statusPill.className = `status-pill ${statusClass(service.status)}`;
+  elements.footerServiceStatus.textContent = `Service ${serviceStatusLabel(service.status).toLowerCase()}`;
   elements.serviceMode.textContent = modeLabel(service.mode);
   elements.servicePort.textContent = String(service.port || appState.bootstrap?.form?.port || 8765);
   elements.serviceMessage.textContent = service.message || "等待启动。";
@@ -983,8 +1044,8 @@ function handleGlobalHotkey(payload = {}) {
     void stopLocalMicRecording();
     return;
   }
-  if (payload.type === "action_send" && localMic.awaitingAction) {
-    void sendLocalMicAction("action_send");
+  if (payload.type === "action_send") {
+    sendOrSubmitLocalMic();
     return;
   }
   if (payload.type === "action_undo" && localMic.awaitingAction) {
@@ -1018,6 +1079,18 @@ elements.tabButtons.forEach((button) => {
   button.addEventListener("click", () => {
     setActiveTab(button.getAttribute("data-tab-trigger"));
   });
+});
+
+document.querySelectorAll("[data-side-target]").forEach((button) => {
+  button.addEventListener("click", () => {
+    activateSideNav(button.getAttribute("data-side-target"));
+  });
+});
+
+document.querySelector("#collapse-sidebar-button")?.addEventListener("click", (event) => {
+  const body = document.querySelector(".app-body");
+  const collapsed = body?.classList.toggle("sidebar-collapsed") ?? false;
+  event.currentTarget.setAttribute("aria-pressed", String(collapsed));
 });
 
 elements.sttProvider.addEventListener("change", updateFormAffordances);
@@ -1072,11 +1145,8 @@ elements.stopServiceButton.addEventListener("click", async () => {
   connectLiveSocket();
 });
 
-elements.openConfigFolderButton.addEventListener("click", async () => {
-  const bootstrap = await window.vibeApp.openConfigFolder();
-  appState.bootstrap = bootstrap;
-  appState.service = bootstrap.service;
-  renderService();
+elements.openConfigFolderButton.addEventListener("click", () => {
+  activateSideNav("logs");
 });
 
 elements.pickCodexCwdButton.addEventListener("click", () => chooseDirectory(elements.codexCwd));
@@ -1153,7 +1223,7 @@ window.addEventListener("pointercancel", () => {
 });
 
 elements.localMicSendButton.addEventListener("click", () => {
-  void sendLocalMicAction("action_send");
+  sendOrSubmitLocalMic();
 });
 
 elements.localMicUndoButton.addEventListener("click", () => {
@@ -1175,9 +1245,9 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (hotkey !== localMic.holdKey) {
-    if (hotkey === localMic.sendKey && localMic.awaitingAction) {
+    if (hotkey === localMic.sendKey) {
       event.preventDefault();
-      void sendLocalMicAction("action_send");
+      sendOrSubmitLocalMic();
       return;
     }
     if (hotkey === localMic.undoKey && localMic.awaitingAction) {

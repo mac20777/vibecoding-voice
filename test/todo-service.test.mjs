@@ -70,6 +70,63 @@ test("TodoService supports CRUD and selection", () => {
   }
 });
 
+test("TodoService records today pomodoros for todo items and unassigned work", () => {
+  const { dir, filePath } = createTempTodoPath();
+  try {
+    const service = createTodoService({
+      storagePath: filePath,
+      seedDefaultItems: false,
+      now: () => new Date("2026-05-08T09:00:00")
+    });
+
+    service.runCommand({ action: "create", text: "Write firmware timer" });
+    let snapshot = service.getSnapshot();
+    const todoId = snapshot.items[0].id;
+
+    service.runCommand({ action: "add_pomodoro", id: todoId });
+    service.runCommand({ action: "add_pomodoro" });
+    snapshot = service.getSnapshot();
+
+    assert.equal(snapshot.pomodoroDate, "2026-05-08");
+    assert.equal(snapshot.items[0].pomodoroCount, 1);
+    assert.equal(snapshot.items[0].pomodoroTarget, 4);
+    assert.equal(snapshot.unassignedPomodoroCount, 1);
+    assert.equal(snapshot.unassignedPomodoroTarget, 4);
+
+    const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    assert.equal(persisted.items[0].pomodoroCount, 1);
+    assert.equal(persisted.unassignedPomodoroCount, 1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("TodoService resets displayed pomodoros across local dates", () => {
+  const { dir, filePath } = createTempTodoPath();
+  try {
+    let now = new Date("2026-05-08T23:00:00");
+    const service = createTodoService({
+      storagePath: filePath,
+      seedDefaultItems: false,
+      now: () => now
+    });
+
+    service.runCommand({ action: "create", text: "Daily task" });
+    service.runCommand({ action: "add_pomodoro" });
+    service.runCommand({ action: "add_pomodoro", index: 1 });
+    assert.equal(service.getSnapshot().items[0].pomodoroCount, 1);
+    assert.equal(service.getSnapshot().unassignedPomodoroCount, 1);
+
+    now = new Date("2026-05-09T08:00:00");
+    const snapshot = service.getSnapshot();
+    assert.equal(snapshot.pomodoroDate, "2026-05-09");
+    assert.equal(snapshot.items[0].pomodoroCount, 0);
+    assert.equal(snapshot.unassignedPomodoroCount, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("TodoService backs up corrupt files and starts empty", () => {
   const { dir, filePath } = createTempTodoPath();
   try {

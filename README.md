@@ -18,8 +18,8 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 
 `vibecoding-voice` now works even without the ESP32 board. The Windows desktop app can use a normal PC microphone or USB microphone as a second voice input device, then sends the audio through the same STT, translation, confirmation, and Inject / Codex / Claude pipeline.
 
-- **Global push-to-talk**: hold `F8` anywhere on Windows to record, release to transcribe and submit.
-- **Desktop confirm shortcuts**: press `F9` to send or `F10` to undo when confirmation is enabled.
+- **Global push-to-talk**: hold `F8` anywhere on Windows to record, release to transcribe and insert text.
+- **Desktop send shortcut**: press `F9` to submit the active text field, or to send pending text when confirmation is enabled; press `F10` to undo pending text.
 - **Configurable keys**: change record / send / undo shortcuts from the desktop app's Speech tab.
 - **Same backend path**: desktop mic audio is streamed as 16 kHz PCM over WebSocket, just like the board firmware, so existing STT and translation settings still apply.
 
@@ -151,8 +151,8 @@ If you want a normal desktop app instead of a terminal window, this repo now inc
 - a local settings window for `config.env`
 - grouped settings tabs for basic use, speech provider, workspace, and advanced options
 - local PC/USB microphone recording using the same STT, translation, and send pipeline as the board
-- configurable global shortcuts in the Speech tab: hold `F8` to record, press `F9` to send, and press `F10` to undo
-- desktop send/undo buttons when transcript delivery is set to confirm before sending
+- configurable global shortcuts in the Speech tab: hold `F8` to record and insert text, press `F9` to submit, and press `F10` to undo pending text
+- desktop send/undo controls for the local microphone and for transcript delivery confirmation
 - live status and recent activity view
 - packaged Windows installer output
 
@@ -537,8 +537,8 @@ node scripts/console.mjs
 
 现在即使没有 ESP32 板子，也可以直接使用 `vibecoding-voice`。Windows 桌面版可以把普通电脑麦克风或 USB 麦克风作为第二种语音输入设备，录到的音频会进入同一套语音识别、翻译、确认和 Inject / Codex / Claude 发送链路。
 
-- **后台全局按住说话**：在 Windows 任意窗口按住 `F8` 录音，松开后自动转写并提交。
-- **桌面确认快捷键**：开启确认模式时，按 `F9` 发送，按 `F10` 撤销。
+- **后台全局按住说话**：在 Windows 任意窗口按住 `F8` 录音，松开后自动转写并输入到当前文本框。
+- **桌面发送快捷键**：按 `F9` 提交当前文本框；开启确认模式时，`F9` 发送待确认文本，`F10` 撤销。
 - **快捷键可配置**：录音 / 发送 / 撤销三个快捷键都可以在桌面端“识别”页修改。
 - **复用同一套后端**：桌面麦克风音频同样以 16 kHz PCM 通过 WebSocket 发送，和板子固件走同一套 STT 与翻译配置。
 
@@ -669,7 +669,7 @@ npm install
 - 本地设置窗口，直接编辑 `config.env`
 - 按标签页分组的设置中心
 - 本机电脑/USB 麦克风录音，复用和板子相同的语音识别、翻译和发送链路
-- 在“识别”页设置全局快捷键，默认后台也可按住 `F8` 录音、松开提交，按 `F9` 发送，按 `F10` 撤销
+- 在“识别”页设置全局快捷键，默认后台也可按住 `F8` 录音并输入文字，按 `F9` 提交，按 `F10` 撤销待确认文本
 - 设备确认模式下，也可以在桌面端点击发送或撤销
 - 最近活动和服务状态面板
 - 打包成 Windows 安装包

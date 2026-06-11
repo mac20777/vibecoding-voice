@@ -236,6 +236,63 @@ test("server routes transcripts using each client's own voice mode", async (t) =
   );
 });
 
+test("desktop mic injects text immediately and submit action presses Enter", async (t) => {
+  const port = await getFreePort();
+  const appDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-desktop-mic-submit-"));
+  const server = spawn(process.execPath, ["src/server.mjs"], {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      APPDATA: appDataRoot,
+      LAN_SHARED_SECRET: "",
+      LAN_DISCOVERY_ENABLED: "0",
+      LAN_VOICE_BIND: "127.0.0.1",
+      LAN_VOICE_PORT: String(port),
+      MOCK_TRANSCRIPT: "hello desktop",
+      SEND_TARGET: "text_injector",
+      DRY_RUN_TEXT_INJECTION: "1",
+      TRANSCRIPT_DELIVERY_MODE: "confirm_on_device",
+      TEXT_INJECTION_MODE: "type_and_enter"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  const serverOutput = [];
+  server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
+  server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
+
+  t.after(async () => {
+    await stopServer(server);
+    fs.rmSync(appDataRoot, { recursive: true, force: true });
+  });
+
+  const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
+  const messages = createMessageCollector(ws);
+  t.after(() => closeWebSocket(ws));
+
+  ws.send(JSON.stringify({ type: "hello", deviceId: "desktop-window", boardType: "desktop-window" }));
+  await messages.waitFor((message) => message.type === "hello_ack");
+  await messages.waitFor((message) => message.type === "server_ready");
+  await messages.waitFor((message) => message.type === "mode_state" && message.mode === "normal");
+
+  ws.send(JSON.stringify({ type: "ptt_start", source: "desktop_mic", ts: Date.now() }));
+  ws.send(Buffer.from([0x00, 0x00]), { binary: true });
+  ws.send(JSON.stringify({ type: "ptt_stop", source: "desktop_mic", ts: Date.now() }));
+
+  const finalMessage = await messages.waitFor((message) => message.type === "transcript_final");
+  assert.equal(finalMessage.text, "hello desktop");
+  assert.equal(finalMessage.requiresAction, false);
+
+  const typed = await messages.waitFor((message) => message.type === "status" && message.status === "typed");
+  assert.equal(typed.text, "hello desktop");
+  assert.match(serverOutput.join(""), /mode: 'type_only'/);
+  assert.equal(messages.take((message) => message.type === "status" && message.status === "awaiting_action"), null);
+
+  ws.send(JSON.stringify({ type: "action_submit", source: "desktop_mic" }));
+  await messages.waitFor((message) => message.type === "status" && message.status === "submitted");
+  assert.match(serverOutput.join(""), /mode: 'enter_only'/);
+});
+
 test("server translates live voice transcript before device confirmation", async (t) => {
   const port = await getFreePort();
   const appDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-translation-"));

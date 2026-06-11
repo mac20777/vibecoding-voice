@@ -27,7 +27,7 @@ import {
   normalizeVoiceTranslationSendMode,
   normalizeVoiceTranslationTargetLanguage
 } from "./translation-service.mjs";
-import { injectText } from "./text-injector.mjs";
+import { injectText, submitTextInput } from "./text-injector.mjs";
 
 const config = loadConfig();
 
@@ -199,6 +199,9 @@ function getTodoSnapshotPayload() {
     type: "todo_state",
     items: snapshot.items,
     selectedIndex: snapshot.selectedIndex,
+    pomodoroDate: snapshot.pomodoroDate,
+    unassignedPomodoroCount: snapshot.unassignedPomodoroCount,
+    unassignedPomodoroTarget: snapshot.unassignedPomodoroTarget,
     lastActionText: snapshot.lastActionText
   };
 }
@@ -354,6 +357,9 @@ function createClientState() {
     authenticated: !config.lanSharedSecret,
     voiceMode: "normal",
     segmentActive: false,
+    segmentSource: "",
+    segmentTranscriptDeliveryMode: null,
+    segmentTextInjectionMode: null,
     chunks: [],
     pendingSegments: [],
     pendingTranslatedSegments: [],
@@ -366,6 +372,31 @@ function createClientState() {
     pendingTodoIntentExpiresAt: 0,
     pendingTodoTimer: null
   };
+}
+
+function resolveSegmentOptions(message = {}) {
+  const source = String(message.source || "").trim();
+  if (source === "desktop_mic") {
+    return {
+      source,
+      transcriptDeliveryMode: "immediate",
+      textInjectionMode: "type_only"
+    };
+  }
+
+  return {
+    source,
+    transcriptDeliveryMode: config.transcriptDeliveryMode,
+    textInjectionMode: config.textInjectionMode
+  };
+}
+
+function getSegmentTranscriptDeliveryMode(state) {
+  return state.segmentTranscriptDeliveryMode || config.transcriptDeliveryMode;
+}
+
+function getSegmentTextInjectionMode(state) {
+  return state.segmentTextInjectionMode || config.textInjectionMode;
 }
 
 function joinPendingSegments(segments) {
@@ -673,6 +704,8 @@ async function finalizeSegment(ws, state) {
   state.segmentActive = false;
   state.chunks = [];
   const voiceMode = getVoiceMode(state);
+  const transcriptDeliveryMode = getSegmentTranscriptDeliveryMode(state);
+  const textInjectionMode = getSegmentTextInjectionMode(state);
 
   if (pcmBuffer.length === 0) {
     sendJson(ws, { type: "status", status: "empty_segment" });
@@ -729,7 +762,7 @@ async function finalizeSegment(ws, state) {
     transform: transcriptTransform
   });
 
-  if (config.transcriptDeliveryMode === "confirm_on_device") {
+  if (transcriptDeliveryMode === "confirm_on_device") {
     state.pendingSegments.push(sendTranscript);
     state.pendingTranslatedSegments.push(translatedTranscript);
     state.pendingOriginalSegments.push(transcript);
@@ -807,7 +840,7 @@ async function finalizeSegment(ws, state) {
     return;
   }
 
-  await dispatchPrompt(sendTranscript);
+  await dispatchPrompt(sendTranscript, { textInjectionMode });
   state.pendingTranscript = "";
   sendJson(ws, {
     type: "status",
@@ -1005,7 +1038,7 @@ function formatVoiceSendText({ originalText, translatedText, translations = {}, 
   return translated || original;
 }
 
-async function dispatchPrompt(prompt) {
+async function dispatchPrompt(prompt, options = {}) {
   if (config.sendTarget === "codex_exec") {
     if (codexSession.isRunning()) {
       throw new Error("Codex session is busy");
@@ -1022,9 +1055,21 @@ async function dispatchPrompt(prompt) {
     return;
   }
 
-  await injectText(prompt, config.textInjectionMode, {
+  await injectText(prompt, options.textInjectionMode || config.textInjectionMode, {
     dryRun: config.dryRunTextInjection
   });
+}
+
+async function submitActiveTextInput(ws) {
+  if (config.sendTarget !== "text_injector") {
+    sendJson(ws, { type: "status", status: "submit_unavailable" });
+    return;
+  }
+
+  await submitTextInput({
+    dryRun: config.dryRunTextInjection
+  });
+  sendJson(ws, { type: "status", status: "submitted" });
 }
 
 async function dispatchUserPrompt(ws, prompt, state) {
@@ -1188,6 +1233,12 @@ wss.on("connection", (ws, req) => {
             closeWithAuthError(ws, state, "auth_required");
             break;
           }
+          {
+            const segmentOptions = resolveSegmentOptions(message);
+            state.segmentSource = segmentOptions.source;
+            state.segmentTranscriptDeliveryMode = segmentOptions.transcriptDeliveryMode;
+            state.segmentTextInjectionMode = segmentOptions.textInjectionMode;
+          }
           log("ptt_start", state.deviceId);
           state.segmentActive = true;
           state.chunks = [];
@@ -1208,6 +1259,14 @@ wss.on("connection", (ws, req) => {
           }
           log("action_send", state.deviceId);
           await sendPendingTranscript(ws, state);
+          break;
+        case "action_submit":
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
+          log("action_submit", state.deviceId);
+          await submitActiveTextInput(ws);
           break;
         case "action_undo":
           if (!state.authenticated) {

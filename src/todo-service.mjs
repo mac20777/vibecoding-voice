@@ -4,7 +4,8 @@ import path from "node:path";
 
 export const VALID_VOICE_MODES = new Set(["normal", "todo"]);
 
-const TODO_FILE_VERSION = 1;
+const TODO_FILE_VERSION = 2;
+const DEFAULT_POMODORO_TARGET = 4;
 const DEFAULT_TODO_ITEMS = [
   "示例：按住 BOOT 说“添加计划 喝水”",
   "示例：UP/DN 移动选中项",
@@ -27,17 +28,40 @@ function normalizePositiveInteger(value) {
   return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
 }
 
-function cloneItem(item) {
+function normalizeNonNegativeInteger(value, fallback = 0) {
+  const numeric = Number.parseInt(String(value ?? "").trim(), 10);
+  return Number.isInteger(numeric) && numeric >= 0 ? numeric : fallback;
+}
+
+function normalizePomodoroTarget(value) {
+  return normalizePositiveInteger(value) || DEFAULT_POMODORO_TARGET;
+}
+
+function formatLocalDate(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function cloneItem(item, today = formatLocalDate()) {
+  const pomodoroDate = collapseWhitespace(item.pomodoroDate) || today;
+  const pomodoroCount = pomodoroDate === today
+    ? normalizeNonNegativeInteger(item.pomodoroCount)
+    : 0;
   return {
     id: item.id,
     title: item.title,
     completed: Boolean(item.completed),
+    pomodoroDate: today,
+    pomodoroCount,
+    pomodoroTarget: normalizePomodoroTarget(item.pomodoroTarget),
     createdAt: item.createdAt,
     updatedAt: item.updatedAt
   };
 }
 
-function sanitizePersistedState(rawState) {
+function sanitizePersistedState(rawState, today = formatLocalDate()) {
   const source = rawState && typeof rawState === "object" ? rawState : {};
   const rawItems = Array.isArray(source.items) ? source.items : [];
   const items = rawItems
@@ -58,6 +82,9 @@ function sanitizePersistedState(rawState) {
         id: collapseWhitespace(item.id) || randomUUID(),
         title,
         completed: Boolean(item.completed),
+        pomodoroDate: collapseWhitespace(item.pomodoroDate) || today,
+        pomodoroCount: normalizeNonNegativeInteger(item.pomodoroCount),
+        pomodoroTarget: normalizePomodoroTarget(item.pomodoroTarget),
         createdAt,
         updatedAt
       };
@@ -73,11 +100,14 @@ function sanitizePersistedState(rawState) {
   return {
     version: TODO_FILE_VERSION,
     items,
-    selectedIndex: items.length === 0 ? -1 : selectedIndex
+    selectedIndex: items.length === 0 ? -1 : selectedIndex,
+    unassignedPomodoroDate: collapseWhitespace(source.unassignedPomodoroDate) || today,
+    unassignedPomodoroCount: normalizeNonNegativeInteger(source.unassignedPomodoroCount),
+    unassignedPomodoroTarget: normalizePomodoroTarget(source.unassignedPomodoroTarget)
   };
 }
 
-function createDefaultTodoState() {
+function createDefaultTodoState(today = formatLocalDate()) {
   const now = new Date().toISOString();
   return {
     version: TODO_FILE_VERSION,
@@ -85,10 +115,16 @@ function createDefaultTodoState() {
       id: randomUUID(),
       title,
       completed: false,
+      pomodoroDate: today,
+      pomodoroCount: 0,
+      pomodoroTarget: DEFAULT_POMODORO_TARGET,
       createdAt: now,
       updatedAt: now
     })),
-    selectedIndex: 0
+    selectedIndex: 0,
+    unassignedPomodoroDate: today,
+    unassignedPomodoroCount: 0,
+    unassignedPomodoroTarget: DEFAULT_POMODORO_TARGET
   };
 }
 
@@ -180,22 +216,30 @@ export function parseTodoVoiceCommand(input) {
 }
 
 export class TodoService {
-  constructor({ storagePath, seedDefaultItems = true }) {
+  constructor({ storagePath, seedDefaultItems = true, now = () => new Date() }) {
     this.storagePath = storagePath;
     this.seedDefaultItems = seedDefaultItems;
+    this.now = now;
     this.lastActionText = "";
     const loaded = this.#loadState();
     this.items = loaded.items;
     this.selectedIndex = loaded.selectedIndex;
+    this.unassignedPomodoroDate = loaded.unassignedPomodoroDate;
+    this.unassignedPomodoroCount = loaded.unassignedPomodoroCount;
+    this.unassignedPomodoroTarget = loaded.unassignedPomodoroTarget;
     if (loaded.seeded && this.storagePath) {
       this.#persist();
     }
   }
 
   getSnapshot() {
+    const today = this.#today();
     return {
-      items: this.items.map(cloneItem),
+      items: this.items.map((item) => this.#cloneItemForSnapshot(item, today)),
       selectedIndex: this.selectedIndex,
+      pomodoroDate: today,
+      unassignedPomodoroCount: this.#todayUnassignedPomodoroCount(today),
+      unassignedPomodoroTarget: this.unassignedPomodoroTarget,
       lastActionText: this.lastActionText
     };
   }
@@ -215,6 +259,8 @@ export class TodoService {
         return this.clear();
       case "toggle":
         return this.toggle(command?.index, command?.completed, command?.id);
+      case "add_pomodoro":
+        return this.addPomodoro(command?.index, command?.id);
       case "select_next":
         return this.selectNext();
       case "select_prev":
@@ -247,6 +293,9 @@ export class TodoService {
       id: randomUUID(),
       title,
       completed: false,
+      pomodoroDate: this.#today(),
+      pomodoroCount: 0,
+      pomodoroTarget: DEFAULT_POMODORO_TARGET,
       createdAt: now,
       updatedAt: now
     });
@@ -337,6 +386,41 @@ export class TodoService {
     };
   }
 
+  addPomodoro(index, id) {
+    const today = this.#today();
+    const normalizedId = collapseWhitespace(id);
+
+    if (!normalizedId && (index === undefined || index === null || String(index).trim() === "")) {
+      this.#rollUnassignedPomodoro(today);
+      this.unassignedPomodoroCount += 1;
+      this.lastActionText = `未归属番茄 ${this.unassignedPomodoroCount}`;
+      this.#persist();
+      return {
+        ok: true,
+        action: "add_pomodoro",
+        changed: true,
+        message: this.lastActionText,
+        snapshot: this.getSnapshot()
+      };
+    }
+
+    const resolvedIndex = this.#resolveIndex(index, id);
+    const item = this.items[resolvedIndex];
+    this.#rollItemPomodoro(item, today);
+    item.pomodoroCount += 1;
+    item.updatedAt = new Date().toISOString();
+    this.selectedIndex = resolvedIndex;
+    this.lastActionText = `计划 ${resolvedIndex + 1} 番茄 ${item.pomodoroCount}`;
+    this.#persist();
+    return {
+      ok: true,
+      action: "add_pomodoro",
+      changed: true,
+      message: this.lastActionText,
+      snapshot: this.getSnapshot()
+    };
+  }
+
   selectNext() {
     if (this.items.length === 0) {
       this.lastActionText = "暂无计划";
@@ -396,18 +480,19 @@ export class TodoService {
   }
 
   #loadState() {
+    const today = this.#today();
     if (!this.storagePath || !fs.existsSync(this.storagePath)) {
       return this.seedDefaultItems
-        ? { ...createDefaultTodoState(), seeded: true }
-        : sanitizePersistedState(null);
+        ? { ...createDefaultTodoState(today), seeded: true }
+        : sanitizePersistedState(null, today);
     }
 
     try {
       const parsed = JSON.parse(fs.readFileSync(this.storagePath, "utf8"));
-      return sanitizePersistedState(parsed);
+      return sanitizePersistedState(parsed, today);
     } catch {
       this.#backupCorruptFile();
-      return sanitizePersistedState(null);
+      return sanitizePersistedState(null, today);
     }
   }
 
@@ -431,7 +516,10 @@ export class TodoService {
         {
           version: TODO_FILE_VERSION,
           selectedIndex: this.selectedIndex,
-          items: this.items.map(cloneItem)
+          unassignedPomodoroDate: this.unassignedPomodoroDate,
+          unassignedPomodoroCount: this.unassignedPomodoroCount,
+          unassignedPomodoroTarget: this.unassignedPomodoroTarget,
+          items: this.items.map((item) => cloneItem(item, item.pomodoroDate || this.#today()))
         },
         null,
         2
@@ -470,6 +558,36 @@ export class TodoService {
       throw new Error("todo_index_out_of_range");
     }
     return resolvedIndex;
+  }
+
+  #today() {
+    return formatLocalDate(this.now());
+  }
+
+  #cloneItemForSnapshot(item, today) {
+    this.#rollItemPomodoro(item, today);
+    return cloneItem(item, today);
+  }
+
+  #rollItemPomodoro(item, today) {
+    if (item.pomodoroDate !== today) {
+      item.pomodoroDate = today;
+      item.pomodoroCount = 0;
+    }
+    item.pomodoroTarget = normalizePomodoroTarget(item.pomodoroTarget);
+  }
+
+  #rollUnassignedPomodoro(today) {
+    if (this.unassignedPomodoroDate !== today) {
+      this.unassignedPomodoroDate = today;
+      this.unassignedPomodoroCount = 0;
+    }
+    this.unassignedPomodoroTarget = normalizePomodoroTarget(this.unassignedPomodoroTarget);
+  }
+
+  #todayUnassignedPomodoroCount(today) {
+    this.#rollUnassignedPomodoro(today);
+    return this.unassignedPomodoroCount;
   }
 }
 

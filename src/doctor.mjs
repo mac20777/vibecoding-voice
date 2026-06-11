@@ -127,6 +127,57 @@ function reportRuntimeLog() {
   }
 }
 
+async function commandAvailable(command) {
+  try {
+    const finder = process.platform === "win32" ? "where" : "which";
+    await execFileAsync(finder, [command], { timeout: 2000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function reportTextInjectionSupport(config) {
+  if (config.sendTarget !== "text_injector") {
+    return { hasError: false };
+  }
+
+  if (process.platform === "win32") {
+    ok("Text injection: Windows PowerShell clipboard bridge");
+    return { hasError: false };
+  }
+
+  if (process.platform === "linux") {
+    const sessionType = String(process.env.XDG_SESSION_TYPE || "").toLowerCase();
+    const hasWayland = Boolean(process.env.WAYLAND_DISPLAY) || sessionType === "wayland";
+    const hasX11 = Boolean(process.env.DISPLAY) || sessionType === "x11";
+    const [hasXdotool, hasXclip, hasWtype] = await Promise.all([
+      commandAvailable("xdotool"),
+      commandAvailable("xclip"),
+      commandAvailable("wtype")
+    ]);
+
+    if (hasWayland && hasWtype) {
+      ok("Text injection: Wayland wtype backend available");
+      return { hasError: false };
+    }
+    if (hasX11 && hasXdotool && hasXclip) {
+      ok("Text injection: X11 xdotool + xclip backend available");
+      return { hasError: false };
+    }
+    if (hasWtype || (hasXdotool && hasXclip)) {
+      warn("Text injection tools are installed, but no matching DISPLAY/WAYLAND_DISPLAY session was detected");
+      return { hasError: false };
+    }
+
+    fail("Text injection: install xdotool + xclip for X11, or wtype for Wayland");
+    return { hasError: true };
+  }
+
+  fail(`Text injection is not implemented for ${process.platform}`);
+  return { hasError: true };
+}
+
 async function reportLivePorts(config) {
   const snapshot = await readWindowsPortSnapshot({
     tcpPort: config.port,
@@ -290,6 +341,9 @@ export async function runDoctor(config) {
   if (!claudeFound && !codexFound) {
     warn("neither claude nor codex found — SEND_TARGET will fall back to text_injector");
   }
+
+  const injectionReport = await reportTextInjectionSupport(config);
+  hasError = hasError || injectionReport.hasError;
 
   // Live ports / current device connection
   const portReport = await reportLivePorts(config);

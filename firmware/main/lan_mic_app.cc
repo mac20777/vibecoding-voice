@@ -79,6 +79,8 @@ constexpr int64_t kServerSilenceTimeoutMs = 45000;
 constexpr int64_t kConnectAttemptWatchdogMs = 20000;
 constexpr int64_t kReconnectPromptTimeoutMs = 15000;
 constexpr int64_t kTodoBootHoldMs = 600;
+constexpr int64_t kPomodoroFocusMs = 25LL * 60 * 1000;
+constexpr int64_t kPomodoroBreakMs = 5LL * 60 * 1000;
 constexpr uint32_t kConnectTaskStackSize = 6 * 1024;
 constexpr UBaseType_t kConnectTaskPriority = 2;
 // If no server connection is established within this window, enter deep sleep
@@ -105,7 +107,7 @@ constexpr int kLogBodyY = 96;
 constexpr int kFooterTextY = 276;
 constexpr int kLineHeight = 18;
 constexpr int kBatteryPollIntervalMs = 15000;
-constexpr size_t kCachedTodoStateMaxBytes = 3500;
+constexpr size_t kCachedTodoStateMaxBytes = 5000;
 constexpr uint8_t kWifiIcon12x12[] = {
     0x00, 0x00,
     0x03, 0xC0,
@@ -130,6 +132,29 @@ constexpr uint8_t kBatteryIcon14x8[] = {
     0x80, 0x04,
     0x80, 0x04,
     0xFF, 0xFC,
+};
+
+constexpr int kPomodoroDotSize = 8;
+constexpr int kPomodoroDotPitch = 11;
+constexpr uint8_t kPomodoroDotFilled8x8[] = {
+    0x3C,
+    0x7E,
+    0xFF,
+    0xFF,
+    0xFF,
+    0xFF,
+    0x7E,
+    0x3C,
+};
+constexpr uint8_t kPomodoroDotEmpty8x8[] = {
+    0x3C,
+    0x42,
+    0x81,
+    0x81,
+    0x81,
+    0x81,
+    0x42,
+    0x3C,
 };
 
 RTC_DATA_ATTR bool s_offline_auto_sleep_pending = false;
@@ -204,6 +229,14 @@ bool GetJsonBool(cJSON* root, const char* key, bool fallback) {
     cJSON* item = cJSON_GetObjectItemCaseSensitive(root, key);
     if (cJSON_IsBool(item)) {
         return cJSON_IsTrue(item);
+    }
+    return fallback;
+}
+
+int GetJsonInt(cJSON* root, const char* key, int fallback) {
+    cJSON* item = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (cJSON_IsNumber(item)) {
+        return item->valueint;
     }
     return fallback;
 }
@@ -1354,6 +1387,8 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         cJSON* items = cJSON_GetObjectItemCaseSensitive(root, "items");
         cJSON* selected_index = cJSON_GetObjectItemCaseSensitive(root, "selectedIndex");
         const char* last_action = GetJsonString(root, "lastActionText");
+        todo_unassigned_pomodoro_count_ = std::max(0, GetJsonInt(root, "unassignedPomodoroCount", 0));
+        todo_unassigned_pomodoro_target_ = std::max(1, GetJsonInt(root, "unassignedPomodoroTarget", 4));
         todo_items_.clear();
         if (cJSON_IsArray(items)) {
             cJSON* item = nullptr;
@@ -1366,7 +1401,9 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
                 todo_items_.push_back({
                     id != nullptr ? id : "",
                     title,
-                    GetJsonBool(item, "completed", false)
+                    GetJsonBool(item, "completed", false),
+                    std::max(0, GetJsonInt(item, "pomodoroCount", 0)),
+                    std::max(1, GetJsonInt(item, "pomodoroTarget", 4))
                 });
             }
         }
@@ -1704,6 +1741,269 @@ void LanMicApp::DeleteSelectedTodo() {
     UpdateDisplay();
 }
 
+void LanMicApp::StartPomodoroForSelectedTodo() {
+    if (todo_items_.empty() ||
+        todo_selected_index_ < 0 ||
+        todo_selected_index_ >= static_cast<int>(todo_items_.size())) {
+        StartPomodoroUnassigned();
+        return;
+    }
+
+    const auto& item = todo_items_[todo_selected_index_];
+    StartPomodoroTarget(true, todo_selected_index_, item.id, item.title);
+}
+
+void LanMicApp::StartPomodoroUnassigned() {
+    StartPomodoroTarget(false, -1, "", "未归属");
+}
+
+void LanMicApp::StartPomodoroTarget(
+    bool has_target,
+    int index,
+    const std::string& id,
+    const std::string& title) {
+    if (phase_ == Phase::Recording || phase_ == Phase::Transcribing || has_pending_transcript_) {
+        return;
+    }
+
+    todo_menu_open_ = false;
+    active_page_ = Page::Todo;
+    phase_ = Phase::Idle;
+    pomodoro_phase_ = PomodoroPhase::FocusRunning;
+    pomodoro_started_ms_ = esp_timer_get_time() / 1000;
+    pomodoro_duration_ms_ = kPomodoroFocusMs;
+    pomodoro_last_visible_minute_ = -1;
+    pomodoro_menu_selected_item_ = 0;
+    pomodoro_has_target_ = has_target;
+    pomodoro_target_index_ = index;
+    pomodoro_target_id_ = id;
+    pomodoro_target_title_ = title.empty() ? "未归属" : title;
+    status_text_ = "专注";
+    hint_text_ = GetPomodoroTargetLabel();
+    PlayBeep(880, 80);
+    UpdateDisplay();
+}
+
+void LanMicApp::StartPomodoroBreak() {
+    pomodoro_phase_ = PomodoroPhase::BreakRunning;
+    pomodoro_started_ms_ = esp_timer_get_time() / 1000;
+    pomodoro_duration_ms_ = kPomodoroBreakMs;
+    pomodoro_last_visible_minute_ = -1;
+    pomodoro_menu_selected_item_ = 0;
+    status_text_ = "休息";
+    hint_text_ = "5分";
+    PlayBeep(660, 80);
+    UpdateDisplay();
+}
+
+void LanMicApp::CancelPomodoroFocus() {
+    FinishPomodoroSession("番茄已取消");
+}
+
+void LanMicApp::FinishPomodoroSession(const std::string& message) {
+    pomodoro_phase_ = PomodoroPhase::None;
+    pomodoro_started_ms_ = 0;
+    pomodoro_duration_ms_ = 0;
+    pomodoro_last_visible_minute_ = -1;
+    pomodoro_menu_selected_item_ = 0;
+    pomodoro_has_target_ = false;
+    pomodoro_target_index_ = -1;
+    pomodoro_target_id_.clear();
+    pomodoro_target_title_.clear();
+    status_text_ = "待办";
+    hint_text_ = message;
+    todo_last_action_text_ = message;
+    active_page_ = Page::Todo;
+    UpdateDisplay();
+}
+
+bool LanMicApp::IsPomodoroVisible() const {
+    return pomodoro_phase_ != PomodoroPhase::None;
+}
+
+bool LanMicApp::IsPomodoroRunning() const {
+    return pomodoro_phase_ == PomodoroPhase::FocusRunning ||
+           pomodoro_phase_ == PomodoroPhase::BreakRunning;
+}
+
+void LanMicApp::UpdatePomodoroTimer(int64_t now_ms) {
+    if (!IsPomodoroRunning() || pomodoro_started_ms_ <= 0 || pomodoro_duration_ms_ <= 0) {
+        return;
+    }
+
+    const int64_t elapsed_ms = now_ms - pomodoro_started_ms_;
+    const int64_t remaining_ms = pomodoro_duration_ms_ - elapsed_ms;
+    if (remaining_ms <= 0) {
+        if (pomodoro_phase_ == PomodoroPhase::FocusRunning) {
+            CompletePomodoroFocus();
+        } else {
+            pomodoro_phase_ = PomodoroPhase::BreakDone;
+            pomodoro_started_ms_ = 0;
+            pomodoro_duration_ms_ = 0;
+            pomodoro_last_visible_minute_ = -1;
+            status_text_ = "休息完成";
+            hint_text_ = "BOOT 返回";
+            PlayBeep(520, 80);
+            PlayBeep(780, 120);
+            UpdateDisplay();
+        }
+        return;
+    }
+
+    const int visible_minute = static_cast<int>((remaining_ms + 59999) / 60000);
+    if (visible_minute != pomodoro_last_visible_minute_) {
+        pomodoro_last_visible_minute_ = visible_minute;
+        UpdateDisplay();
+    }
+}
+
+void LanMicApp::HandlePomodoroInput(bool up_click, bool down_click, bool boot_press) {
+    if (!IsPomodoroVisible()) {
+        return;
+    }
+
+    if (pomodoro_phase_ == PomodoroPhase::FocusRunning) {
+        if (boot_press) {
+            pomodoro_phase_ = PomodoroPhase::FocusCancelConfirm;
+            pomodoro_menu_selected_item_ = 0;
+            status_text_ = "取消番茄?";
+            hint_text_ = "BOOT 确认";
+            UpdateDisplay();
+        }
+        return;
+    }
+
+    if (pomodoro_phase_ == PomodoroPhase::FocusCancelConfirm) {
+        if (up_click || down_click) {
+            pomodoro_menu_selected_item_ = pomodoro_menu_selected_item_ == 0 ? 1 : 0;
+            UpdateDisplay();
+            return;
+        }
+        if (boot_press) {
+            if (pomodoro_menu_selected_item_ == 0) {
+                pomodoro_phase_ = PomodoroPhase::FocusRunning;
+                status_text_ = "专注";
+                hint_text_ = GetPomodoroTargetLabel();
+                UpdateDisplay();
+            } else {
+                CancelPomodoroFocus();
+            }
+        }
+        return;
+    }
+
+    if (pomodoro_phase_ == PomodoroPhase::FocusDone) {
+        if (boot_press) {
+            StartPomodoroBreak();
+        } else if (down_click) {
+            FinishPomodoroSession("返回待办");
+        }
+        return;
+    }
+
+    if (pomodoro_phase_ == PomodoroPhase::BreakRunning) {
+        if (boot_press) {
+            pomodoro_phase_ = PomodoroPhase::BreakDone;
+            pomodoro_started_ms_ = 0;
+            pomodoro_duration_ms_ = 0;
+            pomodoro_last_visible_minute_ = -1;
+            status_text_ = "休息结束";
+            hint_text_ = "BOOT 返回";
+            UpdateDisplay();
+        }
+        return;
+    }
+
+    if (pomodoro_phase_ == PomodoroPhase::BreakDone && (boot_press || down_click)) {
+        FinishPomodoroSession("返回待办");
+    }
+}
+
+void LanMicApp::CompletePomodoroFocus() {
+    pomodoro_phase_ = PomodoroPhase::FocusDone;
+    pomodoro_started_ms_ = 0;
+    pomodoro_duration_ms_ = 0;
+    pomodoro_last_visible_minute_ = -1;
+    SaveCompletedPomodoro(
+        pomodoro_has_target_,
+        pomodoro_target_index_,
+        pomodoro_target_id_,
+        pomodoro_target_title_);
+    status_text_ = "专注完成";
+    hint_text_ = "BOOT 休息 / DN 跳过";
+    PlayBeep(880, 80);
+    PlayBeep(1180, 120);
+    UpdateDisplay();
+}
+
+void LanMicApp::SaveCompletedPomodoro(
+    bool has_target,
+    int index,
+    const std::string& id,
+    const std::string& title) {
+    int resolved_index = -1;
+    if (has_target) {
+        if (!id.empty()) {
+            for (int i = 0; i < static_cast<int>(todo_items_.size()); ++i) {
+                if (todo_items_[i].id == id) {
+                    resolved_index = i;
+                    break;
+                }
+            }
+        }
+        if (resolved_index < 0 &&
+            index >= 0 &&
+            index < static_cast<int>(todo_items_.size())) {
+            resolved_index = index;
+        }
+    }
+
+    if (resolved_index >= 0) {
+        auto& item = todo_items_[resolved_index];
+        item.pomodoro_count = std::max(0, item.pomodoro_count) + 1;
+        item.pomodoro_target = std::max(1, item.pomodoro_target);
+        todo_selected_index_ = resolved_index;
+        pomodoro_has_target_ = true;
+        pomodoro_target_index_ = resolved_index;
+        pomodoro_target_id_ = item.id;
+        pomodoro_target_title_ = item.title;
+        todo_last_action_text_ = "番茄 +" + std::to_string(item.pomodoro_count);
+        if (IsServerConnected()) {
+            SendTodoCommand("add_pomodoro", resolved_index + 1, -1, item.id.c_str());
+        } else {
+            QueueOfflineTodoPomodoro(item.id);
+            todo_last_action_text_ += " (待同步)";
+        }
+    } else {
+        todo_unassigned_pomodoro_count_ = std::max(0, todo_unassigned_pomodoro_count_) + 1;
+        todo_unassigned_pomodoro_target_ = std::max(1, todo_unassigned_pomodoro_target_);
+        pomodoro_has_target_ = false;
+        pomodoro_target_index_ = -1;
+        pomodoro_target_id_.clear();
+        pomodoro_target_title_ = title.empty() ? "未归属" : title;
+        todo_last_action_text_ = "未归属番茄 +" + std::to_string(todo_unassigned_pomodoro_count_);
+        if (IsServerConnected()) {
+            SendTodoCommand("add_pomodoro");
+        } else {
+            QueueOfflineTodoPomodoro("");
+            todo_last_action_text_ += " (待同步)";
+        }
+    }
+    SaveCachedTodoState();
+}
+
+std::string LanMicApp::FormatPomodoroDots(int count, int target) const {
+    const int safe_count = std::max(0, count);
+    return std::to_string(safe_count) + "/" + std::to_string(std::max(1, target));
+}
+
+std::string LanMicApp::GetPomodoroTargetLabel() const {
+    if (pomodoro_has_target_ && !pomodoro_target_title_.empty()) {
+        return pomodoro_target_title_;
+    }
+    return "未归属";
+}
+
 void LanMicApp::QueueOfflineTodoToggle(const TodoItem& item, bool completed) {
     if (item.id.empty()) {
         return;
@@ -1741,6 +2041,11 @@ void LanMicApp::QueueOfflineTodoDelete(const TodoItem& item) {
     SavePendingTodoOps();
 }
 
+void LanMicApp::QueueOfflineTodoPomodoro(const std::string& id) {
+    pending_todo_ops_.push_back({PendingTodoOpType::AddPomodoro, id, false});
+    SavePendingTodoOps();
+}
+
 void LanMicApp::FlushPendingTodoOps() {
     if (!IsServerConnected() || pending_todo_ops_.empty()) {
         return;
@@ -1748,9 +2053,18 @@ void LanMicApp::FlushPendingTodoOps() {
 
     size_t sent = 0;
     for (const auto& op : pending_todo_ops_) {
-        const bool ok = op.type == PendingTodoOpType::Toggle
-            ? SendTodoCommand("toggle", 0, op.completed ? 1 : 0, op.id.c_str())
-            : SendTodoCommand("delete", 0, -1, op.id.c_str());
+        bool ok = false;
+        if (op.type == PendingTodoOpType::Toggle) {
+            ok = SendTodoCommand("toggle", 0, op.completed ? 1 : 0, op.id.c_str());
+        } else if (op.type == PendingTodoOpType::Delete) {
+            ok = SendTodoCommand("delete", 0, -1, op.id.c_str());
+        } else {
+            ok = SendTodoCommand(
+                "add_pomodoro",
+                0,
+                -1,
+                op.id.empty() ? nullptr : op.id.c_str());
+        }
         if (!ok) {
             break;
         }
@@ -1787,6 +2101,8 @@ void LanMicApp::LoadCachedTodoState() {
     cJSON* items = cJSON_GetObjectItemCaseSensitive(root, "items");
     cJSON* selected_index = cJSON_GetObjectItemCaseSensitive(root, "selectedIndex");
     const char* last_action = GetJsonString(root, "lastActionText");
+    todo_unassigned_pomodoro_count_ = std::max(0, GetJsonInt(root, "unassignedPomodoroCount", 0));
+    todo_unassigned_pomodoro_target_ = std::max(1, GetJsonInt(root, "unassignedPomodoroTarget", 4));
 
     std::vector<TodoItem> cached_items;
     if (cJSON_IsArray(items)) {
@@ -1800,7 +2116,9 @@ void LanMicApp::LoadCachedTodoState() {
             cached_items.push_back({
                 id != nullptr ? id : "",
                 title,
-                GetJsonBool(item, "completed", false)
+                GetJsonBool(item, "completed", false),
+                std::max(0, GetJsonInt(item, "pomodoroCount", 0)),
+                std::max(1, GetJsonInt(item, "pomodoroTarget", 4))
             });
         }
     }
@@ -1833,6 +2151,8 @@ void LanMicApp::LoadCachedTodoState() {
 void LanMicApp::SaveCachedTodoState() {
     cJSON* root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "selectedIndex", todo_selected_index_);
+    cJSON_AddNumberToObject(root, "unassignedPomodoroCount", todo_unassigned_pomodoro_count_);
+    cJSON_AddNumberToObject(root, "unassignedPomodoroTarget", todo_unassigned_pomodoro_target_);
     if (!todo_last_action_text_.empty()) {
         cJSON_AddStringToObject(root, "lastActionText", todo_last_action_text_.c_str());
     }
@@ -1846,6 +2166,8 @@ void LanMicApp::SaveCachedTodoState() {
         cJSON_AddStringToObject(item, "id", todo.id.c_str());
         cJSON_AddStringToObject(item, "title", todo.title.c_str());
         cJSON_AddBoolToObject(item, "completed", todo.completed);
+        cJSON_AddNumberToObject(item, "pomodoroCount", todo.pomodoro_count);
+        cJSON_AddNumberToObject(item, "pomodoroTarget", todo.pomodoro_target);
         cJSON_AddItemToArray(items, item);
     }
     cJSON_AddItemToObject(root, "items", items);
@@ -1890,20 +2212,29 @@ void LanMicApp::LoadPendingTodoOps() {
     cJSON_ArrayForEach(item, root) {
         const char* type = GetJsonString(item, "type");
         const char* id = GetJsonString(item, "id");
-        if (type == nullptr || id == nullptr || id[0] == '\0') {
+        if (type == nullptr) {
             continue;
         }
         PendingTodoOp op;
         if (std::strcmp(type, "toggle") == 0) {
+            if (id == nullptr || id[0] == '\0') {
+                continue;
+            }
             op.type = PendingTodoOpType::Toggle;
             op.completed = GetJsonBool(item, "completed", false);
         } else if (std::strcmp(type, "delete") == 0) {
+            if (id == nullptr || id[0] == '\0') {
+                continue;
+            }
             op.type = PendingTodoOpType::Delete;
+            op.completed = false;
+        } else if (std::strcmp(type, "add_pomodoro") == 0) {
+            op.type = PendingTodoOpType::AddPomodoro;
             op.completed = false;
         } else {
             continue;
         }
-        op.id = id;
+        op.id = id != nullptr ? id : "";
         pending_todo_ops_.push_back(op);
     }
     cJSON_Delete(root);
@@ -1923,15 +2254,19 @@ void LanMicApp::SavePendingTodoOps() {
 
     cJSON* root = cJSON_CreateArray();
     for (const auto& op : pending_todo_ops_) {
-        if (op.id.empty()) {
+        if (op.id.empty() && op.type != PendingTodoOpType::AddPomodoro) {
             continue;
         }
         cJSON* item = cJSON_CreateObject();
-        cJSON_AddStringToObject(
-            item,
-            "type",
-            op.type == PendingTodoOpType::Toggle ? "toggle" : "delete");
-        cJSON_AddStringToObject(item, "id", op.id.c_str());
+        const char* type = op.type == PendingTodoOpType::Toggle
+            ? "toggle"
+            : op.type == PendingTodoOpType::Delete
+                ? "delete"
+                : "add_pomodoro";
+        cJSON_AddStringToObject(item, "type", type);
+        if (!op.id.empty()) {
+            cJSON_AddStringToObject(item, "id", op.id.c_str());
+        }
         if (op.type == PendingTodoOpType::Toggle) {
             cJSON_AddBoolToObject(item, "completed", op.completed);
         }
@@ -1947,7 +2282,10 @@ void LanMicApp::SavePendingTodoOps() {
 }
 
 void LanMicApp::OpenTodoMenu(TodoMenuKind kind) {
-    if (has_pending_transcript_ || phase_ == Phase::Recording || phase_ == Phase::Transcribing) {
+    if (has_pending_transcript_ ||
+        IsPomodoroVisible() ||
+        phase_ == Phase::Recording ||
+        phase_ == Phase::Transcribing) {
         return;
     }
     todo_menu_kind_ = kind;
@@ -2058,21 +2396,21 @@ int LanMicApp::GetTodoMenuItemCount() const {
         return 4;
     }
     if (todo_menu_kind_ == TodoMenuKind::TodoAction) {
-        return 3;
+        return 5;
     }
     if (todo_menu_kind_ == TodoMenuKind::Live) {
-        return 8;
+        return 9;
     }
-    return 6;
+    return 7;
 }
 
 std::string LanMicApp::GetTodoMenuItemLabel(int item) const {
     if (todo_menu_kind_ == TodoMenuKind::RestartConfirm) {
         switch (item) {
             case 0:
-                return "Restart device";
+                return "重启设备";
             case 1:
-                return "Back";
+                return "返回";
             default:
                 return "";
         }
@@ -2081,13 +2419,13 @@ std::string LanMicApp::GetTodoMenuItemLabel(int item) const {
     if (todo_menu_kind_ == TodoMenuKind::ReconnectStuck) {
         switch (item) {
             case 0:
-                return "Retry host";
+                return "重试主机";
             case 1:
-                return "Offline Todo";
+                return "离线待办";
             case 2:
-                return "Restart device";
+                return "重启设备";
             case 3:
-                return "Back";
+                return "返回";
             default:
                 return "";
         }
@@ -2096,21 +2434,23 @@ std::string LanMicApp::GetTodoMenuItemLabel(int item) const {
     if (todo_menu_kind_ == TodoMenuKind::Live) {
         switch (item) {
             case 0:
-                return "Go Todo";
+                return "去待办";
             case 1:
-                return voice_translation_enabled_ ? "Translate: On" : "Translate: Off";
+                return "快速番茄";
             case 2:
-                return std::string("Lang: ") + GetVoiceTranslationTargetLabel();
+                return voice_translation_enabled_ ? "翻译: 开" : "翻译: 关";
             case 3:
-                return std::string("Send: ") + GetVoiceTranslationSendLabel();
+                return std::string("语言: ") + GetVoiceTranslationTargetLabel();
             case 4:
-                return "Reconnect host";
+                return std::string("发送: ") + GetVoiceTranslationSendLabel();
             case 5:
-                return "Restart device";
+                return "重连主机";
             case 6:
-                return "Settings";
+                return "重启设备";
             case 7:
-                return "Back";
+                return "设置";
+            case 8:
+                return "返回";
             default:
                 return "";
         }
@@ -2124,11 +2464,15 @@ std::string LanMicApp::GetTodoMenuItemLabel(int item) const {
         const bool is_done = has_item && todo_items_[todo_selected_index_].completed;
         switch (item) {
             case 0:
-                return is_done ? "Mark not done" : "Mark done";
+                return has_item ? "开始番茄" : "开始未归属番茄";
             case 1:
-                return "Delete selected";
+                return is_done ? "取消完成" : "标记完成";
             case 2:
-                return "Back";
+                return "删除选中";
+            case 3:
+                return "快速番茄";
+            case 4:
+                return "返回";
             default:
                 return "";
         }
@@ -2141,17 +2485,19 @@ std::string LanMicApp::GetTodoMenuItemLabel(int item) const {
     const bool is_done = has_item && todo_items_[todo_selected_index_].completed;
     switch (item) {
         case 0:
-            return is_done ? "Mark not done" : "Mark done";
+            return "快速番茄";
         case 1:
-            return "Delete selected";
+            return is_done ? "取消完成" : "标记完成";
         case 2:
-            return "Go Live";
+            return "删除选中";
         case 3:
-            return "Reconnect host";
+            return "去实时";
         case 4:
-            return "Restart device";
+            return "重连主机";
         case 5:
-            return "Back";
+            return "重启设备";
+        case 6:
+            return "返回";
         default:
             return "";
     }
@@ -2176,13 +2522,13 @@ void LanMicApp::HandleTodoMenuInput(bool up_click, bool down_click, bool boot_pr
 void LanMicApp::ExecuteTodoMenuItem(int item) {
     auto restart_device = [this]() {
         if (!pending_todo_ops_.empty()) {
-            status_text_ = "Pending sync";
-            hint_text_ = "Reconnect before restart";
+            status_text_ = "待同步";
+            hint_text_ = "先重连再重启";
             CloseTodoMenu();
             return;
         }
-        status_text_ = "Restarting";
-        hint_text_ = "Reconnecting host";
+        status_text_ = "正在重启";
+        hint_text_ = "重连主机";
         UpdateDisplay();
         vTaskDelay(pdMS_TO_TICKS(300));
         esp_restart();
@@ -2192,16 +2538,16 @@ void LanMicApp::ExecuteTodoMenuItem(int item) {
         switch (item) {
             case 0:
                 if (connect_attempt_running_.load(std::memory_order_acquire)) {
-                    status_text_ = "Reconnect stuck";
-                    hint_text_ = "Choose Offline or Restart";
+                    status_text_ = "重连异常";
+                    hint_text_ = "离线或重启";
                     UpdateDisplay();
                 } else {
                     CloseTodoMenu();
-                    RequestReconnect("Retrying host...");
+                    RequestReconnect("重试主机...");
                 }
                 return;
             case 1:
-                EnterOfflineTodoMode("Offline Todo");
+                EnterOfflineTodoMode("离线待办");
                 return;
             case 2:
                 restart_device();
@@ -2232,29 +2578,33 @@ void LanMicApp::ExecuteTodoMenuItem(int item) {
                 SwitchPage(Page::Todo);
                 return;
             case 1:
+                CloseTodoMenu();
+                StartPomodoroUnassigned();
+                return;
+            case 2:
                 ToggleVoiceTranslation();
                 CloseTodoMenu();
                 return;
-            case 2:
+            case 3:
                 CycleVoiceTranslationTargetLanguage();
                 CloseTodoMenu();
                 return;
-            case 3:
+            case 4:
                 CycleVoiceTranslationSendMode();
                 CloseTodoMenu();
                 return;
-            case 4:
-                CloseTodoMenu();
-                RequestReconnect("Refreshing host...");
-                return;
             case 5:
-                restart_device();
+                CloseTodoMenu();
+                RequestReconnect("刷新主机...");
                 return;
             case 6:
+                restart_device();
+                return;
+            case 7:
                 CloseTodoMenu();
                 EnterSettings();
                 return;
-            case 7:
+            case 8:
             default:
                 CloseTodoMenu();
                 return;
@@ -2264,14 +2614,22 @@ void LanMicApp::ExecuteTodoMenuItem(int item) {
     if (todo_menu_kind_ == TodoMenuKind::TodoAction) {
         switch (item) {
             case 0:
-                ToggleSelectedTodo();
+                StartPomodoroForSelectedTodo();
                 CloseTodoMenu();
                 return;
             case 1:
-                DeleteSelectedTodo();
+                ToggleSelectedTodo();
                 CloseTodoMenu();
                 return;
             case 2:
+                DeleteSelectedTodo();
+                CloseTodoMenu();
+                return;
+            case 3:
+                StartPomodoroUnassigned();
+                CloseTodoMenu();
+                return;
+            case 4:
             default:
                 CloseTodoMenu();
                 return;
@@ -2281,29 +2639,33 @@ void LanMicApp::ExecuteTodoMenuItem(int item) {
     const bool online = IsServerConnected();
     switch (item) {
         case 0:
-            ToggleSelectedTodo();
+            StartPomodoroUnassigned();
             CloseTodoMenu();
             return;
         case 1:
-            DeleteSelectedTodo();
+            ToggleSelectedTodo();
             CloseTodoMenu();
             return;
         case 2:
+            DeleteSelectedTodo();
+            CloseTodoMenu();
+            return;
+        case 3:
             CloseTodoMenu();
             SwitchPage(Page::Summary);
             if (!online) {
                 pending_normal_after_reconnect_ = true;
-                RequestReconnect("Reconnecting live...");
+                RequestReconnect("重连实时...");
             }
             return;
-        case 3:
-            CloseTodoMenu();
-            RequestReconnect(online ? "Refreshing host..." : "Retrying host...");
-            return;
         case 4:
-            restart_device();
+            CloseTodoMenu();
+            RequestReconnect(online ? "刷新主机..." : "重试主机...");
             return;
         case 5:
+            restart_device();
+            return;
+        case 6:
         default:
             CloseTodoMenu();
             return;
@@ -2587,10 +2949,19 @@ const char* LanMicApp::GetToolLabel() const {
 }
 
 const char* LanMicApp::GetModeLabel() const {
-    return (active_page_ == Page::Todo || offline_todo_mode_) ? "Mode: Todo" : "Mode: Live";
+    return (active_page_ == Page::Todo || offline_todo_mode_) ? "待办模式" : "实时模式";
 }
 
 std::string LanMicApp::GetPhaseLabel() const {
+    if (pomodoro_phase_ == PomodoroPhase::FocusRunning ||
+        pomodoro_phase_ == PomodoroPhase::FocusCancelConfirm ||
+        pomodoro_phase_ == PomodoroPhase::FocusDone) {
+        return "专注";
+    }
+    if (pomodoro_phase_ == PomodoroPhase::BreakRunning ||
+        pomodoro_phase_ == PomodoroPhase::BreakDone) {
+        return "休息";
+    }
     switch (phase_) {
         case Phase::Recording:
             return "● REC";
@@ -2624,6 +2995,21 @@ void LanMicApp::ShowIdleTodoPage() {
 }
 
 std::string LanMicApp::GetFooterText() const {
+    if (pomodoro_phase_ == PomodoroPhase::FocusRunning) {
+        return "BOOT 取消菜单";
+    }
+    if (pomodoro_phase_ == PomodoroPhase::FocusCancelConfirm) {
+        return "BOOT 确认 | UP/DN 选择";
+    }
+    if (pomodoro_phase_ == PomodoroPhase::FocusDone) {
+        return "BOOT 休息 | DN 跳过";
+    }
+    if (pomodoro_phase_ == PomodoroPhase::BreakRunning) {
+        return "BOOT 结束休息";
+    }
+    if (pomodoro_phase_ == PomodoroPhase::BreakDone) {
+        return "BOOT 返回待办";
+    }
     if (has_pending_transcript_) {
         return "BOOT Add | UP Send | DN Undo";
     }
@@ -2634,7 +3020,7 @@ std::string LanMicApp::GetFooterText() const {
         return "Join AP then open 192.168.4.1";
     }
     if (todo_menu_open_) {
-        return "UP/DN Menu | BOOT OK";
+        return "BOOT 确认 | UP/DN 选择";
     }
     if (active_page_ == Page::Settings) {
         return settings_editing_volume_ ? "UP/DN ±10 | BOOT Save"
@@ -2644,9 +3030,12 @@ std::string LanMicApp::GetFooterText() const {
         return "DNx2 English | HoldUP Menu";
     }
     if (active_page_ == Page::Todo) {
+        if (todo_menu_open_) {
+            return "BOOT 确认 | UP/DN 选择";
+        }
         return IsServerConnected()
-            ? "Hold UP Menu | Hold Todo"
-            : "Hold UP Menu | UP/DN Pick";
+            ? "UP/DN 移动 | BOOT 菜单"
+            : "UP/DN 移动 | BOOT 重连";
     }
     return "UP/DN Scroll | Hold UP | HoldDN Set";
 }
@@ -2770,10 +3159,32 @@ void LanMicApp::DrawHorizontalLine(int y, int thickness) {
         return;
     }
 
-    const int width = display_->width();
+    const int margin = 16;
+    const int full_width = display_->width();
+    const int x = full_width > margin * 2 ? margin : 0;
+    const int width = full_width > margin * 2 ? full_width - margin * 2 : full_width;
     const int bytes_per_row = (width + 7) >> 3;
     std::vector<uint8_t> buffer(bytes_per_row * thickness, 0xFF);
-    display_->WriteRaw1bpp(0, y, width, thickness, buffer.data(), buffer.size());
+    display_->WriteRaw1bpp(x, y, width, thickness, buffer.data(), buffer.size());
+}
+
+void LanMicApp::DrawPomodoroDots(int x, int y, int count, int target) {
+    if (display_ == nullptr) {
+        return;
+    }
+    const int safe_count = std::max(0, count);
+    const int visible = std::min(std::max(1, target), 4);
+    for (int index = 0; index < visible; ++index) {
+        const bool filled = index < safe_count;
+        const uint8_t* bitmap = filled ? kPomodoroDotFilled8x8 : kPomodoroDotEmpty8x8;
+        display_->WriteRaw1bpp(
+            x + index * kPomodoroDotPitch,
+            y,
+            kPomodoroDotSize,
+            kPomodoroDotSize,
+            bitmap,
+            filled ? sizeof(kPomodoroDotFilled8x8) : sizeof(kPomodoroDotEmpty8x8));
+    }
 }
 
 void LanMicApp::DrawWifiIcon(int x, int y) {
@@ -2817,9 +3228,37 @@ void LanMicApp::UpdateDisplay() {
     }
 
     std::vector<Display::TextItem> texts;
+    struct PomodoroDotRun {
+        int x = 0;
+        int y = 0;
+        int count = 0;
+        int target = 4;
+    };
+    struct PomodoroProgress {
+        int count = 0;
+        int target = 4;
+    };
+    std::vector<PomodoroDotRun> pomodoro_dot_runs;
     auto single_line = [](const std::string& value, size_t max_chars) -> std::string {
         const auto lines = WrapUtf8Lines(value, max_chars, 1);
         return lines.empty() ? std::string() : lines.front();
+    };
+    constexpr int kCompactBodyY = 72;
+    constexpr int kMenuBodyY = 86;
+    constexpr int kTodoRowHeight = 20;
+    constexpr int kMenuRowHeight = 24;
+    constexpr size_t kTodoCharsPerLine = 24;
+    auto add_pomodoro_dots = [&](int x, int text_y, int count, int target) -> int {
+        const int safe_count = std::max(0, count);
+        const int visible = std::min(std::max(1, target), 4);
+        pomodoro_dot_runs.push_back({x, text_y + 5, safe_count, target});
+        int next_x = x + visible * kPomodoroDotPitch;
+        if (safe_count > visible) {
+            const std::string overflow = "+" + std::to_string(safe_count - visible);
+            texts.push_back({overflow, next_x, text_y, 16});
+            next_x += static_cast<int>(overflow.size()) * 8 + 4;
+        }
+        return next_x + 2;
     };
 
     std::string battery_text = "--";
@@ -2837,21 +3276,131 @@ void LanMicApp::UpdateDisplay() {
         quota_status_text = "5H:" + q5 + " 7d:" + qw;
     }
 
+    const bool pomodoro_visible = IsPomodoroVisible();
+    const bool pomodoro_break =
+        pomodoro_phase_ == PomodoroPhase::BreakRunning ||
+        pomodoro_phase_ == PomodoroPhase::BreakDone;
+    auto pomodoro_remaining_minutes = [&]() -> int {
+        if (!IsPomodoroRunning() || pomodoro_started_ms_ <= 0 || pomodoro_duration_ms_ <= 0) {
+            return 0;
+        }
+        const int64_t now_ms = esp_timer_get_time() / 1000;
+        const int64_t remaining_ms = std::max<int64_t>(
+            0,
+            pomodoro_duration_ms_ - (now_ms - pomodoro_started_ms_));
+        return static_cast<int>((remaining_ms + 59999) / 60000);
+    };
+    auto pomodoro_current_progress = [&]() -> PomodoroProgress {
+        if (pomodoro_has_target_) {
+            for (const auto& item : todo_items_) {
+                if (!pomodoro_target_id_.empty() && item.id == pomodoro_target_id_) {
+                    return {item.pomodoro_count, item.pomodoro_target};
+                }
+            }
+        }
+        return {todo_unassigned_pomodoro_count_, todo_unassigned_pomodoro_target_};
+    };
+
     texts.push_back({GetNetworkLabel(), 28, 9, 16});
-    texts.push_back({(active_page_ == Page::Todo || offline_todo_mode_) ? "TODO" : "LIVE", 96, 9, 16});
+    texts.push_back({
+        pomodoro_visible
+            ? (pomodoro_break ? "BREAK" : "FOCUS")
+            : (active_page_ == Page::Todo || offline_todo_mode_) ? "TODO" : "LIVE",
+        96,
+        9,
+        16});
     texts.push_back({GetPhaseLabel(), 166, 9, 16});
     if (!quota_status_text.empty()) {
         texts.push_back({quota_status_text, 250, 9, 16});
     }
     texts.push_back({battery_text, 346, 9, 16});
-    const char* page_label = active_page_ == Page::Summary ? "Live"
-                           : active_page_ == Page::Todo    ? "Todo"
-                           : active_page_ == Page::Log     ? "Log"
-                           :                                 "Settings";
-    texts.push_back({single_line(repo_name_.empty() ? "Codex" : repo_name_, 18), 12, kContentHeaderY, 16});
-    texts.push_back({page_label, 316, kContentHeaderY, 16});
+    std::string header_title = repo_name_.empty() ? "Codex" : repo_name_;
+    std::string header_meta;
+    if (pomodoro_visible) {
+        if (pomodoro_phase_ == PomodoroPhase::FocusCancelConfirm) {
+            header_title = "取消番茄?";
+        } else if (pomodoro_phase_ == PomodoroPhase::FocusDone) {
+            header_title = "专注完成";
+            header_meta = "番茄已计入";
+        } else if (pomodoro_break) {
+            header_title = pomodoro_phase_ == PomodoroPhase::BreakDone ? "休息完成" : "休息";
+        } else {
+            header_title = "专注";
+        }
+        if (header_meta.empty() && IsPomodoroRunning()) {
+            header_meta = std::to_string(pomodoro_remaining_minutes()) + "分";
+        }
+    } else if (active_page_ == Page::Todo) {
+        if (todo_menu_open_) {
+            header_title = todo_menu_kind_ == TodoMenuKind::TodoAction ? "待办操作" : "待办菜单";
+            if (todo_selected_index_ >= 0 &&
+                todo_selected_index_ < static_cast<int>(todo_items_.size())) {
+                header_meta = todo_items_[todo_selected_index_].title;
+            }
+        } else {
+            header_title = "待办";
+            header_meta = "今日番茄";
+        }
+    } else if (active_page_ == Page::Summary) {
+        header_meta = "Live";
+    } else if (active_page_ == Page::Log) {
+        header_title = "Log";
+    } else {
+        header_title = "Settings";
+    }
+    texts.push_back({single_line(header_title, 16), 12, kContentHeaderY, 16});
+    if (!header_meta.empty()) {
+        texts.push_back({single_line(header_meta, 14), 228, kContentHeaderY, 16});
+    }
 
-    if (active_page_ == Page::Summary) {
+    if (pomodoro_visible) {
+        std::vector<std::string> rows;
+        int y = kMenuBodyY;
+
+        switch (pomodoro_phase_) {
+            case PomodoroPhase::FocusRunning:
+                texts.push_back({std::to_string(pomodoro_remaining_minutes()) + "分", 156, 88, 24});
+                rows.push_back(single_line(GetPomodoroTargetLabel(), kTodoCharsPerLine));
+                {
+                    const auto progress = pomodoro_current_progress();
+                    add_pomodoro_dots(12, 164, progress.count, progress.target);
+                }
+                rows.push_back("");
+                rows.push_back("原子番茄，不可暂停");
+                y = 140;
+                break;
+            case PomodoroPhase::FocusCancelConfirm:
+                rows.push_back((pomodoro_menu_selected_item_ == 0 ? "> " : "  ") + std::string("继续专注"));
+                rows.push_back((pomodoro_menu_selected_item_ == 1 ? "> " : "  ") + std::string("废除番茄"));
+                break;
+            case PomodoroPhase::FocusDone:
+                rows.push_back(single_line(GetPomodoroTargetLabel(), kBodyCharsPerLine));
+                {
+                    const auto progress = pomodoro_current_progress();
+                    add_pomodoro_dots(12, kMenuBodyY + kMenuRowHeight, progress.count, progress.target);
+                }
+                rows.push_back("");
+                rows.push_back("番茄已计入");
+                break;
+            case PomodoroPhase::BreakRunning:
+                texts.push_back({std::to_string(pomodoro_remaining_minutes()) + "分", 164, 88, 24});
+                rows.push_back("放松一下");
+                y = 140;
+                break;
+            case PomodoroPhase::BreakDone:
+                rows.push_back("休息完成");
+                rows.push_back("按 BOOT 返回待办");
+                break;
+            case PomodoroPhase::None:
+            default:
+                break;
+        }
+
+        for (const auto& line : rows) {
+            texts.push_back({single_line(line, kTodoCharsPerLine), 12, y, 16});
+            y += kMenuRowHeight;
+        }
+    } else if (active_page_ == Page::Summary) {
         if (todo_menu_open_ && todo_menu_kind_ == TodoMenuKind::Live) {
             texts.push_back({"Live Menu", 12, kPromptTitleY, 16});
             texts.push_back({single_line(GetModeLabel(), 16), 228, kPromptTitleY, 16});
@@ -2905,36 +3454,45 @@ void LanMicApp::UpdateDisplay() {
             }
         }
     } else if (active_page_ == Page::Todo) {
-        texts.push_back({todo_menu_open_ ? "Todo Menu" : "Todo", 12, kLogTitleY, 16});
         std::string todo_status = todo_last_action_text_.empty() ? GetModeLabel() : todo_last_action_text_;
         if (!pending_todo_ops_.empty()) {
             todo_status = "Pending sync " + std::to_string(pending_todo_ops_.size());
         }
-        texts.push_back({single_line(todo_status, 16), 228, kLogTitleY, 16});
 
-        std::vector<std::string> rows;
         if (todo_menu_open_) {
+            std::vector<std::string> rows;
             if (todo_menu_kind_ == TodoMenuKind::ReconnectStuck) {
-                rows.push_back("Reconnect stuck");
-            } else if (todo_menu_kind_ == TodoMenuKind::TodoAction) {
-                rows.push_back("Todo actions");
+                rows.push_back("重连异常");
+            } else if (todo_menu_kind_ != TodoMenuKind::TodoAction && !todo_status.empty()) {
+                rows.push_back(single_line(todo_status, kTodoCharsPerLine));
             } else if (!IsServerConnected()) {
-                rows.push_back("Offline Todo");
-            } else {
-                rows.push_back(GetModeLabel());
+                rows.push_back("离线待办");
             }
             const int count = GetTodoMenuItemCount();
             for (int index = 0; index < count; ++index) {
                 std::string row = (index == todo_menu_selected_item_) ? "> " : "  ";
                 row += GetTodoMenuItemLabel(index);
-                rows.push_back(single_line(row, kBodyCharsPerLine));
+                rows.push_back(single_line(row, kTodoCharsPerLine));
+            }
+            int y = kMenuBodyY;
+            for (const auto& line : rows) {
+                texts.push_back({line, 12, y, 16});
+                y += kMenuRowHeight;
             }
         } else if (todo_items_.empty()) {
-            rows.push_back("No plans yet");
-            rows.push_back(IsServerConnected() ? "Hold UP for menu" : "Offline cache empty");
-            rows.push_back(GetModeLabel());
+            int y = kCompactBodyY;
+            texts.push_back({"未归属", 12, y, 16});
+            add_pomodoro_dots(70, y, todo_unassigned_pomodoro_count_, todo_unassigned_pomodoro_target_);
+            y += kTodoRowHeight;
+            texts.push_back({"暂无待办", 12, y, 16});
+            y += kTodoRowHeight;
+            texts.push_back({IsServerConnected() ? "BOOT 菜单添加" : "离线缓存为空", 12, y, 16});
         } else {
-            const int visible_lines = static_cast<int>(kLogVisibleLines);
+            int y = kCompactBodyY;
+            texts.push_back({"未归属", 12, y, 16});
+            add_pomodoro_dots(70, y, todo_unassigned_pomodoro_count_, todo_unassigned_pomodoro_target_);
+            y += kTodoRowHeight;
+            const int visible_lines = 8;
             const int max_start = std::max(0, static_cast<int>(todo_items_.size()) - visible_lines);
             const int start_index = std::clamp(
                 todo_selected_index_ < 0 ? 0 : todo_selected_index_ - (visible_lines / 2),
@@ -2945,19 +3503,14 @@ void LanMicApp::UpdateDisplay() {
                 start_index + visible_lines);
             for (int index = start_index; index < end_index; ++index) {
                 const auto& item = todo_items_[index];
-                std::string row = (index == todo_selected_index_) ? ">" : " ";
-                row += std::to_string(index + 1);
-                row += ".";
-                row += item.completed ? "[x] " : "[ ] ";
-                row += item.title;
-                rows.push_back(single_line(row, kBodyCharsPerLine));
+                std::string prefix = (index == todo_selected_index_) ? "> " : "  ";
+                prefix += item.completed ? "[x] " : "[ ] ";
+                texts.push_back({prefix, 12, y, 16});
+                const int title_x = add_pomodoro_dots(64, y, item.pomodoro_count, item.pomodoro_target);
+                const size_t title_chars = title_x > 124 ? 16 : 18;
+                texts.push_back({single_line(item.title, title_chars), title_x, y, 16});
+                y += kTodoRowHeight;
             }
-        }
-
-        int y = kLogBodyY;
-        for (const auto& line : rows) {
-            texts.push_back({line, 12, y, 16});
-            y += kLineHeight;
         }
     } else if (active_page_ == Page::Log) {
         texts.push_back({"Log", 12, kLogTitleY, 16});
@@ -3012,6 +3565,9 @@ void LanMicApp::UpdateDisplay() {
     texts.push_back({GetFooterText(), 12, kFooterTextY, 16});
 
     display_->DrawTexts(texts, true);
+    for (const auto& run : pomodoro_dot_runs) {
+        DrawPomodoroDots(run.x, run.y, run.count, run.target);
+    }
     DrawHorizontalLine(kStatusBarBottomY);
     DrawHorizontalLine(kHeaderLineY);
     if (active_page_ == Page::Summary) {
@@ -3069,6 +3625,7 @@ void LanMicApp::Run() {
 
     while (true) {
         const int64_t now_ms = esp_timer_get_time() / 1000;
+        UpdatePomodoroTimer(now_ms);
         if (connect_attempt_completed_.exchange(false, std::memory_order_acq_rel)) {
             reconnect_stuck_prompt_ = false;
             const bool server_connected = IsServerConnected();
@@ -3233,8 +3790,13 @@ void LanMicApp::Run() {
             RefreshBatteryStatus();
         }
 
-        // Navigation buttons always work regardless of WiFi state
-        if (up_long_pressed_.exchange(false)) {
+        // Navigation buttons always work regardless of WiFi state. During a
+        // tomato, long presses are consumed so focus cannot be interrupted by
+        // page changes or menus.
+        if (IsPomodoroVisible()) {
+            up_long_pressed_.exchange(false);
+            down_long_pressed_.exchange(false);
+        } else if (up_long_pressed_.exchange(false)) {
             if (IsNavButtonPressed(TODO_DOWN_BUTTON_GPIO)) {
                 EnterWifiSetupMode();
             } else if (active_page_ == Page::Todo || offline_todo_mode_) {
@@ -3245,7 +3807,7 @@ void LanMicApp::Run() {
                 SwitchPage(Page::Todo);
             }
         }
-        if (down_long_pressed_.exchange(false)) {
+        if (!IsPomodoroVisible() && down_long_pressed_.exchange(false)) {
             if (IsNavButtonPressed(TODO_UP_BUTTON_GPIO)) {
                 EnterWifiSetupMode();
             } else if (active_page_ == Page::Log) {
@@ -3263,6 +3825,7 @@ void LanMicApp::Run() {
         const bool down_single_click = down_clicked_.exchange(false);
 
         if (up_double_click &&
+            !IsPomodoroVisible() &&
             !todo_menu_open_ &&
             !has_pending_transcript_ &&
             (active_page_ == Page::Todo || active_page_ == Page::Summary) &&
@@ -3273,6 +3836,7 @@ void LanMicApp::Run() {
         }
 
         if (down_double_click &&
+            !IsPomodoroVisible() &&
             !todo_menu_open_ &&
             !has_pending_transcript_ &&
             active_page_ == Page::Summary &&
@@ -3321,6 +3885,19 @@ void LanMicApp::Run() {
         }
 
         if (!IsWifiConnected()) {
+            const bool pressed_now = IsPttPressed();
+            const bool boot_press = pressed_now && !last_pressed;
+            if (IsPomodoroVisible()) {
+                if (boot_press) {
+                    last_pressed = true;
+                }
+                if (!pressed_now) {
+                    last_pressed = false;
+                }
+                HandlePomodoroInput(up_click, down_click, boot_press);
+                vTaskDelay(pdMS_TO_TICKS(200));
+                continue;
+            }
             if (!offline_todo_mode_ &&
                 !todo_menu_open_ &&
                 !has_pending_transcript_ &&
@@ -3330,7 +3907,6 @@ void LanMicApp::Run() {
                 vTaskDelay(pdMS_TO_TICKS(10));
                 continue;
             }
-            const bool pressed_now = IsPttPressed();
             if (pressed_now && !last_pressed) {
                 last_pressed = true;
                 handle_disconnected_boot_press();
@@ -3396,6 +3972,7 @@ void LanMicApp::Run() {
             !connect_attempt_running_.load(std::memory_order_acquire) &&
             !has_pending_transcript_ &&
             !todo_menu_open_ &&
+            !IsPomodoroVisible() &&
             active_page_ != Page::Settings &&
             phase_ != Phase::Recording &&
             phase_ != Phase::Transcribing &&
@@ -3485,6 +4062,23 @@ void LanMicApp::Run() {
                 vTaskDelay(pdMS_TO_TICKS(50));
                 continue;
             }
+        }
+
+        if (IsPomodoroVisible()) {
+            const bool pressed_now = IsPttPressed();
+            const bool boot_press = pressed_now && !last_pressed;
+            if (boot_press) {
+                last_pressed = true;
+            }
+            if (!pressed_now && last_pressed) {
+                boot_pressed_since_ms = 0;
+                todo_hold_started = false;
+                boot_press_consumed = false;
+                last_pressed = false;
+            }
+            HandlePomodoroInput(up_click, down_click, boot_press);
+            vTaskDelay(pdMS_TO_TICKS(IsPomodoroRunning() ? 200 : 20));
+            continue;
         }
 
         if (up_click) {

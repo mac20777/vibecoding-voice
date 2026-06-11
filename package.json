@@ -36,7 +36,9 @@
     "console": "node scripts/console.mjs",
     "vibe": "node scripts/vibe.mjs",
     "desktop:dev": "electron .",
-    "desktop:dist": "electron-builder --win nsis"
+    "desktop:dist": "electron-builder --win nsis",
+    "desktop:dist:linux": "electron-builder --linux deb AppImage --x64",
+    "desktop:dist:ubuntu": "electron-builder --linux dir --x64 && bash scripts/build-ubuntu-deb.sh"
   },
   "engines": {
     "node": ">=20"
@@ -77,6 +79,26 @@
       "icon": "build-assets/app-icon.png",
       "signAndEditExecutable": false,
       "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build-assets/app-icon.png",
+      "category": "Development",
+      "maintainer": "mac20777",
+      "artifactName": "vibecoding-voice-${version}-ubuntu-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,

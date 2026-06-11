@@ -1,9 +1,8 @@
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 
-function buildCodexArgs(config, threadId, prompt) {
-  const args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", config.codexCommand];
-
+function buildCodexCliArgs(config, threadId, prompt) {
+  const args = [];
   args.push("-C", config.codexCwd);
 
   if (threadId) {
@@ -17,6 +16,24 @@ function buildCodexArgs(config, threadId, prompt) {
   }
 
   return args;
+}
+
+export function buildCodexInvocation(config, threadId, prompt, platform = process.platform) {
+  const codexCommand = config.codexCommand || "codex";
+  const args = buildCodexCliArgs(config, threadId, prompt);
+
+  if (platform === "win32" && /\.ps1$/i.test(codexCommand)) {
+    return {
+      command: "powershell.exe",
+      args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", codexCommand, ...args]
+    };
+  }
+
+  if (platform === "win32") {
+    return { command: "cmd.exe", args: ["/c", codexCommand, ...args] };
+  }
+
+  return { command: codexCommand, args };
 }
 
 export class CodexSessionManager {
@@ -50,8 +67,8 @@ export class CodexSessionManager {
       threadId: this.threadId
     });
 
-    const args = buildCodexArgs(this.config, this.threadId, trimmedPrompt);
-    const child = spawn("powershell.exe", args, {
+    const { command, args } = buildCodexInvocation(this.config, this.threadId, trimmedPrompt);
+    const child = spawn(command, args, {
       cwd: this.config.codexCwd,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true

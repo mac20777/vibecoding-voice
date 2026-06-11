@@ -87,15 +87,26 @@ private:
         std::string id;
         std::string title;
         bool completed = false;
+        int pomodoro_count = 0;
+        int pomodoro_target = 4;
     };
     enum class PendingTodoOpType {
         Toggle,
-        Delete
+        Delete,
+        AddPomodoro
     };
     struct PendingTodoOp {
         PendingTodoOpType type = PendingTodoOpType::Toggle;
         std::string id;
         bool completed = false;
+    };
+    enum class PomodoroPhase {
+        None,
+        FocusRunning,
+        FocusCancelConfirm,
+        FocusDone,
+        BreakRunning,
+        BreakDone
     };
 
     // Settings page state
@@ -135,6 +146,17 @@ private:
     bool todo_menu_open_ = false;
     TodoMenuKind todo_menu_kind_ = TodoMenuKind::Todo;
     int todo_menu_selected_item_ = 0;
+    int todo_unassigned_pomodoro_count_ = 0;
+    int todo_unassigned_pomodoro_target_ = 4;
+    PomodoroPhase pomodoro_phase_ = PomodoroPhase::None;
+    int64_t pomodoro_started_ms_ = 0;
+    int64_t pomodoro_duration_ms_ = 0;
+    int pomodoro_last_visible_minute_ = -1;
+    int pomodoro_menu_selected_item_ = 0;
+    bool pomodoro_has_target_ = false;
+    int pomodoro_target_index_ = -1;
+    std::string pomodoro_target_id_;
+    std::string pomodoro_target_title_;
     bool offline_todo_mode_ = false;
     bool reconnect_stuck_prompt_ = false;
     bool boot_reconnect_pending_ = false;
@@ -202,6 +224,20 @@ private:
     void MoveTodoSelection(int direction);
     void ToggleSelectedTodo();
     void DeleteSelectedTodo();
+    void StartPomodoroForSelectedTodo();
+    void StartPomodoroUnassigned();
+    void StartPomodoroTarget(bool has_target, int index, const std::string& id, const std::string& title);
+    void StartPomodoroBreak();
+    void CancelPomodoroFocus();
+    void FinishPomodoroSession(const std::string& message);
+    bool IsPomodoroVisible() const;
+    bool IsPomodoroRunning() const;
+    void UpdatePomodoroTimer(int64_t now_ms);
+    void HandlePomodoroInput(bool up_click, bool down_click, bool boot_press);
+    void CompletePomodoroFocus();
+    void SaveCompletedPomodoro(bool has_target, int index, const std::string& id, const std::string& title);
+    std::string FormatPomodoroDots(int count, int target) const;
+    std::string GetPomodoroTargetLabel() const;
     void OpenTodoMenu(TodoMenuKind kind = TodoMenuKind::Todo);
     void CloseTodoMenu();
     int GetTodoMenuItemCount() const;
@@ -222,6 +258,7 @@ private:
     void RequestReconnect(const std::string& message);
     void QueueOfflineTodoToggle(const TodoItem& item, bool completed);
     void QueueOfflineTodoDelete(const TodoItem& item);
+    void QueueOfflineTodoPomodoro(const std::string& id);
     void FlushPendingTodoOps();
     void LoadCachedTodoState();
     void SaveCachedTodoState();
@@ -247,6 +284,7 @@ private:
     void UpdateLed();
     void PlayBeep(int freq_hz, int duration_ms);
     void DrawHorizontalLine(int y, int thickness = 1);
+    void DrawPomodoroDots(int x, int y, int count, int target);
     void DrawWifiIcon(int x, int y);
     void DrawBatteryIcon(int x, int y, int level, bool charging);
     void UpdateDisplay();
