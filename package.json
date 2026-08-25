@@ -35,6 +35,8 @@
     "test:reconnect": "node scripts/reconnect-smoke.mjs",
     "console": "node scripts/console.mjs",
     "vibe": "node scripts/vibe.mjs",
+    "remote:xiaomi": "node scripts/xiaomi-remote-input.mjs",
+    "remote:xiaomi:doctor": "node scripts/xiaomi-remote-input.mjs --doctor",
     "desktop:dev": "electron .",
     "desktop:dist": "electron-builder --win nsis",
     "desktop:dist:linux": "electron-builder --linux deb AppImage --x64",
@@ -72,6 +74,9 @@
       "node_modules/ws/**/*"
     ],
     "asar": true,
+    "asarUnpack": [
+      "scripts/windows/xiaomi-usbpcap-pipe.ps1"
+    ],
     "win": {
       "target": [
         "nsis"

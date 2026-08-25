@@ -384,6 +384,14 @@ function resolveSegmentOptions(message = {}) {
     };
   }
 
+  if (source === "xiaomi_remote") {
+    return {
+      source,
+      transcriptDeliveryMode: "immediate",
+      textInjectionMode: config.textInjectionMode
+    };
+  }
+
   return {
     source,
     transcriptDeliveryMode: config.transcriptDeliveryMode,

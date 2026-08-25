@@ -293,6 +293,56 @@ test("desktop mic injects text immediately and submit action presses Enter", asy
   assert.match(serverOutput.join(""), /mode: 'enter_only'/);
 });
 
+test("Xiaomi remote sends transcripts immediately and preserves configured Enter behavior", async (t) => {
+  const port = await getFreePort();
+  const appDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-xiaomi-remote-"));
+  const server = spawn(process.execPath, ["src/server.mjs"], {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      APPDATA: appDataRoot,
+      LAN_SHARED_SECRET: "",
+      LAN_DISCOVERY_ENABLED: "0",
+      LAN_VOICE_BIND: "127.0.0.1",
+      LAN_VOICE_PORT: String(port),
+      MOCK_TRANSCRIPT: "测试小米遥控器",
+      SEND_TARGET: "text_injector",
+      DRY_RUN_TEXT_INJECTION: "1",
+      TRANSCRIPT_DELIVERY_MODE: "confirm_on_device",
+      TEXT_INJECTION_MODE: "type_and_enter"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  const serverOutput = [];
+  server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
+  server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
+  t.after(async () => {
+    await stopServer(server);
+    fs.rmSync(appDataRoot, { recursive: true, force: true });
+  });
+
+  const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
+  const messages = createMessageCollector(ws);
+  t.after(() => closeWebSocket(ws));
+
+  ws.send(JSON.stringify({ type: "hello", deviceId: "xiaomi-test", boardType: "xiaomi-remote-msbc" }));
+  await messages.waitFor((message) => message.type === "hello_ack");
+  await messages.waitFor((message) => message.type === "server_ready");
+  await messages.waitFor((message) => message.type === "mode_state" && message.mode === "normal");
+
+  ws.send(JSON.stringify({ type: "ptt_start", source: "xiaomi_remote", ts: Date.now() }));
+  ws.send(Buffer.from([0x00, 0x00]), { binary: true });
+  ws.send(JSON.stringify({ type: "ptt_stop", source: "xiaomi_remote", ts: Date.now() }));
+
+  const finalMessage = await messages.waitFor((message) => message.type === "transcript_final");
+  assert.equal(finalMessage.text, "测试小米遥控器");
+  assert.equal(finalMessage.requiresAction, false);
+  await messages.waitFor((message) => message.type === "status" && message.status === "typed");
+  assert.match(serverOutput.join(""), /mode: 'type_and_enter'/);
+  assert.equal(messages.take((message) => message.type === "status" && message.status === "awaiting_action"), null);
+});
+
 test("server translates live voice transcript before device confirmation", async (t) => {
   const port = await getFreePort();
   const appDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-translation-"));

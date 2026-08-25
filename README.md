@@ -23,6 +23,7 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 - **English-output shortcut**: press `F7` to toggle Chinese speech -> English-only output; press it again to return to normal transcript output.
 - **Configurable keys**: change record / send / undo / English-output shortcuts from the desktop app's Speech tab.
 - **Same backend path**: desktop mic audio is streamed as 16 kHz PCM over WebSocket, just like the board firmware, so existing STT and translation settings still apply.
+- **Xiaomi voice remote input (Windows)**: use the paired remote as a push-to-talk mSBC microphone through USBPcap; see [the Windows remote guide](docs/xiaomi-remote-windows.md) and [field notes / adaptation checklist](docs/xiaomi-remote-adaptation-notes.md).
 
 ### New in v2.2.7
 
@@ -546,6 +547,7 @@ node scripts/console.mjs
 - **英文输出快捷键**：按 `F7` 切换到“中文说话，只输出英文”；再次按 `F7` 回到普通转写输出。
 - **快捷键可配置**：录音 / 发送 / 撤销 / 英文输出快捷键都可以在桌面端“识别”页修改。
 - **复用同一套后端**：桌面麦克风音频同样以 16 kHz PCM 通过 WebSocket 发送，和板子固件走同一套 STT 与翻译配置。
+- **Windows 小米语音遥控器输入**：把已配对的遥控器作为按住说话的 mSBC 麦克风使用，配置见 [Windows 遥控器指南](docs/xiaomi-remote-windows.md)；协议证据、踩坑记录与新型号适配步骤见 [实机适配记录](docs/xiaomi-remote-adaptation-notes.md)。
 
 ### v2.2.7 更新内容
 

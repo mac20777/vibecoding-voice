@@ -37,6 +37,7 @@ if (!singleInstance) {
 let mainWindow = null;
 let tray = null;
 let bridgeChild = null;
+let xiaomiRemoteChild = null;
 let globalHotkeyChild = null;
 let globalHotkeyRestartTimer = null;
 let globalHotkeysReady = false;
@@ -747,6 +748,10 @@ function bridgeEntryPath() {
   return path.join(app.getAppPath(), "src", "server.mjs");
 }
 
+function xiaomiRemoteEntryPath() {
+  return path.join(app.getAppPath(), "scripts", "xiaomi-remote-input.mjs");
+}
+
 function createLineReader(stream, source) {
   stream.setEncoding("utf8");
   const reader = readline.createInterface({ input: stream });
@@ -827,6 +832,13 @@ async function syncAutoLaunch(settings = loadDesktopSettings()) {
 }
 
 async function stopBridgeProcess() {
+  if (xiaomiRemoteChild) {
+    const child = xiaomiRemoteChild;
+    xiaomiRemoteChild = null;
+    writeDesktopLog("stopXiaomiRemoteProcess", { pid: child.pid ?? null });
+    child.kill();
+  }
+
   if (!bridgeChild) {
     const config = loadEffectiveConfig();
     const issues = getConfigIssues(config);
@@ -863,6 +875,46 @@ async function stopBridgeProcess() {
     child.once("exit", finish);
     child.kill();
     setTimeout(finish, 2_000);
+  });
+}
+
+function startXiaomiRemoteProcess(config) {
+  if (!config.xiaomiRemoteEnabled || xiaomiRemoteChild) {
+    return;
+  }
+
+  const child = fork(xiaomiRemoteEntryPath(), [], {
+    cwd: DEFAULT_INVOKE_CWD,
+    env: {
+      ...process.env,
+      VIBE_INVOKE_CWD: process.env.VIBE_INVOKE_CWD || DEFAULT_INVOKE_CWD,
+      VIBE_DESKTOP: "1"
+    },
+    silent: true,
+    windowsHide: false
+  });
+  xiaomiRemoteChild = child;
+  writeDesktopLog("xiaomi remote child forked", {
+    pid: child.pid ?? null,
+    entry: xiaomiRemoteEntryPath()
+  });
+  if (child.stdout) {
+    createLineReader(child.stdout, "xiaomi-remote");
+  }
+  if (child.stderr) {
+    createLineReader(child.stderr, "xiaomi-remote");
+  }
+  child.on("exit", (code, signal) => {
+    writeDesktopLog("xiaomi remote child exit", { code, signal });
+    if (xiaomiRemoteChild === child) {
+      xiaomiRemoteChild = null;
+    }
+    if (!isQuitting && code !== 0) {
+      appendProcessLog(
+        "xiaomi-remote",
+        `Remote input exited${code != null ? ` with code ${code}` : ""}${signal ? ` (${signal})` : ""}.`
+      );
+    }
   });
 }
 
@@ -906,6 +958,7 @@ async function startBridgeProcess({ revealOnError = true } = {}) {
     if (revealOnError) {
       showMainWindow();
     }
+    startXiaomiRemoteProcess(config);
     return;
   } catch {
     // nothing listening locally, safe to start
@@ -999,6 +1052,7 @@ async function startBridgeProcess({ revealOnError = true } = {}) {
       pid: child.pid ?? null,
       ownership: "app"
     });
+    startXiaomiRemoteProcess(config);
   } catch (error) {
     appendProcessLog("bridge", error.message || String(error));
     setServiceState({
@@ -1371,6 +1425,7 @@ app.on("before-quit", () => {
   isQuitting = true;
   mainWindow?.removeAllListeners("close");
   stopGlobalHotkeyMonitor();
+  xiaomiRemoteChild?.kill();
   bridgeChild?.kill();
 });
 
