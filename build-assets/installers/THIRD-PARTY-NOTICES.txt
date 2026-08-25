@@ -1,0 +1,11 @@
+Third-party components bundled with this installer
+===================================================
+
+USBPcap 1.5.4.0 (USB packet capture for Windows)
+- Project: https://github.com/desowin/usbpcap
+- Website: https://desowin.org/usbpcap/
+- We bundle the unmodified official installer (USBPcapSetup-1.5.4.0.exe)
+  and run it separately during setup, only with the user's consent.
+- License: USBPcapDriver is licensed under GPLv2;
+  USBPcapCMD is licensed under the BSD 2-Clause license.
+- Source code is available from the project page above.

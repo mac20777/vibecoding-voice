@@ -33,6 +33,11 @@ server.mjs (entry point — HTTP + WebSocket server)
 ├── doctor.mjs           — --doctor diagnostics (STT keys, CLI availability, ports)
 ├── cli-projector.mjs    — formats CLI state for device e-paper display
 ├── codex-rate-limits.mjs— reads quota from ~/.codex/sessions .jsonl files
+├── xiaomi-remote-runtime.mjs — Xiaomi remote capture (USBPcap named pipe; ATT parsing and mSBC
+│   │                             decoding are in-process, no tshark/ffmpeg)
+│   ├── usbpcap-att-parser.mjs — streaming pcap → ATT notification lines (replaces tshark)
+│   ├── msbc-decoder.mjs     — pure-JS mSBC → PCM16 decoder (replaces ffmpeg)
+│   └── xiaomi-remote-session.mjs — PTT session state machine (inactivity watchdog)
 ├── stt.mjs              — speech-to-text (OpenAI Whisper / Volcengine ASR)
 │   ├── wav.mjs          — PCM16 → WAV header conversion
 │   └── paths.mjs        — resolves project root from import.meta.url

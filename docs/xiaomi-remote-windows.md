@@ -14,9 +14,10 @@ Xiaomi remote voice key
   -> BARROT USB Bluetooth adapter
   -> elevated USBPcap capture
   -> Windows named pipe
-  -> tshark ATT notifications
+  -> built-in pcap/ATT parser (src/usbpcap-att-parser.mjs)
   -> 60-byte HID voice packets
   -> 57-byte mSBC frames
+  -> built-in mSBC decoder (src/msbc-decoder.mjs)
   -> PCM16 mono / 16 kHz
   -> local VibeCoding Voice WebSocket
   -> STT -> optional translation -> Inject / Codex / Claude
@@ -29,11 +30,13 @@ the H2 sequence (`08`, `38`, `c8`, `f8`) and reports packet gaps.
 ## Requirements
 
 - Windows with the remote already paired.
-- USBPcap with its filter driver active on the USB Bluetooth adapter.
-- Wireshark command-line tools (`tshark.exe`). Npcap is not required for this USBPcap pipeline.
-- FFmpeg:
-  - native `ffmpeg.exe` on `PATH`, or
-  - FFmpeg installed in the configured WSL distribution.
+- USBPcap with its filter driver active on the USB Bluetooth adapter. The Windows installer
+  offers to run the bundled official USBPcap installer at the end of setup.
+
+Nothing else is required: ATT notification parsing and mSBC decoding are implemented in-process
+(`src/usbpcap-att-parser.mjs`, `src/msbc-decoder.mjs`). Wireshark/tshark and FFmpeg are no longer
+dependencies, and the matching `XIAOMI_REMOTE_TSHARK_PATH` / `XIAOMI_REMOTE_FFMPEG_PATH` /
+`XIAOMI_REMOTE_WSL_DISTRO` settings are ignored.
 
 USBPcap capture needs administrator permission. Windows may show a UAC confirmation when the remote
 input process starts. The module never writes to the remote or its DFU characteristics; it passively
@@ -45,7 +48,7 @@ reads traffic from the local USB Bluetooth adapter.
 npm run remote:xiaomi:doctor
 ```
 
-Expected output names the selected USBPcap interface, USB device address and FFmpeg decoder.
+Expected output names the selected USBPcap interface and USB device address.
 
 ## Run from source
 
@@ -86,24 +89,66 @@ optional; leave `XIAOMI_REMOTE_SEND_TARGET` empty to preserve the target selecte
 
 ```dotenv
 XIAOMI_REMOTE_USBPCAP_PATH=
-XIAOMI_REMOTE_TSHARK_PATH=
 XIAOMI_REMOTE_USBPCAP_INTERFACE=
 XIAOMI_REMOTE_USB_DEVICE=
 XIAOMI_REMOTE_USB_ADAPTER_MATCH=BARROT Bluetooth
-XIAOMI_REMOTE_FFMPEG_PATH=
-XIAOMI_REMOTE_WSL_DISTRO=Ubuntu
 XIAOMI_REMOTE_INACTIVITY_MS=900
 XIAOMI_REMOTE_SEND_TARGET=codex_exec
 ```
 
+Deprecated and ignored: `XIAOMI_REMOTE_TSHARK_PATH`, `XIAOMI_REMOTE_FFMPEG_PATH`,
+`XIAOMI_REMOTE_WSL_DISTRO` (ATT parsing and mSBC decoding are built in now).
+
 The interface and device address normally auto-detect from USBPcap's device tree. Explicit values are
 useful when more than one USB Bluetooth adapter is connected.
 
+## Troubleshooting
+
+### Connected with battery level, but the voice key does nothing
+
+A paired remote with a live battery service only proves the BLE/GATT link, not that HID voice
+notifications are flowing. The listener arms its inactivity fallback as soon as a key-down arrives, so
+a press that produces no audio frames is cancelled within `XIAOMI_REMOTE_INACTIVITY_MS`
+(default 900 ms), logged as `voice session ignored: no audio frames`, and later presses keep working.
+
+If every press logs "no audio frames", the remote's voice stream did not resume after sleep or
+reconnect; re-pair the remote or restart the listener. Remote sleep/wake alone does not kill the
+capture pipeline, because the USBPcap filter tracks the USB adapter address, not the remote.
+
+### Re-pairing fails after the device was removed
+
+After deleting the remote in Windows Settings, unplug the USB adapter and plug it back into the same
+port before pairing again; the radio stack otherwise keeps stale BLE state and the new pairing fails.
+Restart the remote input listener afterwards so it re-detects the adapter's USB address.
+
+### Pairing succeeds but Settings shows "driver error"
+
+On the tested stack the remote's BLE GATT HID child device sometimes fails to start (PnP problem
+code 10) after a re-pair. Run:
+
+```powershell
+npm run remote:xiaomi:fix-hid
+```
+
+It locates the remote's HID child, restarts it with an elevated `pnputil /restart-device` (one UAC
+prompt), and re-checks the problem code. `npm run remote:xiaomi:doctor` reports the same state
+read-only. If the child stays unhealthy afterwards, do a full Windows restart.
+
+### The listener connects and immediately exits
+
+If the log shows `listening` followed at once by `usbpcap exited {"code":0}` (earlier builds logged
+`tshark exited {"code":0}`), a leftover `USBPcapCMD.exe`
+from a previous run still holds the capture driver. Stop it from an elevated terminal
+(`Get-Process USBPcapCMD | Stop-Process -Force`) and restart the app. The bundled pipe helper now
+watches the pipe while idle, so it stops its capture child instead of being orphaned.
+
 ## Current boundary
 
-This first Windows implementation depends on USBPcap and `tshark` because Windows owns the paired HID
-device and does not expose its vendor audio reports as a normal microphone. A future native helper can
-replace the capture layer without changing the mSBC parser or VibeCoding Voice PTT integration.
+This Windows implementation still depends on the USBPcap filter driver because Windows owns the
+paired HID device and does not expose its vendor audio reports as a normal microphone. Everything
+above the capture — pcap parsing, ATT notification extraction, mSBC decoding — runs in-process with
+no external tools. A future native helper can replace the capture layer without changing the parser
+or VibeCoding Voice PTT integration.
 
 Timed capture-to-file, mSBC extraction, decoding, and Volcengine STT were verified twice with real
 hardware and zero mSBC sequence errors. The persistent listener was then verified end to end with a real
@@ -112,6 +157,7 @@ Volcengine transcription all completed with zero sequence errors.
 
 The live transport deliberately does not use USBPcap's non-elevated stdout forwarding path. A small
 elevated PowerShell helper starts USBPcap directly and copies its binary output to a per-process Windows
-named pipe. The Node listener feeds that pipe to `tshark`. Windows still owns the paired HID device, and
+named pipe. The Node listener feeds that pipe to its built-in ATT parser. Windows still owns the paired
+HID device, and
 the user must approve the normal UAC prompt each time the listener starts. A timed `.pcap` remains the
 known-good diagnostic baseline if a future adapter, driver, or remote profile produces no live packets.

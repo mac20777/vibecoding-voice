@@ -1,15 +1,15 @@
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import readline from "node:readline";
 import { execFile, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { UsbPcapAttLineParser } from "./usbpcap-att-parser.mjs";
+import { decodeMsbcFrames as decodeMsbcFramesToPcm } from "./msbc-decoder.mjs";
 
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_USBPCAP_PATH = String.raw`C:\Program Files\USBPcap\USBPcapCMD.exe`;
-const DEFAULT_TSHARK_PATH = String.raw`C:\Program Files\Wireshark\tshark.exe`;
 export function resolveAsarUnpackedPath(filePath) {
   return String(filePath).replace(
     /([\\/])app\.asar\1/,
@@ -26,10 +26,6 @@ const DEFAULT_USBPCAP_PIPE_HELPER = resolveAsarUnpackedPath(
     "xiaomi-usbpcap-pipe.ps1"
   )
 );
-
-function firstNonEmptyLine(value) {
-  return String(value || "").split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
-}
 
 async function runText(command, args) {
   const { stdout } = await execFileAsync(command, args, {
@@ -135,45 +131,6 @@ async function detectCaptureTarget(usbPcapPath, config) {
   );
 }
 
-async function detectDecoder(config) {
-  const explicit = String(config.xiaomiRemoteFfmpegPath || "").trim();
-  if (explicit) {
-    if (!fs.existsSync(explicit)) {
-      throw new Error(`XIAOMI_REMOTE_FFMPEG_PATH does not exist: ${explicit}`);
-    }
-    return { command: explicit, prefixArgs: [], label: explicit };
-  }
-
-  if (process.platform === "win32") {
-    try {
-      const output = await runText("where.exe", ["ffmpeg.exe"]);
-      const executable = firstNonEmptyLine(output);
-      if (executable) {
-        return { command: executable, prefixArgs: [], label: executable };
-      }
-    } catch {
-      // Fall through to the installed WSL decoder.
-    }
-
-    const distro = String(config.xiaomiRemoteWslDistro || "Ubuntu").trim() || "Ubuntu";
-    try {
-      await runText("wsl.exe", ["-d", distro, "--", "sh", "-lc", "command -v ffmpeg"]);
-      return {
-        command: "wsl.exe",
-        prefixArgs: ["-d", distro, "--", "ffmpeg"],
-        label: `WSL ${distro} ffmpeg`
-      };
-    } catch {
-      throw new Error(
-        "FFmpeg was not found. Install native ffmpeg.exe or install ffmpeg in WSL, " +
-          "then set XIAOMI_REMOTE_FFMPEG_PATH or XIAOMI_REMOTE_WSL_DISTRO."
-      );
-    }
-  }
-
-  return { command: "ffmpeg", prefixArgs: [], label: "ffmpeg" };
-}
-
 export async function resolveXiaomiRemoteRuntime(config) {
   if (process.platform !== "win32") {
     throw new Error("Xiaomi remote USB capture is currently supported on Windows only.");
@@ -182,78 +139,56 @@ export async function resolveXiaomiRemoteRuntime(config) {
   const usbPcapPath = path.resolve(
     String(config.xiaomiRemoteUsbPcapPath || DEFAULT_USBPCAP_PATH)
   );
-  const tsharkPath = path.resolve(
-    String(config.xiaomiRemoteTsharkPath || DEFAULT_TSHARK_PATH)
-  );
   if (!fs.existsSync(usbPcapPath)) {
     throw new Error(`USBPcapCMD.exe was not found: ${usbPcapPath}`);
-  }
-  if (!fs.existsSync(tsharkPath)) {
-    throw new Error(`tshark.exe was not found: ${tsharkPath}`);
   }
   if (!fs.existsSync(DEFAULT_USBPCAP_PIPE_HELPER)) {
     throw new Error(`USBPcap named-pipe helper was not found: ${DEFAULT_USBPCAP_PIPE_HELPER}`);
   }
 
   const captureTarget = await detectCaptureTarget(usbPcapPath, config);
-  const decoder = await detectDecoder(config);
   return {
     usbPcapPath,
-    tsharkPath,
     pipeHelperPath: DEFAULT_USBPCAP_PIPE_HELPER,
-    ...captureTarget,
-    decoder
+    ...captureTarget
   };
 }
 
 export async function startXiaomiRemoteCapture(runtime, handlers = {}) {
-  const analyzer = spawn(
-    runtime.tsharkPath,
-    [
-      "-l",
-      "-n",
-      "-r",
-      "-",
-      "-Y",
-      "btatt.opcode == 0x1b",
-      "-T",
-      "fields",
-      "-E",
-      "separator=|",
-      "-e",
-      "btatt.handle",
-      "-e",
-      "btatt.value"
-    ],
-    { stdio: ["pipe", "pipe", "pipe"], windowsHide: true }
-  );
-
-  const reader = readline.createInterface({ input: analyzer.stdout });
-  reader.on("line", (line) => handlers.onLine?.(line));
-
-  analyzer.stderr.setEncoding("utf8");
-  analyzer.stderr.on("data", (chunk) => handlers.onLog?.("tshark", String(chunk).trim()));
-
-  analyzer.on("error", (error) => handlers.onError?.("tshark", error));
-  analyzer.on("exit", (code, signal) => handlers.onExit?.("tshark", code, signal));
+  // In-process USBPcap -> ATT notification parser; no external tshark needed.
+  const parser = new UsbPcapAttLineParser();
 
   let stopped = false;
   let socket = null;
   let launcher = null;
+  let capturedBytes = 0;
+  let exitNotified = false;
   const pipeName = `vibecoding-xiaomi-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const pipePath = `\\\\.\\pipe\\${pipeName}`;
   const server = net.createServer();
+
+  const notifyExit = () => {
+    if (stopped || exitNotified) {
+      return;
+    }
+    exitNotified = true;
+    if (capturedBytes === 0) {
+      handlers.onLog?.(
+        "usbpcap",
+        "capture produced no data; check %TEMP%\\xiaomi-usbpcap-helper.log for USBPcap " +
+          "errors (stale capture process or vanished USB device address)"
+      );
+    }
+    handlers.onExit?.("usbpcap", 0, null);
+  };
 
   const stop = () => {
     if (stopped) {
       return;
     }
     stopped = true;
-    reader.close();
     socket?.destroy();
     server.close();
-    analyzer.stdin.destroy();
-    analyzer.kill();
     if (launcher && launcher.exitCode == null) {
       launcher.kill();
     }
@@ -292,7 +227,33 @@ export async function startXiaomiRemoteCapture(runtime, handlers = {}) {
         rejectConnection = null;
         socket = connection;
         connection.on("error", (error) => handlers.onError?.("usbpcap pipe", error));
-        connection.pipe(analyzer.stdin);
+        connection.on("data", (chunk) => {
+          capturedBytes += chunk.length;
+          let lines;
+          try {
+            lines = parser.push(chunk);
+          } catch (error) {
+            handlers.onError?.("usbpcap parser", error);
+            connection.destroy();
+            notifyExit();
+            return;
+          }
+          for (const line of lines) {
+            handlers.onLine?.(line);
+          }
+        });
+        connection.on("close", () => {
+          if (!stopped) {
+            try {
+              for (const line of parser.end()) {
+                handlers.onLine?.(line);
+              }
+            } catch (error) {
+              handlers.onError?.("usbpcap parser", error);
+            }
+          }
+          notifyExit();
+        });
         resolve();
       });
 
@@ -343,7 +304,6 @@ export async function startXiaomiRemoteCapture(runtime, handlers = {}) {
 
     return {
       capturePid: elevatedPid || launcher.pid,
-      analyzerPid: analyzer.pid,
       transport: "elevated-named-pipe",
       stop
     };
@@ -353,54 +313,13 @@ export async function startXiaomiRemoteCapture(runtime, handlers = {}) {
   };
 }
 
-export async function decodeMsbcFrames(frames, runtime) {
+// Decodes 57-byte mSBC frames to PCM16LE 16 kHz mono in-process
+// (src/msbc-decoder.mjs); no external ffmpeg needed.
+export function decodeMsbcFrames(frames) {
   if (!Array.isArray(frames) || frames.length === 0) {
     return Buffer.alloc(0);
   }
-
-  const args = [
-    ...runtime.decoder.prefixArgs,
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-f",
-    "sbc",
-    "-i",
-    "pipe:0",
-    "-f",
-    "s16le",
-    "-ac",
-    "1",
-    "-ar",
-    "16000",
-    "pipe:1"
-  ];
-  const decoder = spawn(runtime.decoder.command, args, {
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true
-  });
-  const stdout = [];
-  const stderr = [];
-  decoder.stdout.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
-  decoder.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
-
-  const completed = new Promise((resolve, reject) => {
-    decoder.on("error", reject);
-    decoder.on("exit", (code, signal) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(
-        `mSBC decoder exited with code ${code}${signal ? ` (${signal})` : ""}: ` +
-          Buffer.concat(stderr).toString("utf8").trim()
-      ));
-    });
-  });
-
-  decoder.stdin.end(Buffer.concat(frames));
-  await completed;
-  const pcm = Buffer.concat(stdout);
+  const pcm = decodeMsbcFramesToPcm(Buffer.concat(frames));
   if (pcm.length % 2 !== 0) {
     throw new Error(`mSBC decoder returned an odd PCM byte count: ${pcm.length}`);
   }

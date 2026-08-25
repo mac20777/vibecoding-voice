@@ -422,6 +422,8 @@ export function loadConfig(options = {}) {
     saveDebugWav: process.env.SAVE_DEBUG_WAV === "1",
     xiaomiRemoteEnabled: process.env.XIAOMI_REMOTE_ENABLED === "1",
     xiaomiRemoteUsbPcapPath: process.env.XIAOMI_REMOTE_USBPCAP_PATH || "",
+    // Deprecated: ATT parsing and mSBC decoding are built in; these three are
+    // still read so old .env files keep loading, but their values are unused.
     xiaomiRemoteTsharkPath: process.env.XIAOMI_REMOTE_TSHARK_PATH || "",
     xiaomiRemoteUsbPcapInterface: process.env.XIAOMI_REMOTE_USBPCAP_INTERFACE || "",
     xiaomiRemoteUsbDevice: process.env.XIAOMI_REMOTE_USB_DEVICE || "",
@@ -430,6 +432,7 @@ export function loadConfig(options = {}) {
     xiaomiRemoteWslDistro: process.env.XIAOMI_REMOTE_WSL_DISTRO || "Ubuntu",
     xiaomiRemoteInactivityMs: Number(process.env.XIAOMI_REMOTE_INACTIVITY_MS || "900"),
     xiaomiRemoteSendTarget: process.env.XIAOMI_REMOTE_SEND_TARGET || "",
+    xiaomiRemoteHidDeviceMatch: process.env.XIAOMI_REMOTE_HID_DEVICE_MATCH || "VID&012717_PID&32B8",
     loadedConfigFiles,
     userConfigPath,
     cwdConfigPath,

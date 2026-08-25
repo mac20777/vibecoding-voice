@@ -1,6 +1,7 @@
 const elements = {
   statusPill: document.querySelector("#status-pill"),
   footerServiceStatus: document.querySelector("#footer-service-status"),
+  appVersion: document.querySelector("#app-version"),
   serviceMode: document.querySelector("#service-mode"),
   servicePort: document.querySelector("#service-port"),
   cliStatus: document.querySelector("#cli-status"),
@@ -1102,6 +1103,7 @@ async function refreshBootstrap() {
     setLocalMicHotkeys(bootstrap.globalHotkeys.settings || bootstrap.form.desktopSettings);
   }
   fillForm(bootstrap.form, bootstrap.desktopSettingsPath);
+  elements.appVersion.textContent = bootstrap.appVersion ? `v${bootstrap.appVersion}` : "";
   renderNotices(bootstrap.form);
   renderService();
   renderLive();
@@ -1209,7 +1211,8 @@ elements.form.addEventListener("submit", async (event) => {
     appState.bootstrap = bootstrap;
     appState.service = bootstrap.service;
     fillForm(bootstrap.form, bootstrap.desktopSettingsPath);
-    renderNotices(bootstrap.form);
+    elements.appVersion.textContent = bootstrap.appVersion ? `v${bootstrap.appVersion}` : "";
+  renderNotices(bootstrap.form);
     renderService();
     connectLiveSocket();
   } finally {

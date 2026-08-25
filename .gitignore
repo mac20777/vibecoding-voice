@@ -10,3 +10,4 @@ tmp/
 npm-debug.log*
 .npm-cache/
 dist-desktop/
+build-assets/installers/*.exe

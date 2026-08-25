@@ -1,6 +1,6 @@
 {
   "name": "@mac20777/vibecoding-voice",
-  "version": "0.2.13",
+  "version": "0.2.15",
   "private": false,
   "description": "Voice-driven AI coding bridge and Windows desktop app for ESP32 e-paper devices or global-hotkey USB microphones with Inject, Codex, Claude, and Chinese-to-English/Korean/Japanese voice translation.",
   "type": "module",
@@ -37,7 +37,9 @@
     "vibe": "node scripts/vibe.mjs",
     "remote:xiaomi": "node scripts/xiaomi-remote-input.mjs",
     "remote:xiaomi:doctor": "node scripts/xiaomi-remote-input.mjs --doctor",
+    "remote:xiaomi:fix-hid": "node scripts/xiaomi-remote-input.mjs --fix-hid",
     "desktop:dev": "electron .",
+    "predesktop:dist": "node scripts/windows/fetch-usbpcap-installer.mjs",
     "desktop:dist": "electron-builder --win nsis",
     "desktop:dist:linux": "electron-builder --linux deb AppImage --x64",
     "desktop:dist:ubuntu": "electron-builder --linux dir --x64 && bash scripts/build-ubuntu-deb.sh"
@@ -110,7 +112,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "perMachine": false
+      "perMachine": false,
+      "include": "build-assets/installer.nsh"
     }
   }
 }

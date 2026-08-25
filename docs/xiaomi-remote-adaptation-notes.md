@@ -12,7 +12,8 @@ voice remotes.
 - USB adapter: `BARROT Bluetooth 5.4 Adapter`
 - Adapter driver: Barrot `17.55.6.566`, dated 2024-07-26
 - Capture interface: USBPcap root-hub interface containing the BARROT adapter
-- Decoder: FFmpeg in WSL Ubuntu
+- Decoder: FFmpeg in WSL Ubuntu at the time of these tests; since replaced by the built-in
+  `src/msbc-decoder.mjs` (verified against the same FFmpeg output within 3 LSB)
 - STT: Volcengine, through the normal `vibecoding-voice` STT module
 
 The remote firmware was never flashed or modified. USBPcap observes traffic between the existing Windows
@@ -38,7 +39,7 @@ remote microphone
   -> USB HCI traffic
   -> elevated USBPcap
   -> saved pcap or Windows named pipe
-  -> tshark
+  -> ATT notification extraction (tshark during these tests; now built-in src/usbpcap-att-parser.mjs)
   -> mSBC frames
   -> PCM16 mono / 16 kHz
   -> vibecoding-voice STT
@@ -104,6 +105,16 @@ actual remote manual, known TV pairing behavior, and LED pattern as the source o
 If a TV or box still owns a bond for the remote, it may reconnect before the PC. For clean experiments,
 fully power off the previous host rather than leaving it in standby.
 
+### Deleting the pairing in Windows requires an adapter power cycle
+
+Field-verified on the BARROT adapter: after the remote is removed in Windows Settings, a new pairing
+attempt keeps failing until the USB adapter is unplugged and reconnected. The Bluetooth radio stack
+keeps stale BLE state across the delete; power-cycling the adapter resets it. The remote itself does
+not need its bond cleared first in this case.
+
+Replugging changes the adapter's USB address, so restart the listener after the replug and let it
+re-detect the address (or update `XIAOMI_REMOTE_USB_DEVICE` if it is pinned).
+
 ### "Driver error" was HID problem code 10
 
 The failing device tree looked like this:
@@ -118,6 +129,12 @@ Restarting only the failing HID child with an elevated `pnputil /restart-device 
 to `OK / code 0`. A complete Windows restart was still required before the Bluetooth runtime behaved like
 the previously successful session. Do not delete the pairing record again until the child problem code has
 been checked; repeated delete/re-pair cycles can hide the original failure.
+
+Re-pairing after a Settings delete reproduced code 10 on the HID child again (root and services
+stayed OK), and the same `pnputil /restart-device` cleared it. On this stack, treat code 10 on the
+HID child as the expected failure after any re-pair: check it first, restart the child, then reboot.
+`npm run remote:xiaomi:doctor` reports the HID child problem code read-only, and
+`npm run remote:xiaomi:fix-hid` performs the elevated restart and re-check automatically.
 
 Useful read-only inspection:
 
@@ -180,14 +197,19 @@ Node named-pipe server
   <- USBPcapCMD binary stdout
 
 Node named-pipe socket
-  -> tshark stdin
-  -> ATT notification lines
+  -> ATT notification lines (tshark at the time; now the built-in src/usbpcap-att-parser.mjs)
 ```
 
 The helper must launch USBPcap while already elevated and copy
 `StandardOutput.BaseStream` directly into the named pipe. This design produced start, rotating audio, and
 stop packets in real time and then completed the 476-frame end-to-end STT test. Closing the named pipe
-causes the helper to stop its USBPcap child, so the listener does not leave a capture process running.
+causes the helper to stop its USBPcap child, so the listener does not leave a capture process running —
+but only because the helper polls the pipe while streaming. A plain blocking `CopyTo` cannot notice a
+broken pipe while the capture is idle, and the orphaned elevated USBPcapCMD keeps the capture driver
+busy: the next listener start then connects cleanly and immediately sees the capture stream end
+(earlier builds logged `tshark` exit code 0; current builds log `usbpcap exited {"code":0}`). If
+that signature appears, kill leftover `USBPcapCMD.exe` processes from an elevated terminal and restart
+the listener.
 
 Do not modify the proven mSBC parser while diagnosing this transport boundary. First replay the same saved
 pcap through tshark/parser; if replay passes, the bug is before the parser.
@@ -286,6 +308,17 @@ saved capture -> parser -> decoder -> WAV listen/check -> STT
 
 Use `DRY_RUN_TEXT_INJECTION=1` or an isolated bridge port until the transcript is correct. Do not send a
 new remote's first test directly to Codex or another agent target.
+
+## Listener robustness lessons
+
+- Arm the inactivity fallback on session start, not only on audio frames. A press after remote sleep can
+  deliver the start report with zero audio frames and no stop report; a start without audio previously
+  latched the parser active, so every later key press was swallowed silently while GATT and battery
+  still looked fine.
+- A dropped start (previous session still decoding) must reset the parser, or the parser and the
+  session controller diverge and the remote appears dead.
+- `ptt_cancel` needs a native server handler; without one, the bridge stays in recording state after a
+  zero-audio press.
 
 ## Next development priorities
 

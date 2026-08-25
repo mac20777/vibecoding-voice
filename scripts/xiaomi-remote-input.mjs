@@ -3,7 +3,11 @@ import process from "node:process";
 import { WebSocket } from "ws";
 
 import { loadConfig } from "../src/config.mjs";
-import { XiaomiRemoteProtocolParser } from "../src/xiaomi-remote-protocol.mjs";
+import {
+  checkXiaomiRemoteHidHealth,
+  restartXiaomiRemoteHidChild
+} from "../src/xiaomi-remote-hid-health.mjs";
+import { XiaomiRemoteSessionController } from "../src/xiaomi-remote-session.mjs";
 import {
   decodeMsbcFrames,
   resolveXiaomiRemoteRuntime,
@@ -13,6 +17,7 @@ import {
 const DEVICE_ID = "xiaomi-voice-remote";
 const BOARD_TYPE = "xiaomi-remote-msbc";
 const isDoctor = process.argv.includes("--doctor");
+const isFixHid = process.argv.includes("--fix-hid");
 const once = process.argv.includes("--once");
 const config = loadConfig();
 
@@ -102,19 +107,79 @@ function waitForServerTarget(ws, target, timeoutMs = 5_000) {
   });
 }
 
+async function fixHidChild(match) {
+  const entries = await checkXiaomiRemoteHidHealth(match);
+  if (entries.length === 0) {
+    log("HID child device not found; pair the remote first");
+    process.exitCode = 1;
+    return;
+  }
+  const broken = entries.find((entry) => entry.problem !== 0);
+  if (!broken) {
+    log("HID child is healthy", { status: entries[0].status, problem: entries[0].problem });
+    return;
+  }
+  log("restarting HID child device (UAC prompt follows)", {
+    problem: broken.problem,
+    instanceId: broken.instanceId
+  });
+  const result = await restartXiaomiRemoteHidChild(broken.instanceId, match);
+  if (result.output) {
+    log("pnputil", result.output);
+  }
+  if (result.healthy) {
+    log("HID child recovered");
+    return;
+  }
+  log("HID child still unhealthy; a full Windows restart may be required", result.after);
+  process.exitCode = 1;
+}
+
+async function warnOnUnhealthyHidChild(match) {
+  try {
+    const entries = await checkXiaomiRemoteHidHealth(match);
+    const broken = entries.find((entry) => entry.problem !== 0);
+    if (broken) {
+      log("warning: remote HID child device has a problem", {
+        problem: broken.problem,
+        fix: "node scripts/xiaomi-remote-input.mjs --fix-hid"
+      });
+    }
+  } catch (error) {
+    log("hid health check skipped", error.message);
+  }
+}
+
 async function main() {
-  log("checking Windows capture and decoder tools");
+  if (isFixHid) {
+    await fixHidChild(config.xiaomiRemoteHidDeviceMatch);
+    return;
+  }
+
+  log("checking Windows capture tools");
   const runtime = await resolveXiaomiRemoteRuntime(config);
   log("capture target", {
     interface: runtime.interfaceName,
-    usbDevice: runtime.deviceAddress,
-    decoder: runtime.decoder.label
+    usbDevice: runtime.deviceAddress
   });
 
   if (isDoctor) {
+    const hidEntries = await checkXiaomiRemoteHidHealth(config.xiaomiRemoteHidDeviceMatch);
+    const hidEntry = hidEntries[0];
+    log(
+      hidEntry
+        ? "HID child device found"
+        : "HID child device not found (pair the remote, or it is fully disconnected)",
+      hidEntry ? { status: hidEntry.status, problem: hidEntry.problem } : ""
+    );
+    if (hidEntry && hidEntry.problem !== 0) {
+      log("HID child needs repair", { fix: "node scripts/xiaomi-remote-input.mjs --fix-hid" });
+    }
     log("doctor passed");
     return;
   }
+
+  await warnOnUnhealthyHidChild(config.xiaomiRemoteHidDeviceMatch);
 
   const { ws, serverReady } = await waitForBridge();
   log("connected to VibeCoding Voice", `ws://127.0.0.1:${config.port}`);
@@ -129,92 +194,14 @@ async function main() {
   }
 
   let capture = null;
-  let session = null;
-  let decoding = false;
-  let inactivityTimer = null;
   let shuttingDown = false;
-  const parser = new XiaomiRemoteProtocolParser();
-
-  const clearInactivityTimer = () => {
-    if (inactivityTimer) {
-      clearTimeout(inactivityTimer);
-      inactivityTimer = null;
-    }
-  };
-
-  const armInactivityTimer = () => {
-    clearInactivityTimer();
-    inactivityTimer = setTimeout(() => {
-      for (const event of parser.stop("inactivity")) {
-        void handleEvent(event);
-      }
-    }, Math.max(250, config.xiaomiRemoteInactivityMs));
-  };
-
-  const finishSession = async (event) => {
-    clearInactivityTimer();
-    if (!session) {
-      return;
-    }
-
-    const completed = session;
-    session = null;
-    if (completed.frames.length === 0) {
-      log("voice session ignored: no audio frames");
-      ws.send(JSON.stringify({ type: "ptt_cancel", source: "xiaomi_remote", ts: Date.now() }));
-      return;
-    }
-
-    decoding = true;
-    try {
-      log("decoding voice", {
-        frames: completed.frames.length,
-        sequenceErrors: event.sequenceErrors,
-        reason: event.reason
-      });
-      const pcm = await decodeMsbcFrames(completed.frames, runtime);
-      ws.send(pcm, { binary: true });
-      ws.send(JSON.stringify({ type: "ptt_stop", source: "xiaomi_remote", ts: Date.now() }));
-      log("voice sent", {
-        pcmBytes: pcm.length,
-        durationSeconds: Number((pcm.length / 2 / 16_000).toFixed(3))
-      });
-    } catch (error) {
-      ws.send(JSON.stringify({ type: "ptt_cancel", source: "xiaomi_remote", ts: Date.now() }));
-      log("decode failed", error.message);
-    } finally {
-      decoding = false;
-    }
-  };
-
-  const handleEvent = async (event) => {
-    if (event.type === "start") {
-      if (decoding || session) {
-        return;
-      }
-      session = { frames: [], startedAt: Date.now() };
-      ws.send(JSON.stringify({
-        type: "ptt_start",
-        source: "xiaomi_remote",
-        ts: Date.now()
-      }));
-      log("voice key down");
-      return;
-    }
-
-    if (event.type === "audio") {
-      if (!session || decoding) {
-        return;
-      }
-      session.frames.push(event.frame);
-      armInactivityTimer();
-      return;
-    }
-
-    if (event.type === "stop") {
-      await finishSession(event);
-    }
-  };
+  const controller = new XiaomiRemoteSessionController({
+    inactivityMs: config.xiaomiRemoteInactivityMs,
+    log,
+    sendJson: (message) => ws.send(JSON.stringify(message)),
+    sendAudio: (pcm) => ws.send(pcm, { binary: true }),
+    decodeFrames: (frames) => decodeMsbcFrames(frames)
+  });
 
   ws.on("message", (data) => {
     try {
@@ -247,9 +234,7 @@ async function main() {
 
   capture = await startXiaomiRemoteCapture(runtime, {
     onLine(line) {
-      for (const event of parser.pushLine(line)) {
-        void handleEvent(event);
-      }
+      controller.pushLine(line);
     },
     onLog(source, message) {
       if (message) {
@@ -262,12 +247,13 @@ async function main() {
     onExit(source, code, signal) {
       if (!shuttingDown) {
         log(`${source} exited`, { code, signal });
+        log("capture pipeline stopped; restart the listener to resume voice input");
+        void shutdown(1);
       }
     }
   });
   log("listening; hold the Xiaomi voice key to speak", {
     capturePid: capture.capturePid,
-    analyzerPid: capture.analyzerPid,
     transport: capture.transport
   });
 
@@ -276,7 +262,7 @@ async function main() {
       return;
     }
     shuttingDown = true;
-    clearInactivityTimer();
+    controller.dispose();
     capture?.stop();
     if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
       ws.close();

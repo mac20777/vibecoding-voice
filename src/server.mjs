@@ -1260,6 +1260,16 @@ wss.on("connection", (ws, req) => {
           log("ptt_stop", state.deviceId, state.chunks.length);
           await finalizeSegment(ws, state);
           break;
+        case "ptt_cancel":
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
+          log("ptt_cancel", state.deviceId, state.chunks.length);
+          state.segmentActive = false;
+          state.chunks = [];
+          sendJson(ws, { type: "status", status: "cancelled" });
+          break;
         case "action_send":
           if (!state.authenticated) {
             closeWithAuthError(ws, state, "auth_required");
