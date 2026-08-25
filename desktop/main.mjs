@@ -11,6 +11,7 @@ import { buildDesktopFormState, buildUserConfigUpdates } from "../src/desktop-co
 import { getConfigIssues, loadConfig, writeUserConfigValues } from "../src/config.mjs";
 import { getDesktopSettingsPath, loadDesktopSettings, writeDesktopSettings } from "../src/desktop-settings.mjs";
 import { getUserConfigDir } from "../src/paths.mjs";
+import { queryXiaomiRemoteInfo } from "../src/xiaomi-remote-info.mjs";
 
 const APP_ID = "com.mac20777.vibecodingvoice";
 const HIDDEN_LAUNCH_ARG = "--hidden";
@@ -75,6 +76,33 @@ const serviceState = {
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+let latestRemoteInfo = null;
+
+// Queries the remote's model/battery once via BLE GATT (see
+// src/xiaomi-remote-info.mjs). Deliberately not polled: runs at app start and
+// whenever the remote capture child is (re)started.
+async function refreshRemoteInfoOnce(reason = "startup") {
+  if (process.platform !== "win32") {
+    return;
+  }
+  const config = loadEffectiveConfig();
+  if (!config.xiaomiRemoteEnabled) {
+    if (latestRemoteInfo !== null) {
+      latestRemoteInfo = null;
+      emitState();
+    }
+    return;
+  }
+  const info = await queryXiaomiRemoteInfo(config.xiaomiRemoteHidDeviceMatch);
+  if (!info) {
+    writeDesktopLog("remote info query failed", { reason });
+    return;
+  }
+  latestRemoteInfo = { ...info, updatedAt: Date.now() };
+  writeDesktopLog("remote info", { reason, ...info });
+  emitState();
 }
 
 const NAMED_KEY_VKS = new Map([
@@ -493,7 +521,8 @@ function snapshotServiceState() {
 
 function emitState() {
   const payload = {
-    service: snapshotServiceState()
+    service: snapshotServiceState(),
+    remote: latestRemoteInfo
   };
 
   for (const window of BrowserWindow.getAllWindows()) {
@@ -894,6 +923,7 @@ function startXiaomiRemoteProcess(config) {
     windowsHide: false
   });
   xiaomiRemoteChild = child;
+  void refreshRemoteInfoOnce("remote-start");
   writeDesktopLog("xiaomi remote child forked", {
     pid: child.pid ?? null,
     entry: xiaomiRemoteEntryPath()
@@ -1229,7 +1259,8 @@ async function buildBootstrap() {
       ready: globalHotkeysReady,
       settings: selectDesktopHotkeySettings(desktopSettings)
     },
-    service: snapshotServiceState()
+    service: snapshotServiceState(),
+    remote: latestRemoteInfo
   };
 }
 
@@ -1244,7 +1275,7 @@ function createMainWindow() {
     minHeight: 700,
     show: !hiddenLaunch,
     title: "VibeCoding Voice",
-    backgroundColor: "#08121d",
+    backgroundColor: "#0c0e12",
     icon: createWindowIcon(),
     webPreferences: {
       preload: path.join(app.getAppPath(), "desktop", "preload.cjs"),
@@ -1454,3 +1485,4 @@ createMainWindow();
 createTray();
 startGlobalHotkeyMonitor();
 void startBridgeProcess({ revealOnError: !initialLaunchHidden });
+void refreshRemoteInfoOnce("startup");

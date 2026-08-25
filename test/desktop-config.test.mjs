@@ -13,7 +13,9 @@ test("normalizeDesktopSettings applies safe defaults", () => {
     localMicHoldKey: "F8",
     localMicSendKey: "F9",
     localMicUndoKey: "F10",
-    localMicTranslationToggleKey: "F7"
+    localMicTranslationToggleKey: "F7",
+    uiLanguage: "zh",
+    hasUsedVoice: false
   });
 
   assert.deepEqual(
@@ -33,7 +35,9 @@ test("normalizeDesktopSettings applies safe defaults", () => {
       localMicHoldKey: "Ctrl+Alt+M",
       localMicSendKey: "F11",
       localMicUndoKey: "Ctrl+Backspace",
-      localMicTranslationToggleKey: "Ctrl+Alt+E"
+      localMicTranslationToggleKey: "Ctrl+Alt+E",
+      uiLanguage: "zh",
+      hasUsedVoice: false
     }
   );
 });
@@ -99,7 +103,9 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
     localMicHoldKey: "Ctrl+Shift+Space",
     localMicSendKey: "F9",
     localMicUndoKey: "F10",
-    localMicTranslationToggleKey: "F7"
+    localMicTranslationToggleKey: "F7",
+    uiLanguage: "zh",
+    hasUsedVoice: false
   });
 });
 
@@ -151,7 +157,9 @@ test("buildUserConfigUpdates normalizes desktop form payload into env values", (
     CODEX_CWD: "D:/workspace",
     CLAUDE_CWD: null,
     CODEX_SKIP_GIT_REPO_CHECK: "1",
-    CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS: null
+    CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS: null,
+    XIAOMI_REMOTE_ENABLED: null,
+    XIAOMI_REMOTE_BUTTON_MAP: null
   });
 });
 

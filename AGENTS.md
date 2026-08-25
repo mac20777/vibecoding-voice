@@ -37,7 +37,8 @@ server.mjs (entry point — HTTP + WebSocket server)
 │   │                             decoding are in-process, no tshark/ffmpeg)
 │   ├── usbpcap-att-parser.mjs — streaming pcap → ATT notification lines (replaces tshark)
 │   ├── msbc-decoder.mjs     — pure-JS mSBC → PCM16 decoder (replaces ffmpeg)
-│   └── xiaomi-remote-session.mjs — PTT session state machine (inactivity watchdog)
+│   ├── xiaomi-remote-session.mjs — PTT session state machine (inactivity watchdog)
+│   └── remote-buttons.mjs   — maps remote button events to injected keys (inject-key.ps1)
 ├── stt.mjs              — speech-to-text (OpenAI Whisper / Volcengine ASR)
 │   ├── wav.mjs          — PCM16 → WAV header conversion
 │   └── paths.mjs        — resolves project root from import.meta.url
@@ -50,7 +51,7 @@ server.mjs (entry point — HTTP + WebSocket server)
 1. **Discovery**: Device sends UDP `discover_host` → server replies with WS URL (optionally HMAC-signed)
 2. **Handshake**: Device connects WS → sends `hello` (with HMAC signature if auth enabled) → server sends `hello_ack`, `server_ready`, initial CLI state
 3. **PTT cycle**: `ptt_start` → binary PCM16 audio chunks → `ptt_stop` → server transcribes → `transcript_final`
-4. **Transcript delivery**: Either immediate dispatch or confirm-on-device (`action_send`/`action_undo`)
+4. **Transcript delivery**: Either immediate dispatch or confirm-on-device (`action_send`/`action_undo`). The `desktop_mic` and `xiaomi_remote` sources always force immediate dispatch (see `resolveSegmentOptions` in server.mjs) — those clients have no on-device confirm UI; for the remote, "type first, confirm later" is achieved with `TEXT_INJECTION_MODE=type_only` plus a button mapped to `enter`.
 5. **Codex mode**: Transcript sent to Codex CLI, JSON event stream parsed, state broadcast to all clients
 
 ### Key Design Details

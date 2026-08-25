@@ -102,6 +102,30 @@ Deprecated and ignored: `XIAOMI_REMOTE_TSHARK_PATH`, `XIAOMI_REMOTE_FFMPEG_PATH`
 The interface and device address normally auto-detect from USBPcap's device tree. Explicit values are
 useful when more than one USB Bluetooth adapter is connected.
 
+## Button mapping
+
+Besides the voice key, the remote's other buttons (up/down/left/right, OK, back, home, volume +/-)
+arrive on the same capture as standard HID reports and are mapped to synthetic key presses:
+
+| Remote button | Injected key |
+| --- | --- |
+| up / down / left / right | arrow keys |
+| OK (center) | Enter |
+| back | Escape |
+| home | Home |
+| volume + / volume - | system volume |
+
+This drives CLI menus (Codex/Claude selection lists, shell history with up/down) without touching the
+keyboard. Disable everything with `XIAOMI_REMOTE_BUTTONS=0`, or override single buttons with
+`XIAOMI_REMOTE_BUTTON_MAP=ok:enter,back:escape,menu:none` (`none` disables a button).
+The desktop app exposes the same mapping under Settings → Remote: click a button on the virtual
+remote, pick an action, and Save (it writes `XIAOMI_REMOTE_BUTTON_MAP` for you).
+
+Note: when the remote's Windows HID child device is healthy, Windows *also* delivers these keys
+natively and every press would register twice. The mapping is intended for (and was developed on) a
+stack where that HID child reports problem code 10; if `npm run remote:xiaomi:fix-hid` repairs it,
+either leave the child broken or set `XIAOMI_REMOTE_BUTTONS=0`.
+
 ## Troubleshooting
 
 ### Connected with battery level, but the voice key does nothing

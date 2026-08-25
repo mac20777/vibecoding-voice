@@ -1,16 +1,211 @@
+const I18N = {
+  zh: {
+    openLogs: "打开日志目录",
+    navHome: "首页", navTranscripts: "转写记录", navSettings: "设置", navLogs: "日志", navAbout: "关于",
+    homeTitle: "首页", homeSub: "服务状态、初始检查和最近的语音。",
+    startService: "启动", restart: "重启", stopService: "停止",
+    checklistTitle: "初始检查",
+    dictateTitle: "快速听写", recentTitle: "最近转写", emptyRecent: "还没有收到语音",
+    trTitle: "转写记录", trSub: "本次运行的完整语音与回复历史。",
+    setTitle: "设置", setSub: "改完记得点底部「保存」。",
+    tabBasic: "基本", tabSpeech: "语音与快捷键", tabTranslation: "翻译", tabRemote: "遥控器", tabAdvanced: "高级",
+    fTarget: "发送目标", optTargetInject: "输入注入（打字到当前窗口）", fTargetHint: "语音转写后发送到哪里",
+    fTiming: "发送时机", optTimingConfirm: "设备确认后发送", optTimingImm: "识别完成立即发送",
+    fTimingHint: "仅对 ESP32 墨水屏设备生效；电脑麦克风和遥控器总是识别后立即发送",
+    fInputMode: "输入模式", optTypeEnter: "输入并回车", optTypeOnly: "仅输入文本",
+    fInputModeHint: "选「仅输入文本」：文字先打进输入框，按遥控器 OK（回车）再发送",
+    fAutoLaunch: "开机自启", fTray: "启动后最小化到托盘", fCloseTray: "关闭窗口时最小化到托盘",
+    fStt: "语音识别服务", fSttHint: "Volcengine 推荐给中文环境", fLanHint: "局域网设备握手签名，可留空",
+    hotkeyGroup: "全局快捷键",
+    fHoldKey: "按住说话", fSendKey: "发送", fUndoKey: "撤销", fTransToggleKey: "英文输出", capture: "录入",
+    fTransEnable: "启用中文翻译（识别后翻译成目标语言再发送）",
+    fTransTarget: "目标语言", langEnglish: "英语", langKorean: "韩语", langJapanese: "日语",
+    fTransSendMode: "发送格式", optSendTarget: "只发送目标语言", optSendBilingual: "中文 + 目标语言",
+    optSendZhEn: "只输出中文和英语", optSendAll: "输出中文、英语、韩语、日语",
+    fTransModel: "模型", fTransTimeout: "超时 (ms)",
+    fXiaomi: "启用小米蓝牙遥控器（需 USBPcap 驱动）",
+    remoteNote: "点击遥控器上的按键，再点右侧动作完成映射。语音键固定为「按住说话」，不可改。按键事件来自抓包通道，Windows 的 HID 驱动状态不影响它。",
+    advCli: "CLI 行为", fCodexSkip: "Codex：跳过 Git 仓库检查", fClaudeSkip: "Claude：减少权限确认",
+    advWorkspace: "工作目录", fCodexCwd: "Codex 工作目录", fClaudeCwd: "Claude 工作目录", browse: "浏览…",
+    fUserConfig: "用户配置", fDesktopSettings: "桌面设置",
+    discard: "放弃更改", save: "保存",
+    logTitle: "日志", logSub: "排障时看这里：上面是助手活动，下面是服务运行记录。",
+    logCli: "助手活动", logService: "服务日志",
+    aboutTitle: "关于", aboutSub: "版本与运行环境一览。",
+    aboutVersion: "版本", aboutTarget: "发送目标", aboutStt: "语音识别",
+    aboutLaunch: "启动方式", aboutRemote: "小米遥控器", aboutPort: "端口",
+    tagYou: "你", tagAi: "助手",
+    statusRunning: "运行中", statusStarting: "启动中", statusNeedsSetup: "待配置", statusError: "异常", statusStopped: "已停止",
+    modeInject: "输入注入",
+    bannerReady: "就绪，等你说话", bannerListening: "正在听…", bannerTranscribing: "识别中…",
+    bannerStarting: "服务启动中…", bannerNeedsSetup: "需要先完成配置", bannerError: "服务异常", bannerStopped: "服务已停止",
+    micIdle: "待命", micRecording: "录音中", micTranscribing: "识别中", micAwaiting: "待确认",
+    micError: "异常", micConnecting: "准备中", micCapturing: "录入中",
+    micHintIdle: "{scope} · 按住 {hold} 输入，{toggle} 英文输出",
+    micHintRecording: "松开 {key} 结束",
+    micHintTranscribing: "正在提交给语音识别服务",
+    micHintAwaiting: "按 {send} 发送，{undo} 撤销",
+    micHintCapturing: "按下新的快捷键",
+    micHintConnecting: "正在连接本地服务和麦克风",
+    micHintError: "麦克风不可用",
+    scopeGlobal: "后台可用", scopeWindow: "窗口内可用",
+    actIdle: "待命", actRecording: "REC", actStt: "STT", actConfirm: "待确认",
+    sendWithKey: "发送 {key}", undoWithKey: "撤销 {key}",
+    checkStt: "语音识别服务", checkSttOk: "{provider} · 已配置密钥", checkSttMiss: "{provider} 还没填密钥",
+    checkSttFix: "去填写 →",
+    checkTarget: "发送目标",
+    targetDescInject: "文字直接打进当前窗口", targetDescCodex: "发送到 Codex CLI 会话", targetDescClaude: "发送到 Claude Code 会话",
+    checkMicOk: "语音输入已验证", checkMicMiss: "还没试过说一句话",
+    checkMicHint: "按住 {key} 或遥控器的语音键，说「你好」试试", checkMicFix: "去试试 →",
+    checkRemoteOk: "小米遥控器已启用", checkRemoteMiss: "小米遥控器未启用",
+    checkRemoteHint: "启用后可按遥控器语音键说话，方向/确认等按键也能映射", checkRemoteFix: "去设置 →",
+    checkLaunch: "开机自启", checkLaunchOn: "已开启，语音功能随系统就绪", checkLaunchOff: "未开启 — 建议打开，开机即可用",
+    checkLaunchFix: "去开启 →",
+    voiceFixed: "固定为「按住说话」", remoteCodeUnknown: "HID — 待识别",
+    remoteOn: "已启用", remoteOff: "未启用",
+    remoteBattery: "电量 {level}%", remoteDisconnected: "未连接", remoteReading: "读取中…",
+    btnVoice: "语音键", btnUp: "上", btnDown: "下", btnLeft: "左", btnRight: "右", btnOk: "确认",
+    btnBack: "返回", btnHome: "主页", btnMenu: "菜单", btnVolUp: "音量 +", btnVolDown: "音量 −",
+    actionUp: "方向 ↑", actionDown: "方向 ↓", actionLeft: "方向 ←", actionRight: "方向 →",
+    actionEnter: "回车", actionEscape: "Esc", actionHome: "Home", actionMenu: "菜单键",
+    actionVolumeUp: "系统音量 +", actionVolumeDown: "系统音量 −", actionNone: "禁用",
+    notConnected: "尚未连接。", waitingStart: "等待启动。", waitingData: "等待中",
+    connReady: "已连接 · {mode}", connNoService: "服务未连接", connClosed: "连接已断开", connFailed: "无法连接到本地服务",
+    saving: "保存中…", saved: "已保存 ✓",
+    englishOn: "已切换为英文输出。", englishOff: "已关闭英文输出。",
+    configIssuePrefix: "当前配置不完整：",
+    overrideNote: "注意：以下配置文件会覆盖用户配置，界面里保存的值可能不会立即生效：",
+    providerDetailOpenai: "模型：{model}", providerDetailVolc: "适合中文语音环境",
+    translationOn: "翻译开启 · 目标：{lang} · {mode}",
+    transLangEnglish: "英语", transLangKorean: "韩语", transLangJapanese: "日语",
+    sendModeTarget: "只发目标语言", sendModeBilingual: "中文+目标语言", sendModeZhEn: "中文+英语", sendModeAll: "中文+英韩日",
+    deliveryImm: "识别完成立即发送", deliveryConfirm: "设备确认后发送",
+    injectEnter: "输入并回车", injectOnly: "仅输入文本",
+    launchHidden: "开机后隐藏启动", launchAuto: "开机自启", launchManual: "手动启动",
+    closeTray: "关闭窗口时最小化到托盘", closeKeep: "关闭窗口后退出界面",
+    serviceMsgDefault: "等待启动。"
+  },
+  en: {
+    openLogs: "Open Logs Folder",
+    navHome: "Home", navTranscripts: "Transcripts", navSettings: "Settings", navLogs: "Logs", navAbout: "About",
+    homeTitle: "Home", homeSub: "Service status, setup checks and your latest voice.",
+    startService: "Start", restart: "Restart", stopService: "Stop",
+    checklistTitle: "Setup checks",
+    dictateTitle: "Quick dictate", recentTitle: "Recent transcripts", emptyRecent: "No voice received yet",
+    trTitle: "Transcripts", trSub: "Full voice and reply history of this run.",
+    setTitle: "Settings", setSub: "Remember to hit Save at the bottom.",
+    tabBasic: "Basics", tabSpeech: "Speech & Hotkeys", tabTranslation: "Translation", tabRemote: "Remote", tabAdvanced: "Advanced",
+    fTarget: "Send target", optTargetInject: "Text injection (type into focused window)", fTargetHint: "Where transcripts go",
+    fTiming: "Delivery timing", optTimingConfirm: "Confirm on device first", optTimingImm: "Send right after recognition",
+    fTimingHint: "Only applies to the ESP32 e-paper device; the desktop mic and the Xiaomi remote always send right after recognition",
+    fInputMode: "Input mode", optTypeEnter: "Type + Enter", optTypeOnly: "Type only",
+    fInputModeHint: "With “Type only”, text lands in the input box first — press the remote OK key (Enter) to send",
+    fAutoLaunch: "Launch on Windows start", fTray: "Minimize to tray on launch", fCloseTray: "Close window to tray",
+    fStt: "Speech recognition", fSttHint: "Volcengine recommended for Chinese", fLanHint: "HMAC handshake secret for LAN devices, optional",
+    hotkeyGroup: "Global hotkeys",
+    fHoldKey: "Hold to dictate", fSendKey: "Send", fUndoKey: "Undo", fTransToggleKey: "English output", capture: "Record",
+    fTransEnable: "Translate Chinese dictation before sending",
+    fTransTarget: "Target language", langEnglish: "English", langKorean: "Korean", langJapanese: "Japanese",
+    fTransSendMode: "Send format", optSendTarget: "Target language only", optSendBilingual: "Chinese + target",
+    optSendZhEn: "Chinese & English only", optSendAll: "Chinese, English, Korean & Japanese",
+    fTransModel: "Model", fTransTimeout: "Timeout (ms)",
+    fXiaomi: "Enable Xiaomi Bluetooth remote (needs USBPcap driver)",
+    remoteNote: "Click a button on the remote, then pick an action on the right. The voice key is fixed to push-to-talk. Button events come from the capture channel, so Windows HID driver state does not affect them.",
+    advCli: "CLI behavior", fCodexSkip: "Codex: skip Git repo check", fClaudeSkip: "Claude: reduce permission prompts",
+    advWorkspace: "Workspaces", fCodexCwd: "Codex workspace", fClaudeCwd: "Claude workspace", browse: "Browse…",
+    fUserConfig: "User config", fDesktopSettings: "Desktop settings",
+    discard: "Discard", save: "Save",
+    logTitle: "Logs", logSub: "For troubleshooting: assistant activity above, service records below.",
+    logCli: "Assistant activity", logService: "Service log",
+    aboutTitle: "About", aboutSub: "Version and environment at a glance.",
+    aboutVersion: "Version", aboutTarget: "Send target", aboutStt: "Speech recognition",
+    aboutLaunch: "Launch", aboutRemote: "Xiaomi remote", aboutPort: "Port",
+    tagYou: "You", tagAi: "Assistant",
+    statusRunning: "Running", statusStarting: "Starting", statusNeedsSetup: "Needs setup", statusError: "Error", statusStopped: "Stopped",
+    modeInject: "Text injection",
+    bannerReady: "Ready — say something", bannerListening: "Listening…", bannerTranscribing: "Transcribing…",
+    bannerStarting: "Service starting…", bannerNeedsSetup: "Setup needed first", bannerError: "Service error", bannerStopped: "Service stopped",
+    micIdle: "Idle", micRecording: "Recording", micTranscribing: "Transcribing", micAwaiting: "Confirm",
+    micError: "Error", micConnecting: "Preparing", micCapturing: "Capturing",
+    micHintIdle: "{scope} · hold {hold} to dictate, {toggle} for English output",
+    micHintRecording: "Release {key} to finish",
+    micHintTranscribing: "Submitting to the speech service",
+    micHintAwaiting: "Press {send} to send, {undo} to undo",
+    micHintCapturing: "Press the new hotkey",
+    micHintConnecting: "Connecting to the local service and microphone",
+    micHintError: "Microphone unavailable",
+    scopeGlobal: "works in background", scopeWindow: "works in this window",
+    actIdle: "Idle", actRecording: "REC", actStt: "STT", actConfirm: "Confirm",
+    sendWithKey: "Send {key}", undoWithKey: "Undo {key}",
+    checkStt: "Speech recognition", checkSttOk: "{provider} · key configured", checkSttMiss: "{provider} has no API key yet",
+    checkSttFix: "Fill it in →",
+    checkTarget: "Send target",
+    targetDescInject: "Types into the focused window", targetDescCodex: "Sends to a Codex CLI session", targetDescClaude: "Sends to a Claude Code session",
+    checkMicOk: "Voice input verified", checkMicMiss: "No voice test yet",
+    checkMicHint: "Hold {key} or the remote voice key and say hello", checkMicFix: "Try it →",
+    checkRemoteOk: "Xiaomi remote enabled", checkRemoteMiss: "Xiaomi remote not enabled",
+    checkRemoteHint: "Once enabled, hold the remote voice key to talk; other buttons can be mapped", checkRemoteFix: "Open Settings →",
+    checkLaunch: "Launch on Windows start", checkLaunchOn: "On — voice is ready whenever the system is", checkLaunchOff: "Off — recommended so voice is ready at boot",
+    checkLaunchFix: "Enable →",
+    voiceFixed: "Fixed to push-to-talk", remoteCodeUnknown: "HID — to be identified",
+    remoteOn: "Enabled", remoteOff: "Disabled",
+    remoteBattery: "Battery {level}%", remoteDisconnected: "Disconnected", remoteReading: "Reading…",
+    btnVoice: "Voice key", btnUp: "Up", btnDown: "Down", btnLeft: "Left", btnRight: "Right", btnOk: "OK",
+    btnBack: "Back", btnHome: "Home", btnMenu: "Menu", btnVolUp: "Volume +", btnVolDown: "Volume −",
+    actionUp: "Arrow ↑", actionDown: "Arrow ↓", actionLeft: "Arrow ←", actionRight: "Arrow →",
+    actionEnter: "Enter", actionEscape: "Esc", actionHome: "Home", actionMenu: "Menu key",
+    actionVolumeUp: "Volume +", actionVolumeDown: "Volume −", actionNone: "Disabled",
+    notConnected: "Not connected yet.", waitingStart: "Waiting to start.", waitingData: "Waiting",
+    connReady: "Connected · {mode}", connNoService: "Service not connected", connClosed: "Disconnected", connFailed: "Cannot connect to the local service",
+    saving: "Saving…", saved: "Saved ✓",
+    englishOn: "English output enabled.", englishOff: "English output disabled.",
+    configIssuePrefix: "Configuration is incomplete: ",
+    overrideNote: "Note: these config files override the user config; values saved here may not take effect:",
+    providerDetailOpenai: "Model: {model}", providerDetailVolc: "Recommended for Chinese",
+    translationOn: "Translation on · target: {lang} · {mode}",
+    transLangEnglish: "English", transLangKorean: "Korean", transLangJapanese: "Japanese",
+    sendModeTarget: "Target only", sendModeBilingual: "Chinese + target", sendModeZhEn: "Chinese + English", sendModeAll: "All four languages",
+    deliveryImm: "Send right after recognition", deliveryConfirm: "Confirm on device first",
+    injectEnter: "Type + Enter", injectOnly: "Type only",
+    launchHidden: "At login (hidden)", launchAuto: "At login", launchManual: "Manual",
+    closeTray: "Closing the window minimizes to tray", closeKeep: "Closing the window exits the UI",
+    serviceMsgDefault: "Waiting to start."
+  }
+};
+
+let lang = "zh";
+let hasUsedVoice = false;
+
+function t(key, vars = {}) {
+  const table = I18N[lang] || I18N.zh;
+  let value = table[key] ?? I18N.zh[key] ?? key;
+  for (const [name, replacement] of Object.entries(vars)) {
+    value = value.replaceAll(`{${name}}`, String(replacement));
+  }
+  return value;
+}
+
 const elements = {
   statusPill: document.querySelector("#status-pill"),
-  footerServiceStatus: document.querySelector("#footer-service-status"),
+  statusDot: document.querySelector("#status-dot"),
   appVersion: document.querySelector("#app-version"),
-  serviceMode: document.querySelector("#service-mode"),
-  servicePort: document.querySelector("#service-port"),
   cliStatus: document.querySelector("#cli-status"),
+  remoteStatus: document.querySelector("#remote-status"),
+  remoteStatusSep: document.querySelector("#remote-status-sep"),
+  langToggle: document.querySelector("#lang-toggle"),
+  bannerPulse: document.querySelector("#banner-pulse"),
+  bannerState: document.querySelector("#banner-state"),
+  bannerDetail: document.querySelector("#banner-detail"),
   serviceMessage: document.querySelector("#service-message"),
   configIssues: document.querySelector("#config-issues"),
   overrideFiles: document.querySelector("#override-files"),
+  checklistCard: document.querySelector("#checklist-card"),
+  checklist: document.querySelector("#checklist"),
+  recentList: document.querySelector("#recent-list"),
+  transcriptList: document.querySelector("#transcript-list"),
   form: document.querySelector("#settings-form"),
-  tabButtons: [...document.querySelectorAll("[data-tab-trigger]")],
-  tabPanels: [...document.querySelectorAll("[data-tab-panel]")],
+  tabButtons: [...document.querySelectorAll(".settings-tab[data-tab]")],
+  tabPanels: [...document.querySelectorAll("[data-panel]")],
   sendTarget: document.querySelector("#send-target"),
   sttProvider: document.querySelector("#stt-provider"),
   transcriptDeliveryMode: document.querySelector("#transcript-delivery-mode"),
@@ -35,28 +230,22 @@ const elements = {
   closeToTray: document.querySelector("#close-to-tray"),
   codexSkipGitRepoCheck: document.querySelector("#codex-skip-git-repo-check"),
   claudeDangerouslySkipPermissions: document.querySelector("#claude-dangerously-skip-permissions"),
-  summaryMode: document.querySelector("#summary-mode"),
-  summaryDelivery: document.querySelector("#summary-delivery"),
-  summaryProvider: document.querySelector("#summary-provider"),
-  summaryProviderDetail: document.querySelector("#summary-provider-detail"),
-  summaryLaunch: document.querySelector("#summary-launch"),
-  summaryWindowBehavior: document.querySelector("#summary-window-behavior"),
+  xiaomiRemoteEnabled: document.querySelector("#xiaomi-remote-enabled"),
   userConfigPath: document.querySelector("#user-config-path"),
   desktopSettingsPath: document.querySelector("#desktop-settings-path"),
-  lastTranscript: document.querySelector("#last-transcript"),
-  lastUserText: document.querySelector("#last-user-text"),
-  lastAssistantText: document.querySelector("#last-assistant-text"),
   cliLogTail: document.querySelector("#cli-log-tail"),
   serviceLogTail: document.querySelector("#service-log-tail"),
   startServiceButton: document.querySelector("#start-service-button"),
   restartServiceButton: document.querySelector("#restart-service-button"),
   stopServiceButton: document.querySelector("#stop-service-button"),
   saveSettingsButton: document.querySelector("#save-settings-button"),
+  discardSettingsButton: document.querySelector("#discard-settings-button"),
   openConfigFolderButton: document.querySelector("#open-config-folder-button"),
+  openLogsButton: document.querySelector("#open-logs-button"),
   pickCodexCwdButton: document.querySelector("#pick-codex-cwd-button"),
   pickClaudeCwdButton: document.querySelector("#pick-claude-cwd-button"),
   localMicButton: document.querySelector("#local-mic-button"),
-  localMicButtonLabel: document.querySelector("#local-mic-button-label"),
+  localMicKeyBadge: document.querySelector("#local-mic-key-badge"),
   localMicSendButton: document.querySelector("#local-mic-send-button"),
   localMicUndoButton: document.querySelector("#local-mic-undo-button"),
   localMicState: document.querySelector("#local-mic-state"),
@@ -75,7 +264,21 @@ const elements = {
   resetLocalMicTranslationToggleKeyButton: document.querySelector("#reset-local-mic-translation-toggle-key-button"),
   localMicActivity: document.querySelector("#local-mic-activity"),
   localMicDb: document.querySelector("#local-mic-db"),
-  localMicBars: [...document.querySelectorAll("[data-local-mic-bar]")]
+  meter: document.querySelector("#meter"),
+  localMicBars: [...document.querySelectorAll("[data-local-mic-bar]")],
+  aboutVersion: document.querySelector("#about-version"),
+  aboutTarget: document.querySelector("#about-target"),
+  aboutTargetSub: document.querySelector("#about-target-sub"),
+  aboutProvider: document.querySelector("#about-provider"),
+  aboutProviderSub: document.querySelector("#about-provider-sub"),
+  aboutLaunch: document.querySelector("#about-launch"),
+  aboutLaunchSub: document.querySelector("#about-launch-sub"),
+  aboutRemote: document.querySelector("#about-remote"),
+  aboutRemoteSub: document.querySelector("#about-remote-sub"),
+  aboutPort: document.querySelector("#about-port"),
+  rselName: document.querySelector("#rsel-name"),
+  rselCode: document.querySelector("#rsel-code"),
+  actionGrid: document.querySelector("#action-grid")
 };
 
 const DEFAULT_LOCAL_MIC_HOLD_KEY = "F8";
@@ -86,16 +289,44 @@ const LOCAL_MIC_SAMPLE_RATE = 16000;
 const SOCKET_READY_TIMEOUT_MS = 7000;
 
 const liveState = {
-  transcript: "",
-  userText: "",
-  assistantText: "",
-  cliStatus: "尚未连接",
-  cliLogLines: []
+  cliStatusKey: null,
+  cliStatusVars: {},
+  cliStatusRaw: "",
+  cliLogLines: [],
+  lastUserText: "",
+  lastAssistantText: ""
 };
+
+function cliStatusText() {
+  if (liveState.cliStatusKey) {
+    const vars = { ...liveState.cliStatusVars };
+    if (vars.modeRaw !== undefined) {
+      vars.mode = modeLabel(vars.modeRaw);
+      delete vars.modeRaw;
+    }
+    return t(liveState.cliStatusKey, vars);
+  }
+  return liveState.cliStatusRaw || t("notConnected");
+}
+
+function setCliStatusKey(key, vars = {}) {
+  liveState.cliStatusKey = key;
+  liveState.cliStatusVars = vars;
+  liveState.cliStatusRaw = "";
+}
+
+function setCliStatusRaw(text) {
+  liveState.cliStatusKey = null;
+  liveState.cliStatusVars = {};
+  liveState.cliStatusRaw = text;
+}
+
+const transcriptHistory = [];
 
 const appState = {
   bootstrap: null,
   service: null,
+  remote: null,
   socket: null,
   socketReady: false,
   reconnectTimer: null,
@@ -126,6 +357,73 @@ const localMic = {
   error: ""
 };
 
+// Mirror of src/remote-buttons.mjs DEFAULT_REMOTE_BUTTON_KEYS — keep in sync.
+const DEFAULT_REMOTE_BUTTON_MAP = Object.freeze({
+  up: "up",
+  down: "down",
+  left: "left",
+  right: "right",
+  ok: "enter",
+  back: "escape",
+  home: "home",
+  volume_up: "volume_up",
+  volume_down: "volume_down",
+  menu: "menu"
+});
+const REMOTE_BUTTON_DEFS = [
+  { id: "voice", code: "HID 0x3E", nameKey: "btnVoice" },
+  { id: "up", code: "HID 0x52", nameKey: "btnUp" },
+  { id: "down", code: "HID 0x51", nameKey: "btnDown" },
+  { id: "left", code: "HID 0x50", nameKey: "btnLeft" },
+  { id: "right", code: "HID 0x4F", nameKey: "btnRight" },
+  { id: "ok", code: "HID 0x28", nameKey: "btnOk" },
+  { id: "back", code: "HID 0xF1", nameKey: "btnBack" },
+  { id: "home", code: "HID 0x4A", nameKey: "btnHome" },
+  { id: "menu", code: null, nameKey: "btnMenu" },
+  { id: "volume_up", code: "HID 0x80", nameKey: "btnVolUp" },
+  { id: "volume_down", code: "HID 0x81", nameKey: "btnVolDown" }
+];
+const REMOTE_ACTIONS = [
+  ["up", "actionUp"],
+  ["down", "actionDown"],
+  ["left", "actionLeft"],
+  ["right", "actionRight"],
+  ["enter", "actionEnter"],
+  ["escape", "actionEscape"],
+  ["home", "actionHome"],
+  ["menu", "actionMenu"],
+  ["volume_up", "actionVolumeUp"],
+  ["volume_down", "actionVolumeDown"],
+  ["none", "actionNone"]
+];
+let remoteButtonMap = { ...DEFAULT_REMOTE_BUTTON_MAP };
+let selectedRemoteButton = "ok";
+
+function parseRemoteButtonMap(override) {
+  // Tolerant version of src/remote-buttons.mjs parseRemoteButtonMap: unknown
+  // entries are ignored instead of throwing so the UI never breaks on a typo.
+  const map = { ...DEFAULT_REMOTE_BUTTON_MAP };
+  for (const entry of String(override || "").split(",")) {
+    const [rawButton, rawKey] = entry.split(":", 2);
+    const button = String(rawButton || "").trim().toLowerCase();
+    const key = String(rawKey || "").trim().toLowerCase();
+    if (button && key && Object.hasOwn(DEFAULT_REMOTE_BUTTON_MAP, button)) {
+      map[button] = key;
+    }
+  }
+  return map;
+}
+
+function serializeRemoteButtonMap() {
+  const entries = [];
+  for (const button of Object.keys(DEFAULT_REMOTE_BUTTON_MAP)) {
+    if (remoteButtonMap[button] !== DEFAULT_REMOTE_BUTTON_MAP[button]) {
+      entries.push(`${button}:${remoteButtonMap[button]}`);
+    }
+  }
+  return entries.join(",");
+}
+
 function modeLabel(mode) {
   if (mode === "claude_code") {
     return "Claude Code";
@@ -133,7 +431,7 @@ function modeLabel(mode) {
   if (mode === "codex_exec") {
     return "Codex";
   }
-  return "输入注入";
+  return t("modeInject");
 }
 
 function providerLabel(provider) {
@@ -141,80 +439,64 @@ function providerLabel(provider) {
 }
 
 function deliveryLabel(mode) {
-  return mode === "immediate" ? "识别完成立即发送" : "设备确认后发送";
+  return mode === "immediate" ? t("deliveryImm") : t("deliveryConfirm");
 }
 
 function injectionLabel(mode) {
-  return mode === "type_only" ? "仅输入文本" : "输入并回车";
+  return mode === "type_only" ? t("injectOnly") : t("injectEnter");
 }
 
 function launchLabel({ autoLaunch, launchToTray }) {
   if (autoLaunch && launchToTray) {
-    return "开机后隐藏启动";
+    return t("launchHidden");
   }
   if (autoLaunch) {
-    return "开机自启";
+    return t("launchAuto");
   }
-  return "手动启动";
+  return t("launchManual");
 }
 
 function windowBehaviorLabel({ closeToTray }) {
-  return closeToTray ? "关闭窗口时最小化到托盘" : "关闭窗口后仍保留界面";
+  return closeToTray ? t("closeTray") : t("closeKeep");
 }
 
 function translationTargetLabel(language) {
   if (language === "korean") {
-    return "韩语";
+    return t("transLangKorean");
   }
   if (language === "japanese") {
-    return "日语";
+    return t("transLangJapanese");
   }
-  return "英语";
+  return t("transLangEnglish");
 }
 
 function translationSendModeLabel(mode) {
   if (mode === "all") {
-    return "中文+英韩日";
+    return t("sendModeAll");
   }
   if (mode === "zh_en") {
-    return "中文+英语";
+    return t("sendModeZhEn");
   }
   if (mode === "bilingual") {
-    return "中文+目标语言";
+    return t("sendModeBilingual");
   }
-  return "只发目标语言";
-}
-
-function statusClass(status) {
-  if (status === "running") {
-    return "status-running";
-  }
-  if (status === "starting") {
-    return "status-starting";
-  }
-  if (status === "needs_setup") {
-    return "status-warning";
-  }
-  if (status === "error") {
-    return "status-error";
-  }
-  return "status-stopped";
+  return t("sendModeTarget");
 }
 
 function serviceStatusLabel(status) {
   if (status === "running") {
-    return "运行中";
+    return t("statusRunning");
   }
   if (status === "starting") {
-    return "启动中";
+    return t("statusStarting");
   }
   if (status === "needs_setup") {
-    return "待配置";
+    return t("statusNeedsSetup");
   }
   if (status === "error") {
-    return "异常";
+    return t("statusError");
   }
-  return "已停止";
+  return t("statusStopped");
 }
 
 function delay(ms) {
@@ -310,32 +592,38 @@ function setLocalMicStatus(status, error = "") {
   localMic.status = status;
   localMic.error = error;
   renderLocalMic();
+  renderBanner();
 }
 
 function localMicStatusText() {
   if (localMic.capturingHotkey) {
-    return { state: "录入中", hint: "按下新的快捷键" };
+    return { state: t("micCapturing"), hint: t("micHintCapturing") };
   }
   if (localMic.status === "connecting") {
-    return { state: "准备中", hint: "正在连接本地服务和麦克风" };
+    return { state: t("micConnecting"), hint: t("micHintConnecting") };
   }
   if (localMic.status === "recording") {
-    return { state: "录音中", hint: `松开 ${displayHotkey(localMic.holdKey)} 结束` };
+    return { state: t("micRecording"), hint: t("micHintRecording", { key: displayHotkey(localMic.holdKey) }) };
   }
   if (localMic.status === "transcribing") {
-    return { state: "识别中", hint: "正在提交给语音识别服务" };
+    return { state: t("micTranscribing"), hint: t("micHintTranscribing") };
   }
   if (localMic.status === "awaiting_action") {
-    return { state: "待确认", hint: `按 ${displayHotkey(localMic.sendKey)} 发送，${displayHotkey(localMic.undoKey)} 撤销` };
+    return {
+      state: t("micAwaiting"),
+      hint: t("micHintAwaiting", { send: displayHotkey(localMic.sendKey), undo: displayHotkey(localMic.undoKey) })
+    };
   }
   if (localMic.status === "error") {
-    return { state: "异常", hint: localMic.error || "麦克风不可用" };
+    return { state: t("micError"), hint: localMic.error || t("micHintError") };
   }
   return {
-    state: "待命",
-    hint:
-      `${localMic.globalHotkeysReady ? "后台可用" : "窗口内可用"} · ` +
-      `按住 ${displayHotkey(localMic.holdKey)} 输入，${displayHotkey(localMic.translationToggleKey)} 英文输出`
+    state: t("micIdle"),
+    hint: t("micHintIdle", {
+      scope: localMic.globalHotkeysReady ? t("scopeGlobal") : t("scopeWindow"),
+      hold: displayHotkey(localMic.holdKey),
+      toggle: displayHotkey(localMic.translationToggleKey)
+    })
   };
 }
 
@@ -343,28 +631,31 @@ function renderLocalMic() {
   const { state, hint } = localMicStatusText();
   elements.localMicState.textContent = state;
   elements.localMicHint.textContent = hint;
-  elements.localMicButtonLabel.textContent = localMic.recording
-    ? "松开结束"
-    : `按住 ${displayHotkey(localMic.holdKey)}`;
+  elements.localMicKeyBadge.textContent = displayHotkey(localMic.holdKey);
   elements.localMicButton.classList.toggle("is-recording", localMic.recording);
-  elements.localMicButton.disabled = localMic.starting || localMic.stopping || localMic.capturingHotkey;
+  elements.meter.classList.toggle("on", localMic.recording);
+  elements.localMicButton.disabled = localMic.starting || localMic.stopping || Boolean(localMic.capturingHotkey);
   elements.localMicSendButton.disabled =
-    localMic.recording || localMic.starting || localMic.stopping || localMic.capturingHotkey;
+    localMic.recording || localMic.starting || localMic.stopping || Boolean(localMic.capturingHotkey);
   elements.localMicUndoButton.disabled = !localMic.awaitingAction || localMic.recording || localMic.starting;
-  elements.localMicSendButton.textContent = `发送 ${displayHotkey(localMic.sendKey)}`;
-  elements.localMicUndoButton.textContent = `撤销 ${displayHotkey(localMic.undoKey)}`;
-  elements.captureLocalMicHoldKeyButton.textContent = localMic.capturingHotkey === "hold" ? "等待" : "录入";
-  elements.captureLocalMicSendKeyButton.textContent = localMic.capturingHotkey === "send" ? "等待" : "录入";
-  elements.captureLocalMicUndoKeyButton.textContent = localMic.capturingHotkey === "undo" ? "等待" : "录入";
+  elements.localMicSendButton.textContent = t("sendWithKey", { key: displayHotkey(localMic.sendKey) });
+  elements.localMicUndoButton.textContent = t("undoWithKey", { key: displayHotkey(localMic.undoKey) });
+  elements.captureLocalMicHoldKeyButton.textContent = localMic.capturingHotkey === "hold" ? "…" : t("capture");
+  elements.captureLocalMicSendKeyButton.textContent = localMic.capturingHotkey === "send" ? "…" : t("capture");
+  elements.captureLocalMicUndoKeyButton.textContent = localMic.capturingHotkey === "undo" ? "…" : t("capture");
   elements.captureLocalMicTranslationToggleKeyButton.textContent =
-    localMic.capturingHotkey === "translationToggle" ? "等待" : "录入";
+    localMic.capturingHotkey === "translationToggle" ? "…" : t("capture");
   elements.localMicActivity.textContent = localMic.recording
-    ? "Recording"
+    ? t("actRecording")
     : localMic.status === "transcribing"
-      ? "STT"
+      ? t("actStt")
       : localMic.status === "awaiting_action"
-        ? "Confirm"
-        : "Idle";
+        ? t("actConfirm")
+        : t("actIdle");
+  elements.localMicActivity.classList.toggle(
+    "hidden",
+    !localMic.recording && !["transcribing", "awaiting_action"].includes(localMic.status)
+  );
   elements.localMicDb.textContent = localMic.db === null ? "-- dB" : `${Math.round(localMic.db)} dB`;
 
   const baseLevel = localMic.recording ? Math.max(localMic.level, 0.04) : 0.04;
@@ -377,7 +668,7 @@ function renderLocalMic() {
 
 function sendBridgeJson(message) {
   if (!appState.socket || appState.socket.readyState !== WebSocket.OPEN || !appState.socketReady) {
-    throw new Error("本地服务还没有连接。");
+    throw new Error(t("connNoService"));
   }
   appState.socket.send(JSON.stringify(message));
 }
@@ -388,12 +679,11 @@ async function ensureBridgeSocketReady() {
     const bootstrap = await window.vibeApp.startService();
     appState.bootstrap = bootstrap;
     appState.service = bootstrap.service;
-    service = bootstrap.service;
     renderService();
   }
 
   if (!service || service.status === "needs_setup" || service.status === "error") {
-    throw new Error(service?.message || "本地服务未就绪。");
+    throw new Error(service?.message || t("connNoService"));
   }
 
   connectLiveSocket();
@@ -405,7 +695,7 @@ async function ensureBridgeSocketReady() {
     await delay(80);
   }
 
-  throw new Error("连接本地服务超时。");
+  throw new Error(t("connFailed"));
 }
 
 function cleanupLocalAudio() {
@@ -511,11 +801,11 @@ async function startLocalMicRecording() {
   try {
     await ensureBridgeSocketReady();
     if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error("当前环境不支持浏览器麦克风采集。");
+      throw new Error(t("micHintError"));
     }
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextCtor) {
-      throw new Error("当前环境不支持 Web Audio。");
+      throw new Error(t("micHintError"));
     }
 
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -567,6 +857,7 @@ async function startLocalMicRecording() {
   } finally {
     localMic.starting = false;
     renderLocalMic();
+    renderBanner();
   }
 }
 
@@ -582,7 +873,7 @@ async function stopLocalMicRecording({ sendStop = true } = {}) {
   localMic.stopping = true;
   localMic.recording = false;
   cleanupLocalAudio();
-  setLocalMicStatus(sendStop ? "transcribing" : "error", sendStop ? "" : "本地服务连接已断开。");
+  setLocalMicStatus(sendStop ? "transcribing" : "error", sendStop ? "" : t("connClosed"));
 
   try {
     if (sendStop) {
@@ -596,6 +887,7 @@ async function stopLocalMicRecording({ sendStop = true } = {}) {
   } finally {
     localMic.stopping = false;
     renderLocalMic();
+    renderBanner();
   }
 }
 
@@ -666,44 +958,25 @@ function finishLocalMicSessionFromBridge(message) {
   }
 }
 
-function setActiveTab(tabName) {
-  elements.tabButtons.forEach((button) => {
-    const isActive = button.getAttribute("data-tab-trigger") === tabName;
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-selected", String(isActive));
+function gotoPage(pageName, settingsTab = null) {
+  document.querySelectorAll(".nav-item").forEach((button) => {
+    button.classList.toggle("active", button.dataset.page === pageName);
   });
-
-  elements.tabPanels.forEach((panel) => {
-    const isActive = panel.getAttribute("data-tab-panel") === tabName;
-    panel.classList.toggle("hidden", !isActive);
-    panel.classList.toggle("is-active", isActive);
+  document.querySelectorAll(".page").forEach((page) => {
+    page.classList.toggle("active", page.id === `page-${pageName}`);
   });
+  if (pageName === "settings" && settingsTab) {
+    setActiveTab(settingsTab);
+  }
 }
 
-function activateSideNav(targetName) {
-  const normalized = String(targetName || "overview").trim();
-  const targetToTab = {
-    integrations: "speech",
-    settings: "basics",
-    workspace: "workspace",
-    hotkeys: "speech"
-  };
-
-  if (targetToTab[normalized]) {
-    setActiveTab(targetToTab[normalized]);
-    updateFormAffordances();
-  }
-
-  const activeSideTarget = normalized === "logs" ? "transcript" : normalized;
-  document.querySelectorAll(".side-nav-item").forEach((button) => {
-    button.classList.toggle("is-active", button.getAttribute("data-side-target") === activeSideTarget);
+function setActiveTab(tabName) {
+  elements.tabButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.tab === tabName);
   });
-
-  const sectionName = ["hotkeys", "integrations"].includes(normalized) ? "settings" : normalized;
-  const section = document.querySelector(`[data-section="${sectionName}"]`);
-  if (section) {
-    section.scrollIntoView({ block: "start", behavior: "smooth" });
-  }
+  elements.tabPanels.forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.panel !== tabName);
+  });
 }
 
 function updateProviderVisibility() {
@@ -722,31 +995,9 @@ function updateModeVisibility() {
   });
 }
 
-function renderConfigSummary() {
-  elements.summaryMode.textContent = modeLabel(elements.sendTarget.value);
-  elements.summaryDelivery.textContent =
-    elements.sendTarget.value === "text_injector"
-      ? `${deliveryLabel(elements.transcriptDeliveryMode.value)} · ${injectionLabel(elements.textInjectionMode.value)}`
-      : deliveryLabel(elements.transcriptDeliveryMode.value);
-  elements.summaryProvider.textContent = providerLabel(elements.sttProvider.value);
-  const sttDetail =
-    elements.sttProvider.value === "openai"
-      ? `模型：${elements.openaiModel.value || "whisper-1"}`
-      : "适合中文语音环境";
-  if (elements.voiceTranslationEnabled.checked) {
-    elements.summaryProviderDetail.textContent =
-      `${sttDetail} · 翻译开启 · ` +
-      `目标：${translationTargetLabel(elements.voiceTranslationTargetLanguage.value)} · ` +
-      translationSendModeLabel(elements.voiceTranslationSendMode.value);
-  } else {
-    elements.summaryProviderDetail.textContent = sttDetail;
-  }
-  elements.summaryLaunch.textContent = launchLabel({
-    autoLaunch: elements.autoLaunch.checked,
-    launchToTray: elements.launchToTray.checked
-  });
-  elements.summaryWindowBehavior.textContent = windowBehaviorLabel({
-    closeToTray: elements.closeToTray.checked
+function updateTranslationVisibility() {
+  document.querySelectorAll("[data-translation-config]").forEach((section) => {
+    section.classList.toggle("hidden", !elements.voiceTranslationEnabled.checked);
   });
 }
 
@@ -754,13 +1005,8 @@ function updateFormAffordances() {
   updateProviderVisibility();
   updateModeVisibility();
   updateTranslationVisibility();
-  renderConfigSummary();
-}
-
-function updateTranslationVisibility() {
-  document.querySelectorAll("[data-translation-config]").forEach((section) => {
-    section.classList.toggle("hidden", !elements.voiceTranslationEnabled.checked);
-  });
+  renderAbout();
+  renderBanner();
 }
 
 function syncTrayLanguageMode() {
@@ -805,7 +1051,7 @@ async function toggleEnglishVoiceOutput() {
     if (isEnglishTargetOnlyTranslation()) {
       sendBridgeJson({ type: "set_voice_translation", enabled: false, source: "desktop_hotkey" });
       applyVoiceTranslationState({ enabled: false });
-      elements.serviceMessage.textContent = "English output shortcut disabled translation.";
+      elements.serviceMessage.textContent = t("englishOff");
       return;
     }
 
@@ -817,7 +1063,7 @@ async function toggleEnglishVoiceOutput() {
     sendBridgeJson({ type: "set_voice_translation_send_mode", mode: "target", source: "desktop_hotkey" });
     sendBridgeJson({ type: "set_voice_translation", enabled: true, source: "desktop_hotkey" });
     applyVoiceTranslationState({ enabled: true, targetLanguage: "english", sendMode: "target" });
-    elements.serviceMessage.textContent = "English output shortcut enabled.";
+    elements.serviceMessage.textContent = t("englishOn");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     elements.serviceMessage.textContent = message;
@@ -850,7 +1096,9 @@ function collectFormPayload() {
       codexCwd: elements.codexCwd.value,
       claudeCwd: elements.claudeCwd.value,
       codexSkipGitRepoCheck: elements.codexSkipGitRepoCheck.checked,
-      claudeDangerouslySkipPermissions: elements.claudeDangerouslySkipPermissions.checked
+      claudeDangerouslySkipPermissions: elements.claudeDangerouslySkipPermissions.checked,
+      xiaomiRemoteEnabled: elements.xiaomiRemoteEnabled.checked,
+      xiaomiRemoteButtonMap: serializeRemoteButtonMap()
     },
     desktopSettings: {
       autoLaunch: elements.autoLaunch.checked,
@@ -890,6 +1138,9 @@ function fillForm(form, desktopSettingsPath) {
   setLocalMicHotkeys(form.desktopSettings);
   elements.codexSkipGitRepoCheck.checked = Boolean(form.codexSkipGitRepoCheck);
   elements.claudeDangerouslySkipPermissions.checked = Boolean(form.claudeDangerouslySkipPermissions);
+  elements.xiaomiRemoteEnabled.checked = Boolean(form.xiaomiRemoteEnabled);
+  remoteButtonMap = parseRemoteButtonMap(form.xiaomiRemoteButtonMap);
+  renderRemoteEditor();
   elements.userConfigPath.textContent = form.userConfigPath || "";
   elements.desktopSettingsPath.textContent = desktopSettingsPath || "";
   updateFormAffordances();
@@ -901,7 +1152,7 @@ function renderNotices(form) {
   const overrideFiles = form.overrideFiles || [];
 
   if (issues.length > 0) {
-    elements.configIssues.textContent = `当前配置不完整：${issues.join(" ")}`;
+    elements.configIssues.textContent = `${t("configIssuePrefix")}${issues.join(" ")}`;
     elements.configIssues.classList.remove("hidden");
   } else {
     elements.configIssues.classList.add("hidden");
@@ -909,13 +1160,44 @@ function renderNotices(form) {
 
   if (overrideFiles.length > 0) {
     elements.overrideFiles.textContent = [
-      "注意：以下配置文件会覆盖用户配置，界面里保存的值可能不会立即生效：",
+      t("overrideNote"),
       ...overrideFiles.map((filePath) => `• ${filePath}`)
     ].join("\n");
     elements.overrideFiles.classList.remove("hidden");
   } else {
     elements.overrideFiles.classList.add("hidden");
   }
+}
+
+function renderBanner() {
+  const service = appState.service || appState.bootstrap?.service;
+  let stateKey = "bannerStopped";
+  let active = false;
+  if (localMic.recording) {
+    stateKey = "bannerListening";
+    active = true;
+  } else if (localMic.status === "transcribing") {
+    stateKey = "bannerTranscribing";
+    active = true;
+  } else if (service?.status === "running") {
+    stateKey = "bannerReady";
+    active = true;
+  } else if (service?.status === "starting") {
+    stateKey = "bannerStarting";
+  } else if (service?.status === "needs_setup") {
+    stateKey = "bannerNeedsSetup";
+  } else if (service?.status === "error") {
+    stateKey = "bannerError";
+  }
+  elements.bannerState.textContent = t(stateKey);
+  elements.bannerPulse.classList.toggle("off", !active);
+
+  const form = appState.bootstrap?.form;
+  const mode = service?.mode || elements.sendTarget.value || form?.sendTarget;
+  const provider = elements.sttProvider.value || form?.sttProvider;
+  const port = service?.port || form?.port || 8765;
+  elements.bannerDetail.textContent =
+    `${modeLabel(mode)} · ${providerLabel(provider)} · :${port} · ${displayHotkey(localMic.holdKey)}`;
 }
 
 function renderService() {
@@ -925,25 +1207,311 @@ function renderService() {
   }
 
   elements.statusPill.textContent = serviceStatusLabel(service.status);
-  elements.statusPill.className = `status-pill ${statusClass(service.status)}`;
-  elements.footerServiceStatus.textContent = `Service ${serviceStatusLabel(service.status).toLowerCase()}`;
-  elements.serviceMode.textContent = modeLabel(service.mode);
-  elements.servicePort.textContent = String(service.port || appState.bootstrap?.form?.port || 8765);
-  elements.serviceMessage.textContent = service.message || "等待启动。";
-  elements.cliStatus.textContent = liveState.cliStatus;
+  elements.statusDot.className = "dot";
+  if (service.status === "running") {
+    elements.statusDot.classList.add("on");
+  } else if (service.status === "starting" || service.status === "needs_setup") {
+    elements.statusDot.classList.add("warn");
+  } else if (service.status === "error") {
+    elements.statusDot.classList.add("err");
+  }
+  elements.serviceMessage.textContent = service.message || t("serviceMsgDefault");
+  elements.cliStatus.textContent = cliStatusText();
   elements.serviceLogTail.textContent =
-    service.logs && service.logs.length > 0 ? service.logs.join("\n") : "等待启动。";
+    service.logs && service.logs.length > 0 ? service.logs.join("\n") : t("waitingStart");
   elements.startServiceButton.disabled = service.status === "running" || service.status === "starting";
   elements.restartServiceButton.disabled = service.status === "starting";
   elements.stopServiceButton.disabled = service.status === "stopped" || service.status === "needs_setup";
+  renderBanner();
 }
 
-function renderLive() {
-  elements.lastTranscript.textContent = liveState.transcript || "还没有收到语音";
-  elements.lastUserText.textContent = liveState.userText || "等待中";
-  elements.lastAssistantText.textContent = liveState.assistantText || "等待中";
-  elements.cliLogTail.textContent =
-    liveState.cliLogLines.length > 0 ? liveState.cliLogLines.join("\n") : "尚未连接。";
+function remoteDisplayName(remote) {
+  return remote?.name || remote?.model || t("aboutRemote");
+}
+
+// Title-bar chip + About cell for the Xiaomi remote: model and battery are
+// read once at startup via BLE GATT (queried in the main process).
+function renderRemoteStatus() {
+  const enabled = elements.xiaomiRemoteEnabled.checked
+    || appState.bootstrap?.form?.xiaomiRemoteEnabled === true;
+  const remote = appState.remote;
+
+  if (!enabled) {
+    elements.remoteStatus.hidden = true;
+    elements.remoteStatusSep.hidden = true;
+    return;
+  }
+
+  elements.remoteStatus.hidden = false;
+  elements.remoteStatusSep.hidden = false;
+  if (!remote) {
+    elements.remoteStatus.textContent = `${t("aboutRemote")} · ${t("remoteReading")}`;
+    elements.remoteStatus.classList.add("dim");
+    return;
+  }
+
+  const name = remoteDisplayName(remote);
+  if (remote.connected && remote.batteryLevel != null) {
+    elements.remoteStatus.textContent = `${name} · ${remote.batteryLevel}%`;
+    elements.remoteStatus.classList.remove("dim");
+  } else if (remote.connected) {
+    elements.remoteStatus.textContent = `${name} · ${t("remoteOn")}`;
+    elements.remoteStatus.classList.remove("dim");
+  } else {
+    elements.remoteStatus.textContent = `${name} · ${t("remoteDisconnected")}`;
+    elements.remoteStatus.classList.add("dim");
+  }
+  renderAbout();
+}
+
+function formatTime(date) {
+  return date.toLocaleTimeString(lang === "zh" ? "zh-CN" : "en-US", { hour12: false });
+}
+
+function pushTranscript(who, text) {
+  const value = String(text || "").trim();
+  if (!value) {
+    return;
+  }
+  transcriptHistory.push({ time: new Date(), who, text: value });
+  renderTranscripts();
+}
+
+function renderTranscriptListInto(container, entries) {
+  container.innerHTML = "";
+  if (entries.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "tr-empty";
+    empty.textContent = t("emptyRecent");
+    container.appendChild(empty);
+    return;
+  }
+  for (const entry of entries) {
+    const item = document.createElement("div");
+    item.className = "tr-item";
+    const meta = document.createElement("div");
+    meta.className = "tr-meta";
+    const time = document.createElement("span");
+    time.className = "tr-time";
+    time.textContent = formatTime(entry.time);
+    const tag = document.createElement("span");
+    tag.className = `tr-tag ${entry.who}`;
+    tag.textContent = entry.who === "you" ? t("tagYou") : t("tagAi");
+    meta.append(time, tag);
+    const text = document.createElement("div");
+    text.className = `tr-text${entry.who === "ai" ? " dim" : ""}`;
+    text.textContent = entry.text;
+    item.append(meta, text);
+    container.appendChild(item);
+  }
+}
+
+function renderTranscripts() {
+  renderTranscriptListInto(elements.recentList, transcriptHistory.slice(-4));
+  renderTranscriptListInto(elements.transcriptList, transcriptHistory);
+  elements.transcriptList.scrollTop = elements.transcriptList.scrollHeight;
+}
+
+function markVoiceUsed() {
+  if (hasUsedVoice) {
+    return;
+  }
+  hasUsedVoice = true;
+  renderChecklist();
+  void window.vibeApp.updateDesktopSettings({ hasUsedVoice: true }).then((bootstrap) => {
+    appState.bootstrap = bootstrap;
+    appState.service = bootstrap.service;
+  }).catch(() => {});
+}
+
+function renderChecklist() {
+  const form = appState.bootstrap?.form;
+  const sttOk = elements.sttProvider.value === "openai"
+    ? Boolean(elements.openaiApiKey.value)
+    : Boolean(elements.volcengineAppKey.value && elements.volcengineAccessKey.value);
+  const remoteOn = elements.xiaomiRemoteEnabled.checked || form?.xiaomiRemoteEnabled === true;
+  const autoLaunchOn = elements.autoLaunch.checked;
+  const mode = elements.sendTarget.value;
+  const targetDesc = mode === "codex_exec"
+    ? t("targetDescCodex")
+    : mode === "claude_code"
+      ? t("targetDescClaude")
+      : t("targetDescInject");
+
+  const items = [
+    {
+      icon: sttOk ? "ok" : "miss",
+      title: t("checkStt"),
+      desc: sttOk
+        ? t("checkSttOk", { provider: providerLabel(elements.sttProvider.value) })
+        : t("checkSttMiss", { provider: providerLabel(elements.sttProvider.value) }),
+      fix: sttOk ? null : { label: t("checkSttFix"), page: "settings", tab: "speech" }
+    },
+    {
+      icon: "ok",
+      title: t("checkTarget"),
+      desc: `${modeLabel(mode)} — ${targetDesc}`,
+      fix: null
+    },
+    {
+      icon: hasUsedVoice ? "ok" : "miss",
+      title: hasUsedVoice ? t("checkMicOk") : t("checkMicMiss"),
+      desc: t("checkMicHint", { key: displayHotkey(localMic.holdKey) }),
+      fix: hasUsedVoice ? null : { label: t("checkMicFix"), action: "mic" }
+    },
+    {
+      icon: remoteOn ? "ok" : "miss",
+      title: remoteOn ? t("checkRemoteOk") : t("checkRemoteMiss"),
+      desc: t("checkRemoteHint"),
+      fix: remoteOn ? null : { label: t("checkRemoteFix"), page: "settings", tab: "remote" }
+    },
+    {
+      icon: "tip",
+      title: t("checkLaunch"),
+      desc: autoLaunchOn ? t("checkLaunchOn") : t("checkLaunchOff"),
+      fix: autoLaunchOn ? null : { label: t("checkLaunchFix"), page: "settings", tab: "basic" }
+    }
+  ];
+
+  elements.checklist.innerHTML = "";
+  const iconText = { ok: "✓", miss: "!", tip: "i" };
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "check-item";
+    const icon = document.createElement("div");
+    icon.className = `check-icon ${item.icon}`;
+    icon.textContent = iconText[item.icon];
+    const textWrap = document.createElement("div");
+    textWrap.className = "check-text";
+    const title = document.createElement("div");
+    title.className = "t";
+    title.textContent = item.title;
+    const desc = document.createElement("div");
+    desc.className = "d";
+    desc.textContent = item.desc;
+    textWrap.append(title, desc);
+    row.append(icon, textWrap);
+    if (item.fix) {
+      const fix = document.createElement("button");
+      fix.className = "check-fix";
+      fix.type = "button";
+      fix.textContent = item.fix.label;
+      fix.addEventListener("click", () => {
+        if (item.fix.action === "mic") {
+          gotoPage("home");
+          elements.localMicButton.classList.remove("attention");
+          elements.localMicButton.scrollIntoView({ block: "center", behavior: "smooth" });
+          requestAnimationFrame(() => elements.localMicButton.classList.add("attention"));
+          return;
+        }
+        gotoPage(item.fix.page, item.fix.tab);
+      });
+      row.appendChild(fix);
+    }
+    elements.checklist.appendChild(row);
+  }
+
+  const allGood = sttOk && hasUsedVoice && remoteOn && autoLaunchOn;
+  elements.checklistCard.classList.toggle("hidden", allGood);
+}
+
+function renderAbout() {
+  const version = appState.bootstrap?.appVersion;
+  elements.aboutVersion.textContent = version ? `v${version}` : "";
+  elements.appVersion.textContent = version ? `v${version}` : "";
+  elements.aboutTarget.textContent = modeLabel(elements.sendTarget.value);
+  elements.aboutTargetSub.textContent =
+    elements.sendTarget.value === "text_injector"
+      ? `${deliveryLabel(elements.transcriptDeliveryMode.value)} · ${injectionLabel(elements.textInjectionMode.value)}`
+      : deliveryLabel(elements.transcriptDeliveryMode.value);
+  elements.aboutProvider.textContent = providerLabel(elements.sttProvider.value);
+  const providerDetail = elements.sttProvider.value === "openai"
+    ? t("providerDetailOpenai", { model: elements.openaiModel.value || "whisper-1" })
+    : t("providerDetailVolc");
+  elements.aboutProviderSub.textContent = elements.voiceTranslationEnabled.checked
+    ? `${providerDetail} · ${t("translationOn", {
+        lang: translationTargetLabel(elements.voiceTranslationTargetLanguage.value),
+        mode: translationSendModeLabel(elements.voiceTranslationSendMode.value)
+      })}`
+    : providerDetail;
+  elements.aboutLaunch.textContent = launchLabel({
+    autoLaunch: elements.autoLaunch.checked,
+    launchToTray: elements.launchToTray.checked
+  });
+  elements.aboutLaunchSub.textContent = windowBehaviorLabel({ closeToTray: elements.closeToTray.checked });
+  const remoteEnabled = elements.xiaomiRemoteEnabled.checked
+    || appState.bootstrap?.form?.xiaomiRemoteEnabled === true;
+  const remote = appState.remote;
+  elements.aboutRemote.textContent = remoteEnabled ? t("remoteOn") : t("remoteOff");
+  if (!remoteEnabled) {
+    elements.aboutRemoteSub.textContent = "XIAOMI_REMOTE_ENABLED=0";
+  } else if (remote?.connected && remote.batteryLevel != null) {
+    elements.aboutRemoteSub.textContent =
+      `${remoteDisplayName(remote)} · ${t("remoteBattery", { level: remote.batteryLevel })}`;
+  } else if (remote?.connected) {
+    elements.aboutRemoteSub.textContent = remoteDisplayName(remote);
+  } else if (remote) {
+    elements.aboutRemoteSub.textContent =
+      `${remoteDisplayName(remote)} · ${t("remoteDisconnected")}`;
+  } else {
+    elements.aboutRemoteSub.textContent = `USBPcap · ${t("remoteReading")}`;
+  }
+  elements.aboutPort.textContent = String(
+    appState.service?.port || appState.bootstrap?.form?.port || 8765
+  );
+}
+
+function renderRemoteEditor() {
+  const def = REMOTE_BUTTON_DEFS.find((entry) => entry.id === selectedRemoteButton) || REMOTE_BUTTON_DEFS[5];
+  elements.rselName.textContent = t(def.nameKey);
+  elements.rselCode.textContent = def.code || t("remoteCodeUnknown");
+  document.querySelectorAll(".rbtn[data-btn]").forEach((button) => {
+    button.classList.toggle("selected", button.dataset.btn === selectedRemoteButton);
+  });
+
+  elements.actionGrid.innerHTML = "";
+  if (selectedRemoteButton === "voice") {
+    const fixed = document.createElement("div");
+    fixed.className = "remote-note";
+    fixed.style.gridColumn = "1 / -1";
+    fixed.textContent = t("voiceFixed");
+    elements.actionGrid.appendChild(fixed);
+    return;
+  }
+  for (const [action, labelKey] of REMOTE_ACTIONS) {
+    const opt = document.createElement("button");
+    opt.type = "button";
+    opt.className = "action-opt" + (remoteButtonMap[selectedRemoteButton] === action ? " active" : "");
+    opt.textContent = t(labelKey);
+    opt.addEventListener("click", () => {
+      remoteButtonMap[selectedRemoteButton] = action;
+      renderRemoteEditor();
+    });
+    elements.actionGrid.appendChild(opt);
+  }
+}
+
+function applyLang() {
+  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    const key = el.dataset.i18n;
+    const value = I18N[lang][key];
+    if (value !== undefined) {
+      el.textContent = value;
+    }
+  });
+  elements.langToggle.textContent = lang === "zh" ? "EN" : "中文";
+  if (appState.bootstrap?.form) {
+    renderNotices(appState.bootstrap.form);
+  }
+  renderService();
+  renderLocalMic();
+  renderBanner();
+  renderChecklist();
+  renderTranscripts();
+  renderAbout();
+  renderRemoteStatus();
+  renderRemoteEditor();
 }
 
 function resetLiveConnection() {
@@ -982,10 +1550,7 @@ function handleBridgeMessage(message) {
 
   if (message.type === "server_ready") {
     appState.socketReady = true;
-    liveState.cliStatus = `已连接 · ${modeLabel(message.sendTarget)}`;
-    if (message.sendTarget) {
-      elements.serviceMode.textContent = modeLabel(message.sendTarget);
-    }
+    setCliStatusKey("connReady", { modeRaw: message.sendTarget });
     applyVoiceTranslationState(message);
     renderService();
     return;
@@ -1002,37 +1567,36 @@ function handleBridgeMessage(message) {
   }
 
   if (message.type === "cli_session_state") {
-    liveState.cliStatus = message.statusLine || message.phase || "待命";
+    setCliStatusRaw(message.statusLine || message.phase || t("micIdle"));
     renderService();
     return;
   }
 
   if (message.type === "cli_summary") {
-    if (message.latestUserText !== undefined) {
-      liveState.userText = message.latestUserText || "";
+    if (message.latestUserText && message.latestUserText !== liveState.lastUserText) {
+      pushTranscript("you", message.latestUserText);
+      liveState.lastUserText = message.latestUserText;
     }
-    if (message.latestAssistantText !== undefined) {
-      liveState.assistantText = message.latestAssistantText || "";
+    if (message.latestAssistantText && message.latestAssistantText !== liveState.lastAssistantText) {
+      pushTranscript("ai", message.latestAssistantText);
+      liveState.lastAssistantText = message.latestAssistantText;
     }
-    renderLive();
     return;
   }
 
   if (message.type === "cli_log_tail") {
     liveState.cliLogLines = Array.isArray(message.lines) ? message.lines : [];
-    renderLive();
+    elements.cliLogTail.textContent =
+      liveState.cliLogLines.length > 0 ? liveState.cliLogLines.join("\n") : t("notConnected");
     return;
   }
 
   if (message.type === "transcript_final") {
-    liveState.transcript = message.text || "";
-    renderLive();
+    if (message.text) {
+      pushTranscript("you", message.text);
+      markVoiceUsed();
+    }
     return;
-  }
-
-  if (message.type === "status" && message.text) {
-    liveState.transcript = message.text;
-    renderLive();
   }
 }
 
@@ -1040,7 +1604,7 @@ function connectLiveSocket() {
   const service = appState.service || appState.bootstrap?.service;
   if (!service || (service.status !== "running" && service.status !== "starting")) {
     resetLiveConnection();
-    liveState.cliStatus = "服务未连接";
+    setCliStatusKey("connNoService");
     renderService();
     return;
   }
@@ -1083,13 +1647,13 @@ function connectLiveSocket() {
     if (localMic.recording || localMic.starting) {
       void stopLocalMicRecording({ sendStop: false });
     }
-    liveState.cliStatus = "连接已断开";
+    setCliStatusKey("connClosed");
     renderService();
     scheduleReconnect();
   });
 
   socket.addEventListener("error", () => {
-    liveState.cliStatus = "无法连接到本地服务";
+    setCliStatusKey("connFailed");
     renderService();
   });
 }
@@ -1098,15 +1662,20 @@ async function refreshBootstrap() {
   const bootstrap = await window.vibeApp.getBootstrap();
   appState.bootstrap = bootstrap;
   appState.service = bootstrap.service;
+  appState.remote = bootstrap.remote ?? appState.remote;
+  const savedLang = bootstrap.form?.desktopSettings?.uiLanguage;
+  if ((savedLang === "en" || savedLang === "zh") && savedLang !== lang) {
+    lang = savedLang;
+  }
+  hasUsedVoice = bootstrap.form?.desktopSettings?.hasUsedVoice === true;
   if (bootstrap.globalHotkeys) {
     localMic.globalHotkeysReady = Boolean(bootstrap.globalHotkeys.ready);
     setLocalMicHotkeys(bootstrap.globalHotkeys.settings || bootstrap.form.desktopSettings);
   }
   fillForm(bootstrap.form, bootstrap.desktopSettingsPath);
-  elements.appVersion.textContent = bootstrap.appVersion ? `v${bootstrap.appVersion}` : "";
   renderNotices(bootstrap.form);
-  renderService();
-  renderLive();
+  applyLang();
+  renderRemoteStatus();
   connectLiveSocket();
 }
 
@@ -1173,50 +1742,73 @@ async function persistLocalMicHotkeys(patch = {}) {
 
 let localMicPointerActive = false;
 
+document.querySelectorAll(".nav-item").forEach((button) => {
+  button.addEventListener("click", () => gotoPage(button.dataset.page));
+});
+
 elements.tabButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    setActiveTab(button.getAttribute("data-tab-trigger"));
-  });
+  button.addEventListener("click", () => setActiveTab(button.dataset.tab));
 });
 
-document.querySelectorAll("[data-side-target]").forEach((button) => {
-  button.addEventListener("click", () => {
-    activateSideNav(button.getAttribute("data-side-target"));
-  });
-});
-
-document.querySelector("#collapse-sidebar-button")?.addEventListener("click", (event) => {
-  const body = document.querySelector(".app-body");
-  const collapsed = body?.classList.toggle("sidebar-collapsed") ?? false;
-  event.currentTarget.setAttribute("aria-pressed", String(collapsed));
+elements.langToggle.addEventListener("click", () => {
+  lang = lang === "zh" ? "en" : "zh";
+  applyLang();
+  void window.vibeApp.updateDesktopSettings({ uiLanguage: lang }).then((bootstrap) => {
+    appState.bootstrap = bootstrap;
+    appState.service = bootstrap.service;
+  }).catch(() => {});
 });
 
 elements.sttProvider.addEventListener("change", updateFormAffordances);
 elements.sendTarget.addEventListener("change", updateFormAffordances);
-elements.transcriptDeliveryMode.addEventListener("change", renderConfigSummary);
-elements.textInjectionMode.addEventListener("change", renderConfigSummary);
+elements.transcriptDeliveryMode.addEventListener("change", updateFormAffordances);
+elements.textInjectionMode.addEventListener("change", updateFormAffordances);
 elements.voiceTranslationEnabled.addEventListener("change", updateFormAffordances);
-elements.voiceTranslationTargetLanguage.addEventListener("change", renderConfigSummary);
-elements.voiceTranslationSendMode.addEventListener("change", renderConfigSummary);
-elements.openaiModel.addEventListener("input", renderConfigSummary);
-elements.autoLaunch.addEventListener("change", renderConfigSummary);
-elements.launchToTray.addEventListener("change", renderConfigSummary);
-elements.closeToTray.addEventListener("change", renderConfigSummary);
+elements.voiceTranslationTargetLanguage.addEventListener("change", updateFormAffordances);
+elements.voiceTranslationSendMode.addEventListener("change", updateFormAffordances);
+elements.openaiModel.addEventListener("input", updateFormAffordances);
+elements.autoLaunch.addEventListener("change", () => {
+  updateFormAffordances();
+  renderChecklist();
+});
+elements.launchToTray.addEventListener("change", updateFormAffordances);
+elements.closeToTray.addEventListener("change", updateFormAffordances);
+elements.xiaomiRemoteEnabled.addEventListener("change", () => {
+  updateFormAffordances();
+  renderChecklist();
+  renderRemoteStatus();
+});
+elements.volcengineAppKey.addEventListener("input", renderChecklist);
+elements.volcengineAccessKey.addEventListener("input", renderChecklist);
+elements.openaiApiKey.addEventListener("input", renderChecklist);
 
 elements.form.addEventListener("submit", async (event) => {
   event.preventDefault();
   elements.saveSettingsButton.disabled = true;
+  elements.saveSettingsButton.textContent = t("saving");
   try {
     const bootstrap = await window.vibeApp.saveConfig(collectFormPayload());
     appState.bootstrap = bootstrap;
     appState.service = bootstrap.service;
     fillForm(bootstrap.form, bootstrap.desktopSettingsPath);
-    elements.appVersion.textContent = bootstrap.appVersion ? `v${bootstrap.appVersion}` : "";
-  renderNotices(bootstrap.form);
+    renderNotices(bootstrap.form);
     renderService();
+    renderChecklist();
     connectLiveSocket();
+    elements.saveSettingsButton.textContent = t("saved");
+    setTimeout(() => {
+      elements.saveSettingsButton.textContent = t("save");
+    }, 1600);
   } finally {
     elements.saveSettingsButton.disabled = false;
+  }
+});
+
+elements.discardSettingsButton.addEventListener("click", () => {
+  if (appState.bootstrap?.form) {
+    fillForm(appState.bootstrap.form, appState.bootstrap.desktopSettingsPath);
+    renderNotices(appState.bootstrap.form);
+    renderChecklist();
   }
 });
 
@@ -1245,11 +1837,22 @@ elements.stopServiceButton.addEventListener("click", async () => {
 });
 
 elements.openConfigFolderButton.addEventListener("click", () => {
-  activateSideNav("logs");
+  void window.vibeApp.openConfigFolder();
+});
+
+elements.openLogsButton.addEventListener("click", () => {
+  void window.vibeApp.openConfigFolder();
 });
 
 elements.pickCodexCwdButton.addEventListener("click", () => chooseDirectory(elements.codexCwd));
 elements.pickClaudeCwdButton.addEventListener("click", () => chooseDirectory(elements.claudeCwd));
+
+document.querySelectorAll(".rbtn[data-btn]").forEach((button) => {
+  button.addEventListener("click", () => {
+    selectedRemoteButton = button.dataset.btn;
+    renderRemoteEditor();
+  });
+});
 
 function beginHotkeyCapture(target) {
   localMic.capturingHotkey = target;
@@ -1260,7 +1863,7 @@ function beginHotkeyCapture(target) {
       : target === "translationToggle"
         ? elements.localMicTranslationToggleKey
         : elements.localMicHoldKey;
-  input.value = "按下新的快捷键...";
+  input.value = "…";
   input.focus();
   renderLocalMic();
 }
@@ -1404,12 +2007,17 @@ window.addEventListener("blur", () => {
 
 window.vibeApp.onState((payload) => {
   appState.service = payload.service;
+  if (payload.remote !== undefined) {
+    appState.remote = payload.remote;
+  }
   renderService();
+  renderRemoteStatus();
   connectLiveSocket();
 });
 
 window.vibeApp.onGlobalHotkey(handleGlobalHotkey);
 
-setActiveTab("basics");
+setActiveTab("basic");
 renderLocalMic();
+renderRemoteEditor();
 await refreshBootstrap();

@@ -66,6 +66,24 @@ export class XiaomiRemoteSessionController {
       return;
     }
 
+    if (event.type === "button") {
+      this.sendJson({
+        type: "remote_button",
+        button: event.button,
+        code: event.code,
+        pressed: event.pressed,
+        source: this.source,
+        ts: Date.now()
+      });
+      // Unknown codes surface here so a new key (for example the menu key) can
+      // be identified from the log and added to the code table.
+      this.log(event.pressed ? "button down" : "button up", {
+        button: event.button,
+        code: `0x${event.code.toString(16).padStart(2, "0")}`
+      });
+      return;
+    }
+
     if (event.type === "stop") {
       await this.#finishSession(event);
     }

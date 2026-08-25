@@ -13,7 +13,7 @@ import {
 const DEFAULT_REMOTE_MATCH = "VID&012717_PID&32B8";
 const HID_OVER_GATT_GUID = "{00001812-";
 
-function runPowerShell(script, options = {}) {
+export function runPowerShell(script, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn("powershell.exe", [
       "-NoProfile",

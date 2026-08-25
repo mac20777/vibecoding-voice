@@ -269,3 +269,26 @@ export async function submitTextInput(options = {}) {
     Mode: "enter_only"
   });
 }
+
+export async function injectKey(key, options = {}) {
+  const normalized = String(key || "").trim().toLowerCase();
+  if (!normalized) {
+    return;
+  }
+
+  if (options.dryRun) {
+    console.log("[inject] dry-run", { key: normalized });
+    return;
+  }
+
+  if (process.platform !== "win32") {
+    throw new Error(`key injection is only implemented for Windows, got ${process.platform}`);
+  }
+
+  const scriptPath = path.join(projectRoot, "scripts", "inject-key.ps1");
+  const scriptContent = fs.readFileSync(scriptPath, "utf8");
+
+  await runPowerShellScript(scriptContent, {
+    Key: normalized
+  });
+}

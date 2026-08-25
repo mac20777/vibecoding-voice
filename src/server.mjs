@@ -27,7 +27,8 @@ import {
   normalizeVoiceTranslationSendMode,
   normalizeVoiceTranslationTargetLanguage
 } from "./translation-service.mjs";
-import { injectText, submitTextInput } from "./text-injector.mjs";
+import { injectKey, injectText, submitTextInput } from "./text-injector.mjs";
+import { parseRemoteButtonMap } from "./remote-buttons.mjs";
 
 const config = loadConfig();
 
@@ -1080,6 +1081,32 @@ async function submitActiveTextInput(ws) {
   sendJson(ws, { type: "status", status: "submitted" });
 }
 
+// Xiaomi remote direction/OK/volume buttons arrive as remote_button messages
+// from the capture listener; map them to synthetic key presses (arrows, Enter,
+// Esc, volume) so the remote can drive CLI menus without touching the keyboard.
+const remoteButtonKeys = config.xiaomiRemoteButtons
+  ? parseRemoteButtonMap(config.xiaomiRemoteButtonMap)
+  : null;
+
+function handleRemoteButton(message) {
+  if (!remoteButtonKeys || message.pressed === false) {
+    return;
+  }
+  const button = String(message.button || "");
+  if (button === "unknown") {
+    log("remote_button unknown code", `0x${Number(message.code || 0).toString(16).padStart(2, "0")}`);
+    return;
+  }
+  const key = remoteButtonKeys[button];
+  if (!key || key === "none") {
+    return;
+  }
+  log("remote_button", button, "->", key);
+  void injectKey(key, { dryRun: config.dryRunTextInjection }).catch((error) => {
+    log("remote_button inject failed", button, error.message);
+  });
+}
+
 async function dispatchUserPrompt(ws, prompt, state) {
   if (getVoiceMode(state) === "todo") {
     await dispatchTodoPrompt(ws, prompt, state);
@@ -1269,6 +1296,13 @@ wss.on("connection", (ws, req) => {
           state.segmentActive = false;
           state.chunks = [];
           sendJson(ws, { type: "status", status: "cancelled" });
+          break;
+        case "remote_button":
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
+          handleRemoteButton(message);
           break;
         case "action_send":
           if (!state.authenticated) {
