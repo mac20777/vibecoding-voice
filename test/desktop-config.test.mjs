@@ -12,7 +12,8 @@ test("normalizeDesktopSettings applies safe defaults", () => {
     closeToTray: false,
     localMicHoldKey: "F8",
     localMicSendKey: "F9",
-    localMicUndoKey: "F10"
+    localMicUndoKey: "F10",
+    localMicTranslationToggleKey: "F7"
   });
 
   assert.deepEqual(
@@ -22,7 +23,8 @@ test("normalizeDesktopSettings applies safe defaults", () => {
       closeToTray: false,
       localMicHoldKey: "Ctrl+Alt+M",
       localMicSendKey: "F11",
-      localMicUndoKey: "Ctrl+Backspace"
+      localMicUndoKey: "Ctrl+Backspace",
+      localMicTranslationToggleKey: "Ctrl+Alt+E"
     }),
     {
       autoLaunch: true,
@@ -30,7 +32,8 @@ test("normalizeDesktopSettings applies safe defaults", () => {
       closeToTray: false,
       localMicHoldKey: "Ctrl+Alt+M",
       localMicSendKey: "F11",
-      localMicUndoKey: "Ctrl+Backspace"
+      localMicUndoKey: "Ctrl+Backspace",
+      localMicTranslationToggleKey: "Ctrl+Alt+E"
     }
   );
 });
@@ -72,7 +75,8 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
       closeToTray: false,
       localMicHoldKey: "Ctrl+Shift+Space",
       localMicSendKey: "F9",
-      localMicUndoKey: "F10"
+      localMicUndoKey: "F10",
+      localMicTranslationToggleKey: "F7"
     }
   );
 
@@ -94,7 +98,8 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
     closeToTray: false,
     localMicHoldKey: "Ctrl+Shift+Space",
     localMicSendKey: "F9",
-    localMicUndoKey: "F10"
+    localMicUndoKey: "F10",
+    localMicTranslationToggleKey: "F7"
   });
 });
 

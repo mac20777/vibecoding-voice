@@ -20,12 +20,14 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 
 - **Global push-to-talk**: hold `F8` anywhere on Windows to record, release to transcribe and insert text.
 - **Desktop send shortcut**: press `F9` to submit the active text field, or to send pending text when confirmation is enabled; press `F10` to undo pending text.
-- **Configurable keys**: change record / send / undo shortcuts from the desktop app's Speech tab.
+- **English-output shortcut**: press `F7` to toggle Chinese speech -> English-only output; press it again to return to normal transcript output.
+- **Configurable keys**: change record / send / undo / English-output shortcuts from the desktop app's Speech tab.
 - **Same backend path**: desktop mic audio is streamed as 16 kHz PCM over WebSocket, just like the board firmware, so existing STT and translation settings still apply.
 
 ### New in v2.2.7
 
 - **PC/USB microphone input**: the Windows desktop app can now act as a local push-to-talk microphone device with global shortcuts.
+- **Desktop English shortcut**: press `F7` to toggle Chinese speech -> English-only output from the Windows app.
 - **DN double-click English shortcut**: on the Live page, double-click `DN` to toggle Chinese speech -> English-only output; double-click `DN` again to return to normal transcript output.
 - **Multilingual voice translation**: speak Chinese and translate to English, Korean, or Japanese through DeepSeek.
 - **Selectable send formats**: send only the target translation, Chinese + target language, Chinese + English, or Chinese + English + Korean + Japanese.
@@ -151,7 +153,8 @@ If you want a normal desktop app instead of a terminal window, this repo now inc
 - a local settings window for `config.env`
 - grouped settings tabs for basic use, speech provider, workspace, and advanced options
 - local PC/USB microphone recording using the same STT, translation, and send pipeline as the board
-- configurable global shortcuts in the Speech tab: hold `F8` to record and insert text, press `F9` to submit, and press `F10` to undo pending text
+- configurable global shortcuts in the Speech tab: hold `F8` to record and insert text, press `F9` to submit, press `F10` to undo pending text, and press `F7` to toggle English-only output
+- tray icon badge changes between `中` and `英` to show normal Chinese-input mode versus English-output mode
 - desktop send/undo controls for the local microphone and for transcript delivery confirmation
 - live status and recent activity view
 - packaged Windows installer output
@@ -213,6 +216,7 @@ VOICE_TRANSLATION_SEND_BILINGUAL=0
 
 On the board, use the safer menu path: switch to the Live page, hold `UP`, select `Translate: On` / `Translate: Off` with `UP` / `DN`, then press `BOOT` to confirm. There is no single-click shortcut for this toggle, so accidental mode changes are less likely.
 For the common "speak Chinese, output English" flow, double-click `DN` on the Live page. The first double-click enables English target-only output; the next double-click disables translation and returns to normal transcript output.
+In the desktop app, press `F7` for the same English-output toggle. This shortcut is configurable from the Speech tab.
 Use the adjacent `Lang: English/Korean/Japanese` and `Send: Target/CN+Target/CN+EN/All` menu items, or the desktop Translation tab, to choose the board display language and whether `UP` sends only the target translation, Chinese + target, Chinese + English, or a four-line Chinese + English + Korean + Japanese result without prefixes.
 When translation is enabled, the board's confirmation screen shows `Chinese` in the upper prompt area and the selected translated language in the lower reply area.
 
@@ -539,12 +543,14 @@ node scripts/console.mjs
 
 - **后台全局按住说话**：在 Windows 任意窗口按住 `F8` 录音，松开后自动转写并输入到当前文本框。
 - **桌面发送快捷键**：按 `F9` 提交当前文本框；开启确认模式时，`F9` 发送待确认文本，`F10` 撤销。
-- **快捷键可配置**：录音 / 发送 / 撤销三个快捷键都可以在桌面端“识别”页修改。
+- **英文输出快捷键**：按 `F7` 切换到“中文说话，只输出英文”；再次按 `F7` 回到普通转写输出。
+- **快捷键可配置**：录音 / 发送 / 撤销 / 英文输出快捷键都可以在桌面端“识别”页修改。
 - **复用同一套后端**：桌面麦克风音频同样以 16 kHz PCM 通过 WebSocket 发送，和板子固件走同一套 STT 与翻译配置。
 
 ### v2.2.7 更新内容
 
 - **PC/USB 麦克风输入**：Windows 桌面版现在可以作为本地按住说话麦克风设备，并支持后台全局快捷键。
+- **桌面端英文快捷开关**：按 `F7` 可从 Windows 桌面端切换“中文说话，只输出英文”。
 - **DN 双击英文快捷开关**：Live 页面空闲时，双击 `DN` 切换到“中文说话，只输出英文”；再次双击 `DN` 关闭翻译，回到普通转写输出。
 - **多语言语音翻译**：中文说话，经 DeepSeek 翻译成英语、韩语或日语。
 - **可选发送格式**：可以只发送目标语言，也可以发送中文 + 目标语言、中文 + 英语，或中文 + 英语 + 韩语 + 日语。
@@ -612,7 +618,8 @@ node scripts/console.mjs
 - 语音识别支持火山引擎闪速 ASR 或 OpenAI Whisper
 - 通过剪贴板（Ctrl+V）注入 Windows 文本
 - 带 Windows 桌面版：支持托盘图标、开机自启、隐藏启动、关闭后驻留托盘和安装包
-- 带本地设置界面：按“基础 / 识别 / 工作区 / 高级”分组管理配置，也可以设置 USB 麦克风录音、发送、撤销快捷键
+- 带本地设置界面：按“基础 / 识别 / 工作区 / 高级”分组管理配置，也可以设置 USB 麦克风录音、发送、撤销和英文输出快捷键
+- 托盘图标会在 `中` / `英` 之间切换，提示当前是普通中文输入模式还是英文输出模式
 - Windows 桌面版可直接采集电脑/USB 麦克风，并在设备确认模式下提供桌面发送/撤销按钮和全局快捷键
 - 托管 `codex exec --json` 会话
 - 托管 `claude -p --output-format stream-json` 会话
@@ -731,6 +738,7 @@ VOICE_TRANSLATION_SEND_BILINGUAL=0
 
 板子上也可以切换：先到 Live 页面，长按 `UP` 打开菜单，用 `UP` / `DN` 选中 `Translate: On` / `Translate: Off`，再按 `BOOT` 确认。这个开关没有做成单击快捷键，避免录音或翻页时误触。
 常用的“中文说话、英文输出”流程可以直接在 Live 页面双击 `DN`：第一次双击会开启“只输出英文”，再次双击会关闭翻译，回到普通转写输出。
+桌面端也可以按 `F7` 执行同样的英文输出切换，并且可以在“识别”页修改这个快捷键。
 旁边的 `Lang: English/Korean/Japanese` 和 `Send: Target/CN+Target/CN+EN/All` 菜单项，或桌面端“翻译”页，可以控制板子下半区显示哪种译文，以及按 `UP` 时只发送目标语言、中 + 目标、中英，还是发送“不带前缀的四行文本”：中文、英语、韩语、日语。
 翻译开启后，板子的确认页上半区标题为 `Chinese`，显示你刚说的中文原文；下半区标题为当前目标语言，显示对应译文。
 

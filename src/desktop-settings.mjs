@@ -9,7 +9,8 @@ export const DEFAULT_DESKTOP_SETTINGS = Object.freeze({
   closeToTray: false,
   localMicHoldKey: "F8",
   localMicSendKey: "F9",
-  localMicUndoKey: "F10"
+  localMicUndoKey: "F10",
+  localMicTranslationToggleKey: "F7"
 });
 
 export function getDesktopSettingsPath() {
@@ -23,7 +24,11 @@ export function normalizeDesktopSettings(value = {}) {
     closeToTray: value.closeToTray === true,
     localMicHoldKey: normalizeLocalMicHotkey(value.localMicHoldKey, DEFAULT_DESKTOP_SETTINGS.localMicHoldKey),
     localMicSendKey: normalizeLocalMicHotkey(value.localMicSendKey, DEFAULT_DESKTOP_SETTINGS.localMicSendKey),
-    localMicUndoKey: normalizeLocalMicHotkey(value.localMicUndoKey, DEFAULT_DESKTOP_SETTINGS.localMicUndoKey)
+    localMicUndoKey: normalizeLocalMicHotkey(value.localMicUndoKey, DEFAULT_DESKTOP_SETTINGS.localMicUndoKey),
+    localMicTranslationToggleKey: normalizeLocalMicHotkey(
+      value.localMicTranslationToggleKey,
+      DEFAULT_DESKTOP_SETTINGS.localMicTranslationToggleKey
+    )
   };
 }
 

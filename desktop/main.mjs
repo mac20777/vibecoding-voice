@@ -44,6 +44,8 @@ let bridgeStopRequested = false;
 let isQuitting = false;
 let initialLaunchHidden = false;
 let bundledIconCache = null;
+const trayIconCache = new Map();
+let trayLanguageMode = "chinese";
 const desktopLogPath = path.join(getUserConfigDir(), "desktop.log");
 const pressedGlobalKeys = new Set();
 let activeGlobalRecordKey = null;
@@ -217,7 +219,8 @@ function selectDesktopHotkeySettings(settings = loadDesktopSettings()) {
   return {
     localMicHoldKey: settings.localMicHoldKey,
     localMicSendKey: settings.localMicSendKey,
-    localMicUndoKey: settings.localMicUndoKey
+    localMicUndoKey: settings.localMicUndoKey,
+    localMicTranslationToggleKey: settings.localMicTranslationToggleKey
   };
 }
 
@@ -372,6 +375,10 @@ function handleGlobalKeyboardEvent(event) {
     }
     if (hotkeyMatches(parseHotkey(settings.localMicUndoKey), vkCode)) {
       emitGlobalHotkey({ type: "action_undo" });
+      return;
+    }
+    if (hotkeyMatches(parseHotkey(settings.localMicTranslationToggleKey), vkCode)) {
+      emitGlobalHotkey({ type: "toggle_english_output" });
     }
     return;
   }
@@ -510,17 +517,68 @@ function appendProcessLog(source, line) {
   emitState();
 }
 
-function createTrayIcon() {
-  const bundledIcon = loadBundledAppIcon();
-  if (bundledIcon && !bundledIcon.isEmpty()) {
-    const trayIcon = bundledIcon.resize(process.platform === "win32"
-      ? { width: 16, height: 16 }
-      : { width: 20, height: 20 });
-    if (!trayIcon.isEmpty()) {
-      return trayIcon;
+function normalizeTrayLanguageMode(value) {
+  return value === "english" ? "english" : "chinese";
+}
+
+function trayLanguageLabel(mode = trayLanguageMode) {
+  return normalizeTrayLanguageMode(mode) === "english" ? "English output" : "Chinese input";
+}
+
+function trayIconSize() {
+  return process.platform === "win32" ? 16 : 20;
+}
+
+function resizeTrayIcon(image) {
+  if (!image || image.isEmpty()) {
+    return null;
+  }
+
+  const trayIcon = image.resize({ width: trayIconSize(), height: trayIconSize() });
+  return trayIcon.isEmpty() ? image : trayIcon;
+}
+
+function loadTrayBadgeIcon(mode = trayLanguageMode) {
+  const normalizedMode = normalizeTrayLanguageMode(mode);
+  if (trayIconCache.has(normalizedMode)) {
+    return trayIconCache.get(normalizedMode);
+  }
+
+  const filename = normalizedMode === "english" ? "tray-english.png" : "tray-chinese.png";
+  const candidatePaths = [
+    path.join(app.getAppPath(), "build-assets", filename),
+    path.join(process.resourcesPath, "build-assets", filename),
+    path.join(process.cwd(), "build-assets", filename)
+  ];
+
+  for (const candidatePath of candidatePaths) {
+    try {
+      if (!fs.existsSync(candidatePath)) {
+        continue;
+      }
+
+      const image = nativeImage.createFromBuffer(fs.readFileSync(candidatePath));
+      const trayIcon = resizeTrayIcon(image);
+      if (trayIcon) {
+        trayIconCache.set(normalizedMode, trayIcon);
+        return trayIcon;
+      }
+    } catch (error) {
+      writeDesktopLog("tray badge icon load failed", {
+        candidatePath,
+        error: error?.message || String(error)
+      });
     }
-    writeDesktopLog("tray icon resize returned empty image");
-    return bundledIcon;
+  }
+
+  return null;
+}
+
+function createFallbackTrayIcon() {
+  const bundledIcon = loadBundledAppIcon();
+  const trayIcon = resizeTrayIcon(bundledIcon);
+  if (trayIcon) {
+    return trayIcon;
   }
 
   const svg = `
@@ -541,7 +599,24 @@ function createTrayIcon() {
 
   return nativeImage
     .createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`)
-    .resize({ width: 20, height: 20 });
+    .resize({ width: trayIconSize(), height: trayIconSize() });
+}
+
+function createTrayIcon(mode = trayLanguageMode) {
+  return loadTrayBadgeIcon(mode) || createFallbackTrayIcon();
+}
+
+function updateTrayLanguageMode(mode) {
+  const nextMode = normalizeTrayLanguageMode(mode);
+  if (trayLanguageMode === nextMode) {
+    return;
+  }
+
+  trayLanguageMode = nextMode;
+  if (tray) {
+    tray.setImage(createTrayIcon(trayLanguageMode));
+    refreshTrayMenu();
+  }
 }
 
 function createWindowIcon() {
@@ -991,6 +1066,10 @@ function refreshTrayMenu() {
       label: `${serviceStatusLabel(serviceState.status)} · ${modeLabel(serviceState.mode)}`,
       enabled: false
     },
+    {
+      label: `Voice: ${trayLanguageLabel()}`,
+      enabled: false
+    },
     { type: "separator" },
     {
       label: "Open Window",
@@ -1077,7 +1156,10 @@ function refreshTrayMenu() {
   ]);
 
   tray.setContextMenu(menu);
-  tray.setToolTip(`VibeCoding Voice · ${serviceStatusLabel(serviceState.status)} · ${modeLabel(serviceState.mode)}`);
+  tray.setToolTip(
+    `VibeCoding Voice · ${serviceStatusLabel(serviceState.status)} · ` +
+      `${modeLabel(serviceState.mode)} · ${trayLanguageLabel()}`
+  );
 }
 
 async function buildBootstrap() {
@@ -1268,6 +1350,10 @@ ipcMain.handle("desktop:set-mode", async (_event, mode) => {
 ipcMain.handle("desktop:update-desktop-settings", async (_event, patch = {}) => {
   await persistDesktopSettings(patch);
   return buildBootstrap();
+});
+
+ipcMain.on("desktop:set-tray-language-mode", (_event, mode) => {
+  updateTrayLanguageMode(mode);
 });
 
 app.on("second-instance", () => {

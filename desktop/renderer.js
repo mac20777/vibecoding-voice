@@ -63,12 +63,15 @@ const elements = {
   localMicHoldKey: document.querySelector("#local-mic-hold-key"),
   localMicSendKey: document.querySelector("#local-mic-send-key"),
   localMicUndoKey: document.querySelector("#local-mic-undo-key"),
+  localMicTranslationToggleKey: document.querySelector("#local-mic-translation-toggle-key"),
   captureLocalMicHoldKeyButton: document.querySelector("#capture-local-mic-hold-key-button"),
   resetLocalMicHoldKeyButton: document.querySelector("#reset-local-mic-hold-key-button"),
   captureLocalMicSendKeyButton: document.querySelector("#capture-local-mic-send-key-button"),
   resetLocalMicSendKeyButton: document.querySelector("#reset-local-mic-send-key-button"),
   captureLocalMicUndoKeyButton: document.querySelector("#capture-local-mic-undo-key-button"),
   resetLocalMicUndoKeyButton: document.querySelector("#reset-local-mic-undo-key-button"),
+  captureLocalMicTranslationToggleKeyButton: document.querySelector("#capture-local-mic-translation-toggle-key-button"),
+  resetLocalMicTranslationToggleKeyButton: document.querySelector("#reset-local-mic-translation-toggle-key-button"),
   localMicActivity: document.querySelector("#local-mic-activity"),
   localMicDb: document.querySelector("#local-mic-db"),
   localMicBars: [...document.querySelectorAll("[data-local-mic-bar]")]
@@ -77,6 +80,7 @@ const elements = {
 const DEFAULT_LOCAL_MIC_HOLD_KEY = "F8";
 const DEFAULT_LOCAL_MIC_SEND_KEY = "F9";
 const DEFAULT_LOCAL_MIC_UNDO_KEY = "F10";
+const DEFAULT_LOCAL_MIC_TRANSLATION_TOGGLE_KEY = "F7";
 const LOCAL_MIC_SAMPLE_RATE = 16000;
 const SOCKET_READY_TIMEOUT_MS = 7000;
 
@@ -105,6 +109,7 @@ const localMic = {
   holdKey: DEFAULT_LOCAL_MIC_HOLD_KEY,
   sendKey: DEFAULT_LOCAL_MIC_SEND_KEY,
   undoKey: DEFAULT_LOCAL_MIC_UNDO_KEY,
+  translationToggleKey: DEFAULT_LOCAL_MIC_TRANSLATION_TOGGLE_KEY,
   recording: false,
   starting: false,
   stopping: false,
@@ -289,9 +294,14 @@ function setLocalMicHotkeys(settings = {}) {
   localMic.holdKey = normalizeUiHotkey(settings.localMicHoldKey, DEFAULT_LOCAL_MIC_HOLD_KEY);
   localMic.sendKey = normalizeUiHotkey(settings.localMicSendKey, DEFAULT_LOCAL_MIC_SEND_KEY);
   localMic.undoKey = normalizeUiHotkey(settings.localMicUndoKey, DEFAULT_LOCAL_MIC_UNDO_KEY);
+  localMic.translationToggleKey = normalizeUiHotkey(
+    settings.localMicTranslationToggleKey,
+    DEFAULT_LOCAL_MIC_TRANSLATION_TOGGLE_KEY
+  );
   elements.localMicHoldKey.value = displayHotkey(localMic.holdKey);
   elements.localMicSendKey.value = displayHotkey(localMic.sendKey);
   elements.localMicUndoKey.value = displayHotkey(localMic.undoKey);
+  elements.localMicTranslationToggleKey.value = displayHotkey(localMic.translationToggleKey);
   renderLocalMic();
 }
 
@@ -324,7 +334,7 @@ function localMicStatusText() {
     state: "待命",
     hint:
       `${localMic.globalHotkeysReady ? "后台可用" : "窗口内可用"} · ` +
-      `按住 ${displayHotkey(localMic.holdKey)} 输入，${displayHotkey(localMic.sendKey)} 发送`
+      `按住 ${displayHotkey(localMic.holdKey)} 输入，${displayHotkey(localMic.translationToggleKey)} 英文输出`
   };
 }
 
@@ -345,6 +355,8 @@ function renderLocalMic() {
   elements.captureLocalMicHoldKeyButton.textContent = localMic.capturingHotkey === "hold" ? "等待" : "录入";
   elements.captureLocalMicSendKeyButton.textContent = localMic.capturingHotkey === "send" ? "等待" : "录入";
   elements.captureLocalMicUndoKeyButton.textContent = localMic.capturingHotkey === "undo" ? "等待" : "录入";
+  elements.captureLocalMicTranslationToggleKeyButton.textContent =
+    localMic.capturingHotkey === "translationToggle" ? "等待" : "录入";
   elements.localMicActivity.textContent = localMic.recording
     ? "Recording"
     : localMic.status === "transcribing"
@@ -750,6 +762,70 @@ function updateTranslationVisibility() {
   });
 }
 
+function syncTrayLanguageMode() {
+  window.vibeApp.setTrayLanguageMode?.(
+    isEnglishTargetOnlyTranslation() ? "english" : "chinese"
+  );
+}
+
+function applyVoiceTranslationState(message = {}) {
+  const enabled = message.enabled ?? message.voiceTranslationEnabled;
+  const targetLanguage = message.targetLanguage || message.voiceTranslationTargetLanguage;
+  const sendMode = message.sendMode || message.voiceTranslationSendMode;
+
+  if (enabled !== undefined) {
+    elements.voiceTranslationEnabled.checked = Boolean(enabled);
+  }
+  if (["english", "korean", "japanese"].includes(targetLanguage)) {
+    elements.voiceTranslationTargetLanguage.value = targetLanguage;
+  }
+  if (["target", "bilingual", "zh_en", "all"].includes(sendMode)) {
+    elements.voiceTranslationSendMode.value = sendMode;
+  }
+  updateFormAffordances();
+  syncTrayLanguageMode();
+}
+
+function isEnglishTargetOnlyTranslation() {
+  return (
+    elements.voiceTranslationEnabled.checked &&
+    elements.voiceTranslationTargetLanguage.value === "english" &&
+    elements.voiceTranslationSendMode.value === "target"
+  );
+}
+
+async function toggleEnglishVoiceOutput() {
+  if (localMic.capturingHotkey) {
+    return;
+  }
+
+  try {
+    await ensureBridgeSocketReady();
+    if (isEnglishTargetOnlyTranslation()) {
+      sendBridgeJson({ type: "set_voice_translation", enabled: false, source: "desktop_hotkey" });
+      applyVoiceTranslationState({ enabled: false });
+      elements.serviceMessage.textContent = "English output shortcut disabled translation.";
+      return;
+    }
+
+    sendBridgeJson({
+      type: "set_voice_translation_target_language",
+      language: "english",
+      source: "desktop_hotkey"
+    });
+    sendBridgeJson({ type: "set_voice_translation_send_mode", mode: "target", source: "desktop_hotkey" });
+    sendBridgeJson({ type: "set_voice_translation", enabled: true, source: "desktop_hotkey" });
+    applyVoiceTranslationState({ enabled: true, targetLanguage: "english", sendMode: "target" });
+    elements.serviceMessage.textContent = "English output shortcut enabled.";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    elements.serviceMessage.textContent = message;
+    if (!localMic.recording && !localMic.starting && !localMic.stopping) {
+      setLocalMicStatus("error", message);
+    }
+  }
+}
+
 function collectFormPayload() {
   return {
     form: {
@@ -781,7 +857,8 @@ function collectFormPayload() {
       closeToTray: elements.closeToTray.checked,
       localMicHoldKey: localMic.holdKey,
       localMicSendKey: localMic.sendKey,
-      localMicUndoKey: localMic.undoKey
+      localMicUndoKey: localMic.undoKey,
+      localMicTranslationToggleKey: localMic.translationToggleKey
     }
   };
 }
@@ -815,6 +892,7 @@ function fillForm(form, desktopSettingsPath) {
   elements.userConfigPath.textContent = form.userConfigPath || "";
   elements.desktopSettingsPath.textContent = desktopSettingsPath || "";
   updateFormAffordances();
+  syncTrayLanguageMode();
 }
 
 function renderNotices(form) {
@@ -907,7 +985,18 @@ function handleBridgeMessage(message) {
     if (message.sendTarget) {
       elements.serviceMode.textContent = modeLabel(message.sendTarget);
     }
+    applyVoiceTranslationState(message);
     renderService();
+    return;
+  }
+
+  if (message.type === "voice_translation_state") {
+    applyVoiceTranslationState(message);
+    return;
+  }
+
+  if (message.type === "warning" && message.warning) {
+    elements.serviceMessage.textContent = message.warning;
     return;
   }
 
@@ -1050,6 +1139,10 @@ function handleGlobalHotkey(payload = {}) {
   }
   if (payload.type === "action_undo" && localMic.awaitingAction) {
     void sendLocalMicAction("action_undo");
+    return;
+  }
+  if (payload.type === "toggle_english_output") {
+    void toggleEnglishVoiceOutput();
   }
 }
 
@@ -1057,12 +1150,15 @@ async function persistLocalMicHotkeys(patch = {}) {
   setLocalMicHotkeys({
     localMicHoldKey: patch.localMicHoldKey || localMic.holdKey,
     localMicSendKey: patch.localMicSendKey || localMic.sendKey,
-    localMicUndoKey: patch.localMicUndoKey || localMic.undoKey
+    localMicUndoKey: patch.localMicUndoKey || localMic.undoKey,
+    localMicTranslationToggleKey:
+      patch.localMicTranslationToggleKey || localMic.translationToggleKey
   });
   const bootstrap = await window.vibeApp.updateDesktopSettings({
     localMicHoldKey: localMic.holdKey,
     localMicSendKey: localMic.sendKey,
-    localMicUndoKey: localMic.undoKey
+    localMicUndoKey: localMic.undoKey,
+    localMicTranslationToggleKey: localMic.translationToggleKey
   });
   appState.bootstrap = bootstrap;
   appState.service = bootstrap.service;
@@ -1158,7 +1254,9 @@ function beginHotkeyCapture(target) {
     ? elements.localMicSendKey
     : target === "undo"
       ? elements.localMicUndoKey
-      : elements.localMicHoldKey;
+      : target === "translationToggle"
+        ? elements.localMicTranslationToggleKey
+        : elements.localMicHoldKey;
   input.value = "按下新的快捷键...";
   input.focus();
   renderLocalMic();
@@ -1175,12 +1273,19 @@ function persistCapturedHotkey(hotkey) {
     void persistLocalMicHotkeys({ localMicUndoKey: hotkey });
     return;
   }
+  if (target === "translationToggle") {
+    void persistLocalMicHotkeys({ localMicTranslationToggleKey: hotkey });
+    return;
+  }
   void persistLocalMicHotkeys({ localMicHoldKey: hotkey });
 }
 
 elements.captureLocalMicHoldKeyButton.addEventListener("click", () => beginHotkeyCapture("hold"));
 elements.captureLocalMicSendKeyButton.addEventListener("click", () => beginHotkeyCapture("send"));
 elements.captureLocalMicUndoKeyButton.addEventListener("click", () => beginHotkeyCapture("undo"));
+elements.captureLocalMicTranslationToggleKeyButton.addEventListener("click", () =>
+  beginHotkeyCapture("translationToggle")
+);
 
 elements.resetLocalMicHoldKeyButton.addEventListener("click", () => {
   localMic.capturingHotkey = null;
@@ -1195,6 +1300,13 @@ elements.resetLocalMicSendKeyButton.addEventListener("click", () => {
 elements.resetLocalMicUndoKeyButton.addEventListener("click", () => {
   localMic.capturingHotkey = null;
   void persistLocalMicHotkeys({ localMicUndoKey: DEFAULT_LOCAL_MIC_UNDO_KEY });
+});
+
+elements.resetLocalMicTranslationToggleKeyButton.addEventListener("click", () => {
+  localMic.capturingHotkey = null;
+  void persistLocalMicHotkeys({
+    localMicTranslationToggleKey: DEFAULT_LOCAL_MIC_TRANSLATION_TOGGLE_KEY
+  });
 });
 
 elements.localMicButton.addEventListener("pointerdown", (event) => {
@@ -1253,6 +1365,11 @@ document.addEventListener("keydown", (event) => {
     if (hotkey === localMic.undoKey && localMic.awaitingAction) {
       event.preventDefault();
       void sendLocalMicAction("action_undo");
+      return;
+    }
+    if (hotkey === localMic.translationToggleKey) {
+      event.preventDefault();
+      void toggleEnglishVoiceOutput();
     }
     return;
   }
