@@ -293,7 +293,7 @@ test("desktop mic injects text immediately and submit action presses Enter", asy
   assert.match(serverOutput.join(""), /mode: 'enter_only'/);
 });
 
-test("Xiaomi remote sends transcripts immediately and preserves configured Enter behavior", async (t) => {
+test("Xiaomi remote with confirm_on_device types text first and lets the OK key send", async (t) => {
   const port = await getFreePort();
   const appDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-xiaomi-remote-"));
   const server = spawn(process.execPath, ["src/server.mjs"], {
@@ -339,7 +339,7 @@ test("Xiaomi remote sends transcripts immediately and preserves configured Enter
   assert.equal(finalMessage.text, "测试小米遥控器");
   assert.equal(finalMessage.requiresAction, false);
   await messages.waitFor((message) => message.type === "status" && message.status === "typed");
-  assert.match(serverOutput.join(""), /mode: 'type_and_enter'/);
+  assert.match(serverOutput.join(""), /mode: 'type_only'/);
   assert.equal(messages.take((message) => message.type === "status" && message.status === "awaiting_action"), null);
 });
 

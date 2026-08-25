@@ -435,6 +435,7 @@ export function loadConfig(options = {}) {
     xiaomiRemoteHidDeviceMatch: process.env.XIAOMI_REMOTE_HID_DEVICE_MATCH || "VID&012717_PID&32B8",
     xiaomiRemoteButtons: process.env.XIAOMI_REMOTE_BUTTONS !== "0",
     xiaomiRemoteButtonMap: process.env.XIAOMI_REMOTE_BUTTON_MAP || "",
+    xiaomiRemotePromptTemplates: process.env.XIAOMI_REMOTE_PROMPT_TEMPLATES || "",
     loadedConfigFiles,
     userConfigPath,
     cwdConfigPath,

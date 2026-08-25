@@ -1,37 +1,246 @@
-// Maps Xiaomi remote button names (from xiaomi-remote-protocol.mjs) to the key
-// names understood by scripts/inject-key.ps1. A value of "none" disables the
-// button. XIAOMI_REMOTE_BUTTON_MAP overrides single entries, e.g.
-// "ok:enter,back:escape,menu:none".
+// Maps Xiaomi remote button gestures (from remote-gestures.mjs) to actions.
+//
+// Action types:
+//   { type: "none" }                          — do nothing
+//   { type: "key", key: "enter" }             — single key tap (inject-key.ps1)
+//   { type: "combo", combo: "ctrl+shift+p" }  — modifier + key chord
+//   { type: "app", command: "chrome" }        — launch an app / command line
+//   { type: "text", text: "…" }               — type a preset snippet
+//   { type: "prompt", name: "优化" }          — wrap the NEXT voice transcript
+//                                               in the named prompt template
+//
+// XIAOMI_REMOTE_BUTTON_MAP overrides single entries. Format:
+//   new:  "ok.click=key:enter, ok.double=app:chrome, back.hold=none"
+//   old:  "ok:enter, menu:none"  (legacy, means ok.click=key:enter)
+// Payloads are percent-encoded so commas and colons survive.
 
-export const DEFAULT_REMOTE_BUTTON_KEYS = Object.freeze({
-  up: "up",
-  down: "down",
-  left: "left",
-  right: "right",
-  ok: "enter",
-  back: "escape",
-  home: "home",
-  volume_up: "volume_up",
-  volume_down: "volume_down",
-  menu: "menu"
+export const REMOTE_BUTTONS = Object.freeze([
+  "up", "down", "left", "right", "ok", "back", "home", "volume_up", "volume_down", "menu"
+]);
+
+export const REMOTE_GESTURES = Object.freeze(["click", "double", "hold"]);
+
+export const ACTION_TYPES = Object.freeze(["none", "key", "combo", "app", "text", "prompt"]);
+
+const keyAction = (key) => Object.freeze({ type: "key", key });
+
+export const DEFAULT_REMOTE_ACTIONS = Object.freeze({
+  up: Object.freeze({ click: keyAction("up") }),
+  down: Object.freeze({ click: keyAction("down") }),
+  left: Object.freeze({ click: keyAction("left") }),
+  right: Object.freeze({ click: keyAction("right") }),
+  ok: Object.freeze({ click: keyAction("enter") }),
+  back: Object.freeze({ click: keyAction("escape") }),
+  home: Object.freeze({ click: keyAction("home") }),
+  volume_up: Object.freeze({ click: keyAction("volume_up") }),
+  volume_down: Object.freeze({ click: keyAction("volume_down") }),
+  menu: Object.freeze({ click: keyAction("menu") })
 });
 
-export function parseRemoteButtonMap(override) {
-  const map = { ...DEFAULT_REMOTE_BUTTON_KEYS };
+export function cloneDefaultRemoteActions() {
+  const map = {};
+  for (const button of REMOTE_BUTTONS) {
+    map[button] = { ...DEFAULT_REMOTE_ACTIONS[button] };
+  }
+  return map;
+}
+
+export function normalizeAction(action) {
+  if (!action || typeof action !== "object") {
+    return null;
+  }
+  switch (action.type) {
+    case "none":
+      return { type: "none" };
+    case "key": {
+      const key = String(action.key || "").trim().toLowerCase();
+      return key ? { type: "key", key } : null;
+    }
+    case "combo": {
+      const combo = String(action.combo || "").trim().toLowerCase();
+      return combo ? { type: "combo", combo } : null;
+    }
+    case "app": {
+      const command = String(action.command || "").trim();
+      return command ? { type: "app", command } : null;
+    }
+    case "text": {
+      const text = String(action.text || "");
+      return text.trim() ? { type: "text", text } : null;
+    }
+    case "prompt": {
+      const name = String(action.name || "").trim();
+      return name ? { type: "prompt", name } : null;
+    }
+    default:
+      return null;
+  }
+}
+
+function parseActionSpec(spec) {
+  const raw = String(spec || "").trim();
+  if (!raw) {
+    return null;
+  }
+  if (raw === "none") {
+    return { type: "none" };
+  }
+  const sepIndex = raw.indexOf(":");
+  if (sepIndex < 0) {
+    // Bare key name (legacy value position), e.g. "ok:enter".
+    return normalizeAction({ type: "key", key: raw });
+  }
+  const type = raw.slice(0, sepIndex).trim().toLowerCase();
+  const payload = decodeURIComponent(raw.slice(sepIndex + 1));
+  return normalizeAction({ type, [type === "key" ? "key" : type === "combo" ? "combo" : type === "app" ? "command" : type === "text" ? "text" : "name"]: payload });
+}
+
+export function serializeAction(action) {
+  const normalized = normalizeAction(action);
+  if (!normalized) {
+    return "";
+  }
+  switch (normalized.type) {
+    case "none":
+      return "none";
+    case "key":
+      return `key:${encodeURIComponent(normalized.key)}`;
+    case "combo":
+      return `combo:${encodeURIComponent(normalized.combo)}`;
+    case "app":
+      return `app:${encodeURIComponent(normalized.command)}`;
+    case "text":
+      return `text:${encodeURIComponent(normalized.text)}`;
+    case "prompt":
+      return `prompt:${encodeURIComponent(normalized.name)}`;
+    default:
+      return "";
+  }
+}
+
+export function actionsEqual(a, b) {
+  return serializeAction(a) === serializeAction(b);
+}
+
+/**
+ * Parses XIAOMI_REMOTE_BUTTON_MAP into { button: { gesture: action } } with
+ * defaults filled in. Unknown buttons/gestures throw so config typos surface;
+ * malformed entries are ignored.
+ */
+export function parseRemoteActionMap(override) {
+  const map = cloneDefaultRemoteActions();
   for (const entry of String(override || "").split(",")) {
-    const [rawButton, rawKey] = entry.split(":", 2);
+    const trimmed = entry.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    if (trimmed.includes("=")) {
+      const eqIndex = trimmed.indexOf("=");
+      const target = trimmed.slice(0, eqIndex).trim().toLowerCase();
+      const [button, gesture = "click"] = target.split(".");
+      if (!Object.hasOwn(DEFAULT_REMOTE_ACTIONS, button)) {
+        throw new Error(`Unknown Xiaomi remote button in XIAOMI_REMOTE_BUTTON_MAP: ${button}`);
+      }
+      if (!REMOTE_GESTURES.includes(gesture)) {
+        throw new Error(`Unknown Xiaomi remote gesture in XIAOMI_REMOTE_BUTTON_MAP: ${gesture}`);
+      }
+      const action = parseActionSpec(trimmed.slice(eqIndex + 1));
+      if (action) {
+        map[button][gesture] = action;
+      }
+      continue;
+    }
+
+    // Legacy "button:key" entries configure the click gesture.
+    const [rawButton, rawKey] = trimmed.split(":", 2);
     const button = String(rawButton || "").trim().toLowerCase();
-    const key = String(rawKey || "").trim().toLowerCase();
     if (!button) {
       continue;
     }
-    if (!Object.hasOwn(DEFAULT_REMOTE_BUTTON_KEYS, button)) {
+    if (!Object.hasOwn(DEFAULT_REMOTE_ACTIONS, button)) {
       throw new Error(`Unknown Xiaomi remote button in XIAOMI_REMOTE_BUTTON_MAP: ${button}`);
     }
+    const key = String(rawKey || "").trim().toLowerCase();
     if (!key) {
       throw new Error(`Missing key for Xiaomi remote button "${button}" in XIAOMI_REMOTE_BUTTON_MAP`);
     }
-    map[button] = key;
+    map[button].click = parseActionSpec(key);
   }
   return map;
+}
+
+/**
+ * Serializes only the entries that differ from defaults. Legacy consumers
+ * used a flat "button:key" string; new entries use "button.gesture=type:value".
+ */
+export function serializeRemoteActionMap(map) {
+  const entries = [];
+  for (const button of REMOTE_BUTTONS) {
+    for (const gesture of REMOTE_GESTURES) {
+      const action = map?.[button]?.[gesture];
+      if (!action) {
+        continue;
+      }
+      const defaultAction = DEFAULT_REMOTE_ACTIONS[button]?.[gesture] || null;
+      if (defaultAction && actionsEqual(action, defaultAction)) {
+        continue;
+      }
+      const spec = serializeAction(action);
+      if (spec) {
+        entries.push(`${button}.${gesture}=${spec}`);
+      }
+    }
+  }
+  return entries.join(", ");
+}
+
+/** Back-compat helper: the click-gesture key of each button, as before. */
+export function parseRemoteButtonMap(override) {
+  const actions = parseRemoteActionMap(override);
+  const map = {};
+  for (const button of REMOTE_BUTTONS) {
+    const click = actions[button]?.click;
+    map[button] = click?.type === "key" ? click.key : click?.type === "none" ? "none" : "";
+  }
+  return map;
+}
+
+// Legacy flat shape kept for older callers/tests: button -> click key name.
+export const DEFAULT_REMOTE_BUTTON_KEYS = Object.freeze(
+  Object.fromEntries(
+    REMOTE_BUTTONS.map((button) => [button, DEFAULT_REMOTE_ACTIONS[button].click.key])
+  )
+);
+
+/**
+ * XIAOMI_REMOTE_PROMPT_TEMPLATES holds a JSON array:
+ *   [{"name": "优化", "body": "优化下面这段话，去掉语气词：{text}"}]
+ * `{text}` is replaced by the next voice transcript when the template is armed
+ * by a prompt action. Tolerant parser: invalid JSON or shape yields [].
+ */
+export function parsePromptTemplates(json) {
+  try {
+    const parsed = JSON.parse(String(json || "").trim() || "[]");
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((entry) => ({
+        name: String(entry?.name || "").trim(),
+        body: String(entry?.body || "")
+      }))
+      .filter((entry) => entry.name && entry.body.trim());
+  } catch {
+    return [];
+  }
+}
+
+export function applyPromptTemplate(templateBody, transcript) {
+  const body = String(templateBody || "");
+  const text = String(transcript || "").trim();
+  if (body.includes("{text}")) {
+    return body.replaceAll("{text}", text);
+  }
+  return `${body.trim()}\n${text}`.trim();
 }

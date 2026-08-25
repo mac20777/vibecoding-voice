@@ -38,7 +38,11 @@ server.mjs (entry point — HTTP + WebSocket server)
 │   ├── usbpcap-att-parser.mjs — streaming pcap → ATT notification lines (replaces tshark)
 │   ├── msbc-decoder.mjs     — pure-JS mSBC → PCM16 decoder (replaces ffmpeg)
 │   ├── xiaomi-remote-session.mjs — PTT session state machine (inactivity watchdog)
-│   └── remote-buttons.mjs   — maps remote button events to injected keys (inject-key.ps1)
+│   ├── xiaomi-remote-info.mjs — reads remote model + battery over WinRT GATT (once at startup)
+│   ├── remote-gestures.mjs  — turns raw button down/up into click/double/hold gestures
+│   │                          (volume keys auto-repeat while held)
+│   └── remote-buttons.mjs   — maps button gestures to actions: key/combo/app/text/prompt
+│                              (inject-key.ps1 handles single keys and modifier chords)
 ├── stt.mjs              — speech-to-text (OpenAI Whisper / Volcengine ASR)
 │   ├── wav.mjs          — PCM16 → WAV header conversion
 │   └── paths.mjs        — resolves project root from import.meta.url
@@ -51,7 +55,7 @@ server.mjs (entry point — HTTP + WebSocket server)
 1. **Discovery**: Device sends UDP `discover_host` → server replies with WS URL (optionally HMAC-signed)
 2. **Handshake**: Device connects WS → sends `hello` (with HMAC signature if auth enabled) → server sends `hello_ack`, `server_ready`, initial CLI state
 3. **PTT cycle**: `ptt_start` → binary PCM16 audio chunks → `ptt_stop` → server transcribes → `transcript_final`
-4. **Transcript delivery**: Either immediate dispatch or confirm-on-device (`action_send`/`action_undo`). The `desktop_mic` and `xiaomi_remote` sources always force immediate dispatch (see `resolveSegmentOptions` in server.mjs) — those clients have no on-device confirm UI; for the remote, "type first, confirm later" is achieved with `TEXT_INJECTION_MODE=type_only` plus a button mapped to `enter`.
+4. **Transcript delivery**: Either immediate dispatch or confirm-on-device (`action_send`/`action_undo`). The `desktop_mic` source always forces immediate dispatch (see `resolveSegmentOptions` in server.mjs) — it has no on-device confirm UI. For `xiaomi_remote`, `confirm_on_device` forces `textInjectionMode: "type_only"`: text is typed into the focused input first, and the user sends it with the remote's OK button (mapped to `enter` by default, customizable like any other button gesture). A `prompt` button action arms a template so the next voice transcript is wrapped into its `{text}` placeholder before sending.
 5. **Codex mode**: Transcript sent to Codex CLI, JSON event stream parsed, state broadcast to all clients
 
 ### Key Design Details

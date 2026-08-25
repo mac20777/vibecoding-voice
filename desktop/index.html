@@ -367,8 +367,60 @@
                   <div class="remote-editor">
                     <div class="sel-name" id="rsel-name"></div>
                     <div class="sel-code" id="rsel-code"></div>
-                    <div class="action-grid" id="action-grid"></div>
+                    <div class="gesture-tabs" id="gesture-tabs">
+                      <button class="gesture-tab" type="button" data-gesture="click">
+                        <b data-i18n="gestureClick">单击</b><i class="gsum"></i>
+                      </button>
+                      <button class="gesture-tab" type="button" data-gesture="double">
+                        <b data-i18n="gestureDouble">双击</b><i class="gsum"></i>
+                      </button>
+                      <button class="gesture-tab" type="button" data-gesture="hold">
+                        <b data-i18n="gestureHold">长按</b><i class="gsum"></i>
+                      </button>
+                    </div>
+                    <div class="action-editor" id="action-editor">
+                      <select id="action-type" class="action-type-select">
+                        <option value="none" data-i18n="actionTypeNone">禁用</option>
+                        <option value="key" data-i18n="actionTypeKey">键盘按键</option>
+                        <option value="combo" data-i18n="actionTypeCombo">组合快捷键</option>
+                        <option value="app" data-i18n="actionTypeApp">打开应用</option>
+                        <option value="text" data-i18n="actionTypeText">输入文本</option>
+                        <option value="prompt" data-i18n="actionTypePrompt">提示词模板</option>
+                      </select>
+                      <div class="action-fields" id="af-key">
+                        <select id="action-key"></select>
+                      </div>
+                      <div class="action-fields" id="af-combo" hidden>
+                        <div class="combo-mods">
+                          <label><input type="checkbox" id="combo-ctrl" /> Ctrl</label>
+                          <label><input type="checkbox" id="combo-alt" /> Alt</label>
+                          <label><input type="checkbox" id="combo-shift" /> Shift</label>
+                          <label><input type="checkbox" id="combo-win" /> Win</label>
+                        </div>
+                        <input type="text" id="combo-key" placeholder="p / enter / f5 …" maxlength="20" />
+                      </div>
+                      <div class="action-fields" id="af-app" hidden>
+                        <input type="text" id="action-app" data-i18n-ph="appPlaceholder" placeholder="chrome / notepad / C:\path\app.exe" />
+                      </div>
+                      <div class="action-fields" id="af-text" hidden>
+                        <input type="text" id="action-text" data-i18n-ph="textPlaceholder" placeholder="按一下就打进这段文字" />
+                      </div>
+                      <div class="action-fields" id="af-prompt" hidden>
+                        <select id="action-prompt"></select>
+                      </div>
+                    </div>
+                    <div class="remote-note" id="voice-fixed-note" data-i18n="voiceFixedNote" hidden>语音键固定为「按住说话」，不参与映射。</div>
                     <div class="remote-note" data-i18n="remoteNote"></div>
+                  </div>
+                </div>
+                <div class="templates-block">
+                  <div class="group-heading" data-i18n="templatesTitle">提示词模板</div>
+                  <div class="remote-note" data-i18n="templatesHint">模板中的 {text} 会被替换成你说的话。用法：按绑定了模板的遥控器按键，再按住语音键说话。</div>
+                  <div id="template-list"></div>
+                  <div class="template-add">
+                    <input type="text" id="template-name" data-i18n-ph="templateNamePh" placeholder="模板名，如：优化" />
+                    <input type="text" id="template-body" data-i18n-ph="templateBodyPh" placeholder="优化下面这段话，去掉语气词：{text}" />
+                    <button id="template-add-button" class="btn btn-ghost btn-small" type="button" data-i18n="addTemplate">添加</button>
                   </div>
                 </div>
               </div>

@@ -159,7 +159,8 @@ test("buildUserConfigUpdates normalizes desktop form payload into env values", (
     CODEX_SKIP_GIT_REPO_CHECK: "1",
     CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS: null,
     XIAOMI_REMOTE_ENABLED: null,
-    XIAOMI_REMOTE_BUTTON_MAP: null
+    XIAOMI_REMOTE_BUTTON_MAP: null,
+    XIAOMI_REMOTE_PROMPT_TEMPLATES: null
   });
 });
 

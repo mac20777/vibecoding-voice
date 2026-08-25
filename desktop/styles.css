@@ -349,14 +349,62 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 24px 28px 32px; }
 .remote-editor { flex: 1; min-width: 220px; }
 .remote-editor .sel-name { font-size: 16px; font-weight: 700; margin-bottom: 2px; }
 .remote-editor .sel-code { font-family: var(--font-mono); font-size: 11px; color: var(--on-surface-variant); margin-bottom: 14px; }
-.action-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
-.action-opt {
+.gesture-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+.gesture-tab {
   border: none; background: var(--surface-high); color: var(--on-surface-variant);
-  border-radius: var(--radius-md); padding: 9px 6px; font-size: 12.5px; font-weight: 600;
-  outline: 1px solid transparent;
+  border-radius: var(--radius-md); padding: 9px 10px; text-align: left;
+  outline: 1px solid transparent; cursor: pointer; font-family: inherit;
+  display: flex; flex-direction: column; gap: 3px; min-width: 0;
 }
-.action-opt:hover { color: var(--on-surface); }
-.action-opt.active { background: var(--surface-highest); color: var(--primary); outline-color: var(--primary); }
+.gesture-tab:hover { color: var(--on-surface); }
+.gesture-tab.active { background: var(--surface-highest); color: var(--primary); outline-color: var(--primary); }
+.gesture-tab b { font-size: 12.5px; font-weight: 600; }
+.gesture-tab .gsum {
+  font-style: normal; font-size: 11px; color: var(--on-surface-variant);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gesture-tab.active .gsum { color: var(--primary); opacity: 0.8; }
+.action-editor { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.action-editor select, .action-editor input[type="text"] {
+  width: 100%; box-sizing: border-box;
+  background: var(--surface-high); color: var(--on-surface);
+  border: 1px solid transparent; border-radius: var(--radius-md);
+  padding: 9px 12px; font-size: 13px; font-family: inherit;
+}
+.action-editor select:focus, .action-editor input[type="text"]:focus { outline: none; border-color: var(--primary); }
+.action-fields:not([hidden]) { display: flex; flex-direction: column; gap: 8px; }
+.combo-mods { display: flex; gap: 14px; flex-wrap: wrap; }
+.combo-mods label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--on-surface-variant); cursor: pointer;
+}
+.templates-block { margin-top: 22px; border-top: 1px solid var(--surface-high); padding-top: 16px; }
+.template-empty { font-size: 12.5px; color: var(--on-surface-variant); padding: 8px 0; }
+.template-row {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface-high); border-radius: var(--radius-md);
+  padding: 8px 12px; margin-bottom: 6px;
+}
+.template-row .template-name { font-size: 12.5px; font-weight: 600; flex-shrink: 0; }
+.template-row .template-body {
+  font-size: 12px; color: var(--on-surface-variant); flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.template-row .template-del {
+  border: none; background: transparent; color: var(--on-surface-variant);
+  font-size: 15px; cursor: pointer; padding: 0 4px; border-radius: var(--radius-md);
+}
+.template-row .template-del:hover { color: var(--on-surface); background: var(--surface-highest); }
+.template-add { display: flex; gap: 8px; margin-top: 10px; }
+.template-add input[type="text"] {
+  background: var(--surface-high); color: var(--on-surface);
+  border: 1px solid transparent; border-radius: var(--radius-md);
+  padding: 8px 12px; font-size: 12.5px; font-family: inherit;
+}
+.template-add input[type="text"]:focus { outline: none; border-color: var(--primary); }
+.template-add #template-name { width: 140px; flex-shrink: 0; }
+.template-add #template-body { flex: 1; min-width: 0; }
+.template-add .btn { flex-shrink: 0; }
 .remote-note {
   font-size: 12px; color: var(--on-surface-variant); line-height: 1.6;
   background: var(--surface-high); border-radius: var(--radius-md); padding: 10px 12px;

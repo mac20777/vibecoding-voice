@@ -27,8 +27,15 @@ import {
   normalizeVoiceTranslationSendMode,
   normalizeVoiceTranslationTargetLanguage
 } from "./translation-service.mjs";
+import { spawn } from "node:child_process";
 import { injectKey, injectText, submitTextInput } from "./text-injector.mjs";
-import { parseRemoteButtonMap } from "./remote-buttons.mjs";
+import {
+  applyPromptTemplate,
+  parsePromptTemplates,
+  parseRemoteActionMap,
+  serializeAction
+} from "./remote-buttons.mjs";
+import { RemoteGestureEngine } from "./remote-gestures.mjs";
 
 const config = loadConfig();
 
@@ -386,10 +393,13 @@ function resolveSegmentOptions(message = {}) {
   }
 
   if (source === "xiaomi_remote") {
+    // The remote has no on-device confirm UI; "confirm_on_device" means the
+    // transcript is typed without Enter and the remote's OK key (Enter) sends.
+    const confirmOnDevice = config.transcriptDeliveryMode === "confirm_on_device";
     return {
       source,
       transcriptDeliveryMode: "immediate",
-      textInjectionMode: config.textInjectionMode
+      textInjectionMode: confirmOnDevice ? "type_only" : config.textInjectionMode
     };
   }
 
@@ -764,12 +774,12 @@ async function finalizeSegment(ws, state) {
   const translationResult = await translateVoiceTranscript(ws, transcript);
   const translatedTranscript = translationResult.text;
   const transcriptTransform = translationResult.transform;
-  const sendTranscript = formatVoiceSendText({
+  const sendTranscript = applyArmedPromptTemplate(formatVoiceSendText({
     originalText: transcript,
     translatedText: translatedTranscript,
     translations: translationResult.translations,
     transform: transcriptTransform
-  });
+  }));
 
   if (transcriptDeliveryMode === "confirm_on_device") {
     state.pendingSegments.push(sendTranscript);
@@ -1081,30 +1091,125 @@ async function submitActiveTextInput(ws) {
   sendJson(ws, { type: "status", status: "submitted" });
 }
 
-// Xiaomi remote direction/OK/volume buttons arrive as remote_button messages
-// from the capture listener; map them to synthetic key presses (arrows, Enter,
-// Esc, volume) so the remote can drive CLI menus without touching the keyboard.
-const remoteButtonKeys = config.xiaomiRemoteButtons
-  ? parseRemoteButtonMap(config.xiaomiRemoteButtonMap)
+// Xiaomi remote buttons arrive as raw down/up events in remote_button messages
+// from the capture listener. A gesture engine turns them into click / double /
+// hold gestures (volume keys auto-repeat while held), and each gesture runs a
+// configurable action: inject a key or combo, launch an app, type a text
+// snippet, or arm a prompt template that wraps the next voice transcript.
+const remoteButtonActions = config.xiaomiRemoteButtons
+  ? parseRemoteActionMap(config.xiaomiRemoteButtonMap)
+  : null;
+const remotePromptTemplates = parsePromptTemplates(config.xiaomiRemotePromptTemplates);
+
+let armedPromptTemplate = null;
+
+function applyArmedPromptTemplate(transcript) {
+  if (!armedPromptTemplate) {
+    return transcript;
+  }
+  const template = armedPromptTemplate;
+  armedPromptTemplate = null;
+  if (template.expiresAt < Date.now()) {
+    return transcript;
+  }
+  const wrapped = applyPromptTemplate(template.body, transcript);
+  log("prompt template applied", template.name);
+  broadcastRemoteAction({ action: "prompt_applied", name: template.name });
+  return wrapped;
+}
+
+function broadcastRemoteAction(payload) {
+  for (const client of wss.clients) {
+    if (client.readyState === WebSocket.OPEN && client.clientState?.authenticated) {
+      sendJson(client, { type: "remote_action", ...payload });
+    }
+  }
+}
+
+function launchRemoteApp(command) {
+  try {
+    const child = spawn("cmd.exe", ["/d", "/c", "start", "", command], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true
+    });
+    child.unref();
+  } catch (error) {
+    log("remote app launch failed", command, error.message);
+  }
+}
+
+function executeRemoteAction(button, gesture, action) {
+  const dryRun = config.dryRunTextInjection;
+  log("remote_button", `${button}.${gesture}`, "->", serializeAction(action));
+  switch (action.type) {
+    case "key":
+    case "combo": {
+      const keySpec = action.type === "key" ? action.key : action.combo;
+      void injectKey(keySpec, { dryRun }).catch((error) => {
+        log("remote_button inject failed", button, error.message);
+      });
+      return;
+    }
+    case "app":
+      if (dryRun) {
+        log("[inject] dry-run app", { command: action.command });
+        return;
+      }
+      launchRemoteApp(action.command);
+      return;
+    case "text":
+      void injectText(action.text, "type_only", { dryRun }).catch((error) => {
+        log("remote_button text inject failed", button, error.message);
+      });
+      return;
+    case "prompt": {
+      const template = remotePromptTemplates.find((entry) => entry.name === action.name);
+      if (!template) {
+        log("remote_button prompt template not found", action.name);
+        return;
+      }
+      armedPromptTemplate = { ...template, expiresAt: Date.now() + 5 * 60 * 1000 };
+      log("prompt template armed", template.name);
+      broadcastRemoteAction({ action: "prompt_armed", name: template.name });
+      return;
+    }
+    default:
+      return;
+  }
+}
+
+const remoteGestureEngine = remoteButtonActions
+  ? new RemoteGestureEngine({
+      hasGestureAction: (button, gesture) => {
+        const action = remoteButtonActions[button]?.[gesture];
+        return Boolean(action && action.type !== "none");
+      },
+      isRepeatButton: (button) => button === "volume_up" || button === "volume_down",
+      onGesture: (button, gesture) => {
+        const action = gesture === "repeat"
+          ? remoteButtonActions[button]?.click
+          : remoteButtonActions[button]?.[gesture];
+        if (!action || action.type === "none") {
+          return;
+        }
+        executeRemoteAction(button, gesture, action);
+      }
+    })
   : null;
 
 function handleRemoteButton(message) {
-  if (!remoteButtonKeys || message.pressed === false) {
+  if (!remoteGestureEngine) {
     return;
   }
   const button = String(message.button || "");
   if (button === "unknown") {
-    log("remote_button unknown code", `0x${Number(message.code || 0).toString(16).padStart(2, "0")}`);
+    if (message.pressed !== false) {
+      log("remote_button unknown code", `0x${Number(message.code || 0).toString(16).padStart(2, "0")}`);
+    }
     return;
   }
-  const key = remoteButtonKeys[button];
-  if (!key || key === "none") {
-    return;
-  }
-  log("remote_button", button, "->", key);
-  void injectKey(key, { dryRun: config.dryRunTextInjection }).catch((error) => {
-    log("remote_button inject failed", button, error.message);
-  });
+  remoteGestureEngine.handleButtonEvent({ button, pressed: message.pressed !== false });
 }
 
 async function dispatchUserPrompt(ws, prompt, state) {
