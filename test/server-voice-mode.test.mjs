@@ -293,7 +293,7 @@ test("desktop mic injects text immediately and submit action presses Enter", asy
   assert.match(serverOutput.join(""), /mode: 'enter_only'/);
 });
 
-test("Xiaomi remote with confirm_on_device types text first and lets the OK key send", async (t) => {
+test("Xiaomi remote with confirm_on_device previews in the overlay; OK injects and sends", async (t) => {
   const port = await getFreePort();
   const appDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-xiaomi-remote-"));
   const server = spawn(process.execPath, ["src/server.mjs"], {
@@ -335,12 +335,75 @@ test("Xiaomi remote with confirm_on_device types text first and lets the OK key 
   ws.send(Buffer.from([0x00, 0x00]), { binary: true });
   ws.send(JSON.stringify({ type: "ptt_stop", source: "xiaomi_remote", ts: Date.now() }));
 
+  // Preview phase: transcript is shown (overlay) but nothing is injected yet.
   const finalMessage = await messages.waitFor((message) => message.type === "transcript_final");
   assert.equal(finalMessage.text, "测试小米遥控器");
-  assert.equal(finalMessage.requiresAction, false);
+  assert.equal(finalMessage.requiresAction, true);
+  await messages.waitFor((message) => message.type === "status" && message.status === "awaiting_action");
+  assert.equal(
+    messages.take((message) => message.type === "status" && message.status === "typed"),
+    null,
+    "nothing is typed before confirmation"
+  );
+  assert.equal(serverOutput.join("").includes("[inject] dry-run"), false, "no injection before OK");
+
+  // The remote's OK click injects the previewed text and sends it in one step.
+  ws.send(JSON.stringify({ type: "remote_button", button: "ok", code: 0x28, pressed: true, ts: Date.now() }));
+  ws.send(JSON.stringify({ type: "remote_button", button: "ok", code: 0x28, pressed: false, ts: Date.now() }));
   await messages.waitFor((message) => message.type === "status" && message.status === "typed");
-  assert.match(serverOutput.join(""), /mode: 'type_only'/);
-  assert.equal(messages.take((message) => message.type === "status" && message.status === "awaiting_action"), null);
+  assert.match(serverOutput.join(""), /mode: 'type_and_enter'/);
+});
+
+test("Xiaomi remote preview: Back discards the pending transcript", async (t) => {
+  const port = await getFreePort();
+  const appDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-xiaomi-preview-cancel-"));
+  const server = spawn(process.execPath, ["src/server.mjs"], {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      APPDATA: appDataRoot,
+      LAN_SHARED_SECRET: "",
+      LAN_DISCOVERY_ENABLED: "0",
+      LAN_VOICE_BIND: "127.0.0.1",
+      LAN_VOICE_PORT: String(port),
+      MOCK_TRANSCRIPT: "将被丢弃",
+      SEND_TARGET: "text_injector",
+      DRY_RUN_TEXT_INJECTION: "1",
+      TRANSCRIPT_DELIVERY_MODE: "confirm_on_device"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  const serverOutput = [];
+  server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
+  server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
+  t.after(async () => {
+    await stopServer(server);
+    fs.rmSync(appDataRoot, { recursive: true, force: true });
+  });
+
+  const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
+  const messages = createMessageCollector(ws);
+  t.after(() => closeWebSocket(ws));
+
+  ws.send(JSON.stringify({ type: "hello", deviceId: "xiaomi-test", boardType: "xiaomi-remote-msbc" }));
+  await messages.waitFor((message) => message.type === "hello_ack");
+
+  ws.send(JSON.stringify({ type: "ptt_start", source: "xiaomi_remote", ts: Date.now() }));
+  ws.send(Buffer.from([0x00, 0x00]), { binary: true });
+  ws.send(JSON.stringify({ type: "ptt_stop", source: "xiaomi_remote", ts: Date.now() }));
+  await messages.waitFor((message) => message.type === "status" && message.status === "awaiting_action");
+
+  ws.send(JSON.stringify({ type: "remote_button", button: "back", code: 0xf1, pressed: true, ts: Date.now() }));
+  ws.send(JSON.stringify({ type: "remote_button", button: "back", code: 0xf1, pressed: false, ts: Date.now() }));
+  await messages.waitFor((message) => message.type === "status" && message.status === "cancelled");
+
+  // The transcript is gone: a later OK falls back to its normal Enter mapping
+  // and must not inject the discarded text.
+  ws.send(JSON.stringify({ type: "remote_button", button: "ok", code: 0x28, pressed: true, ts: Date.now() }));
+  ws.send(JSON.stringify({ type: "remote_button", button: "ok", code: 0x28, pressed: false, ts: Date.now() }));
+  await sleep(400);
+  assert.equal(serverOutput.join("").includes("将被丢弃"), false, "discarded preview must never inject");
 });
 
 test("server translates live voice transcript before device confirmation", async (t) => {
@@ -710,4 +773,82 @@ test("server falls back to original transcript when voice translation fails", as
   assert.equal(finalMessage.originalText, "继续测试这个功能");
   assert.equal(finalMessage.transform, "none");
   assert.equal(finalMessage.requiresAction, true);
+});
+
+test("Xiaomi remote preview: segments append, undo pops last, double-click discards all", async (t) => {
+  const port = await getFreePort();
+  const appDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-xiaomi-preview-append-"));
+  const server = spawn(process.execPath, ["src/server.mjs"], {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      APPDATA: appDataRoot,
+      LAN_SHARED_SECRET: "",
+      LAN_DISCOVERY_ENABLED: "0",
+      LAN_VOICE_BIND: "127.0.0.1",
+      LAN_VOICE_PORT: String(port),
+      MOCK_TRANSCRIPT: "第一句",
+      SEND_TARGET: "text_injector",
+      DRY_RUN_TEXT_INJECTION: "1",
+      TRANSCRIPT_DELIVERY_MODE: "confirm_on_device"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  const serverOutput = [];
+  server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
+  server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
+  t.after(async () => {
+    await stopServer(server);
+    fs.rmSync(appDataRoot, { recursive: true, force: true });
+  });
+
+  const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
+  const messages = createMessageCollector(ws);
+  t.after(() => closeWebSocket(ws));
+
+  const press = (button, code) => {
+    ws.send(JSON.stringify({ type: "remote_button", button, code, pressed: true, ts: Date.now() }));
+    ws.send(JSON.stringify({ type: "remote_button", button, code, pressed: false, ts: Date.now() }));
+  };
+  const dictate = async () => {
+    ws.send(JSON.stringify({ type: "ptt_start", source: "xiaomi_remote", ts: Date.now() }));
+    ws.send(Buffer.from([0x00, 0x00]), { binary: true });
+    ws.send(JSON.stringify({ type: "ptt_stop", source: "xiaomi_remote", ts: Date.now() }));
+    await messages.waitFor((message) => message.type === "status" && message.status === "awaiting_action");
+  };
+
+  ws.send(JSON.stringify({ type: "hello", deviceId: "xiaomi-test", boardType: "xiaomi-remote-msbc" }));
+  await messages.waitFor((message) => message.type === "hello_ack");
+
+  // Two dictations accumulate into one preview.
+  await dictate();
+  const firstSegment = await messages.waitFor(
+    (message) => message.type === "transcript_final" && message.text === "第一句"
+  );
+  assert.equal(firstSegment.requiresAction, true);
+  await dictate();
+  const appended = await messages.waitFor(
+    (message) => message.type === "transcript_final" && message.text === "第一句 第一句"
+  );
+  assert.equal(appended.requiresAction, true);
+
+  // Single Back click pops only the last segment (waits out the double window).
+  press("back", 0xf1);
+  const afterUndo = await messages.waitFor(
+    (message) => message.type === "transcript_final" && message.text === "第一句"
+  );
+  assert.equal(afterUndo.requiresAction, true);
+  assert.equal(serverOutput.join("").includes("[inject] dry-run"), false, "undo must not inject");
+
+  // Double-click Back discards the whole preview.
+  press("back", 0xf1);
+  await sleep(60);
+  press("back", 0xf1);
+  await messages.waitFor((message) => message.type === "status" && message.status === "cancelled");
+
+  // Everything is gone: OK now falls back to its normal Enter mapping.
+  press("ok", 0x28);
+  await sleep(400);
+  assert.equal(serverOutput.join("").includes("第一句"), false, "discarded segments must never inject");
 });

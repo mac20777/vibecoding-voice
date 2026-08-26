@@ -93,7 +93,7 @@
       const tt = T[lang];
       if (payload.type === "transcript_final") {
         if (payload.requiresAction) {
-          render(tt.waiting, "busy", payload.text || "", tt.confirmHint);
+          render(tt.waiting, "busy", payload.text || "", payload.confirmHint || tt.confirmHint);
         } else {
           render(tt.transcribing, "busy", payload.text || "");
         }
@@ -108,7 +108,7 @@
           render(tt.transcribing, "busy");
           break;
         case "awaiting_action":
-          render(tt.waiting, "busy", payload.text || "", tt.confirmHint);
+          render(tt.waiting, "busy", payload.text || "", payload.confirmHint || tt.confirmHint);
           break;
         case "typed":
           render(tt.sent, "ok", payload.text || "");

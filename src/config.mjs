@@ -436,6 +436,7 @@ export function loadConfig(options = {}) {
     xiaomiRemoteButtons: process.env.XIAOMI_REMOTE_BUTTONS !== "0",
     xiaomiRemoteButtonMap: process.env.XIAOMI_REMOTE_BUTTON_MAP || "",
     xiaomiRemotePromptTemplates: process.env.XIAOMI_REMOTE_PROMPT_TEMPLATES || "",
+    xiaomiRemotePreviewKeys: process.env.XIAOMI_REMOTE_PREVIEW_KEYS || "",
     loadedConfigFiles,
     userConfigPath,
     cwdConfigPath,

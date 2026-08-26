@@ -2,14 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  DEFAULT_PREVIEW_KEYS,
   DEFAULT_REMOTE_ACTIONS,
   REMOTE_BUTTONS,
   applyPromptTemplate,
   cloneDefaultRemoteActions,
   normalizeAction,
+  parsePreviewKeys,
   parsePromptTemplates,
   parseRemoteActionMap,
   serializeAction,
+  serializePreviewKeys,
   serializeRemoteActionMap
 } from "../src/remote-buttons.mjs";
 
@@ -79,6 +82,27 @@ test("serializeRemoteActionMap only emits non-default entries", () => {
   assert.deepEqual(reparsed.ok.double, { type: "app", command: "chrome" });
   assert.deepEqual(reparsed.back.click, { type: "none" });
   assert.deepEqual(reparsed.up.click, { type: "key", key: "up" });
+});
+
+test("parsePreviewKeys defaults, overrides and junk tolerance", () => {
+  assert.deepEqual(parsePreviewKeys(""), {
+    confirm: { button: "ok", gesture: "click" },
+    undo: { button: "back", gesture: "click" },
+    discard: { button: "back", gesture: "double" }
+  });
+
+  const overridden = parsePreviewKeys("confirm:home.hold, junk, undo:nope.click, discard:menu.double");
+  assert.deepEqual(overridden.confirm, { button: "home", gesture: "hold" });
+  assert.deepEqual(overridden.undo, DEFAULT_PREVIEW_KEYS.undo, "unknown button falls back to default");
+  assert.deepEqual(overridden.discard, { button: "menu", gesture: "double" });
+});
+
+test("serializePreviewKeys only emits non-default bindings", () => {
+  assert.equal(serializePreviewKeys(parsePreviewKeys("")), "");
+  assert.equal(
+    serializePreviewKeys(parsePreviewKeys("discard:menu.double")),
+    "discard:menu.double"
+  );
 });
 
 test("parsePromptTemplates tolerates junk and filters empty entries", () => {

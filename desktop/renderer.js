@@ -11,7 +11,7 @@ const I18N = {
     tabBasic: "基本", tabSpeech: "语音与快捷键", tabTranslation: "翻译", tabAdvanced: "高级",
     fTarget: "发送目标", optTargetInject: "输入注入（打字到当前窗口）", fTargetHint: "语音转写后发送到哪里",
     fTiming: "发送时机", optTimingConfirm: "设备确认后发送", optTimingImm: "识别完成立即发送",
-    fTimingHint: "ESP32 在墨水屏上确认；遥控器选「设备确认后发送」时，文字先打进输入框，按确认键（默认回车）再发送",
+    fTimingHint: "ESP32 在墨水屏上确认；遥控器选「设备确认后发送」时，文字先出现在悬浮条里预览，按确认键上屏并发送",
     fInputMode: "输入模式", optTypeEnter: "输入并回车", optTypeOnly: "仅输入文本",
     fInputModeHint: "选「仅输入文本」：文字先打进输入框，按遥控器 OK（回车）再发送",
     fAutoLaunch: "开机自启", fTray: "启动后最小化到托盘", fCloseTray: "关闭窗口时最小化到托盘",
@@ -98,6 +98,10 @@ const I18N = {
     deleteTemplate: "删除",
     promptArmed: "模板「{name}」已就位 — 按住语音键说话",
     voiceFixedNote: "语音键固定为「按住说话」，不参与映射。",
+    previewKeysTitle: "悬浮条预览键位",
+    previewKeysHint: "选「设备确认后发送」时：说话后文字先出现在悬浮条，再按住语音键可追加；确认 = 上屏并发送，撤销 = 去掉最后一段，取消 = 整段丢弃。",
+    previewConfirm: "确认发送", previewUndo: "撤销一段", previewDiscard: "整段取消",
+    overlayPreviewHint: "{confirm} 发送 · {undo} 撤销一段 · {discard} 整段取消",
     navPrompts: "提示词", navRemote: "遥控器",
     promptsTitle: "提示词模板",
     promptsSub: "把常用指令存成模板并绑定到遥控器按键：按一下绑定的键，再按住语音键说话，{text} 会被替换成你说的话。",
@@ -125,7 +129,7 @@ const I18N = {
     tabBasic: "Basics", tabSpeech: "Speech & Hotkeys", tabTranslation: "Translation", tabAdvanced: "Advanced",
     fTarget: "Send target", optTargetInject: "Text injection (type into focused window)", fTargetHint: "Where transcripts go",
     fTiming: "Delivery timing", optTimingConfirm: "Confirm on device first", optTimingImm: "Send right after recognition",
-    fTimingHint: "ESP32 confirms on the e-paper screen; with “Confirm on device first”, the remote types text into the input box and the OK key (Enter by default) sends it",
+    fTimingHint: "ESP32 confirms on the e-paper screen; with “Confirm on device first”, remote transcripts preview in the floating bar — the OK key types and sends them",
     fInputMode: "Input mode", optTypeEnter: "Type + Enter", optTypeOnly: "Type only",
     fInputModeHint: "With “Type only”, text lands in the input box first — press the remote OK key (Enter) to send",
     fAutoLaunch: "Launch on Windows start", fTray: "Minimize to tray on launch", fCloseTray: "Close window to tray",
@@ -212,6 +216,10 @@ const I18N = {
     deleteTemplate: "Delete",
     promptArmed: "Template \"{name}\" armed — hold the voice key and speak",
     voiceFixedNote: "The voice key is fixed to push-to-talk and cannot be remapped.",
+    previewKeysTitle: "Overlay preview keys",
+    previewKeysHint: "With 'Confirm on device first': speech lands in the floating bar first; hold the voice key again to append. Confirm = type & send, Undo = drop the last segment, Discard = cancel everything.",
+    previewConfirm: "Confirm & send", previewUndo: "Undo last", previewDiscard: "Discard all",
+    overlayPreviewHint: "{confirm} send · {undo} undo last · {discard} discard all",
     navPrompts: "Prompts", navRemote: "Remote",
     promptsTitle: "Prompt Templates",
     promptsSub: "Save common instructions as templates and bind them to remote buttons: press the bound button, then hold the voice key and speak — {text} is replaced by what you said.",
@@ -364,7 +372,13 @@ const elements = {
   promptPreview: document.querySelector("#prompt-preview"),
   promptBindings: document.querySelector("#prompt-bindings"),
   promptSaveButton: document.querySelector("#prompt-save-button"),
-  remoteSaveButton: document.querySelector("#remote-save-button")
+  remoteSaveButton: document.querySelector("#remote-save-button"),
+  pvkConfirmButton: document.querySelector("#pvk-confirm-button"),
+  pvkConfirmGesture: document.querySelector("#pvk-confirm-gesture"),
+  pvkUndoButton: document.querySelector("#pvk-undo-button"),
+  pvkUndoGesture: document.querySelector("#pvk-undo-gesture"),
+  pvkDiscardButton: document.querySelector("#pvk-discard-button"),
+  pvkDiscardGesture: document.querySelector("#pvk-discard-gesture")
 };
 
 const DEFAULT_LOCAL_MIC_HOLD_KEY = "F8";
@@ -486,6 +500,100 @@ let selectedPromptIndex = -1;
 let loadedPromptName = "";
 let remoteVoiceStatus = "idle";
 let recordTranscriptsEnabled = true;
+
+// Mirror of src/remote-buttons.mjs preview keys — keep in sync.
+const PREVIEW_ACTIONS = ["confirm", "undo", "discard"];
+const DEFAULT_PREVIEW_KEYS = {
+  confirm: { button: "ok", gesture: "click" },
+  undo: { button: "back", gesture: "click" },
+  discard: { button: "back", gesture: "double" }
+};
+let previewKeys = {
+  confirm: { ...DEFAULT_PREVIEW_KEYS.confirm },
+  undo: { ...DEFAULT_PREVIEW_KEYS.undo },
+  discard: { ...DEFAULT_PREVIEW_KEYS.discard }
+};
+
+function parsePreviewKeys(spec) {
+  const keys = {
+    confirm: { ...DEFAULT_PREVIEW_KEYS.confirm },
+    undo: { ...DEFAULT_PREVIEW_KEYS.undo },
+    discard: { ...DEFAULT_PREVIEW_KEYS.discard }
+  };
+  for (const entry of String(spec || "").split(",")) {
+    const trimmed = entry.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const [rawAction, rawTarget] = trimmed.split(":", 2);
+    const action = String(rawAction || "").trim().toLowerCase();
+    const [button, gesture] = String(rawTarget || "").trim().toLowerCase().split(".");
+    if (!PREVIEW_ACTIONS.includes(action)) {
+      continue;
+    }
+    if (!REMOTE_BUTTONS.includes(button) || !REMOTE_GESTURES.includes(gesture)) {
+      continue;
+    }
+    keys[action] = { button, gesture };
+  }
+  return keys;
+}
+
+function serializePreviewKeys() {
+  const entries = [];
+  for (const action of PREVIEW_ACTIONS) {
+    const value = previewKeys[action];
+    const fallback = DEFAULT_PREVIEW_KEYS[action];
+    if (value.button === fallback.button && value.gesture === fallback.gesture) {
+      continue;
+    }
+    entries.push(`${action}:${value.button}.${value.gesture}`);
+  }
+  return entries.join(", ");
+}
+
+function previewHintText() {
+  const fmt = (binding) => `${buttonLabel(binding.button)}·${gestureLabel(binding.gesture)}`;
+  return t("overlayPreviewHint", {
+    confirm: fmt(previewKeys.confirm),
+    undo: fmt(previewKeys.undo),
+    discard: fmt(previewKeys.discard)
+  });
+}
+
+function renderPreviewKeyPickers() {
+  if (!elements.pvkConfirmButton) {
+    return;
+  }
+  for (const action of PREVIEW_ACTIONS) {
+    const cap = `${action[0].toUpperCase()}${action.slice(1)}`;
+    const buttonSelect = elements[`pvk${cap}Button`];
+    const gestureSelect = elements[`pvk${cap}Gesture`];
+    if (buttonSelect.options.length === 0) {
+      for (const def of REMOTE_BUTTON_DEFS) {
+        if (def.id === "voice") {
+          continue;
+        }
+        const option = document.createElement("option");
+        option.value = def.id;
+        buttonSelect.appendChild(option);
+      }
+      for (const gesture of REMOTE_GESTURES) {
+        const option = document.createElement("option");
+        option.value = gesture;
+        gestureSelect.appendChild(option);
+      }
+    }
+    for (const option of buttonSelect.options) {
+      option.textContent = buttonLabel(option.value);
+    }
+    for (const option of gestureSelect.options) {
+      option.textContent = gestureLabel(option.value);
+    }
+    buttonSelect.value = previewKeys[action].button;
+    gestureSelect.value = previewKeys[action].gesture;
+  }
+}
 
 const EXAMPLE_PROMPTS = {
   zh: [
@@ -1365,7 +1473,8 @@ function collectFormPayload() {
       xiaomiRemoteButtonMap: serializeRemoteActions(),
       xiaomiRemotePromptTemplates: JSON.stringify(
         promptTemplates.filter((template) => template.name.trim() && template.body.trim())
-      )
+      ),
+      xiaomiRemotePreviewKeys: serializePreviewKeys()
     },
     desktopSettings: {
       autoLaunch: elements.autoLaunch.checked,
@@ -1414,6 +1523,8 @@ function fillForm(form, desktopSettingsPath) {
   if (selectedPromptIndex >= promptTemplates.length) {
     selectedPromptIndex = promptTemplates.length ? promptTemplates.length - 1 : -1;
   }
+  previewKeys = parsePreviewKeys(form.xiaomiRemotePreviewKeys);
+  renderPreviewKeyPickers();
   renderRemoteEditor();
   renderPromptsPage();
   elements.userConfigPath.textContent = form.userConfigPath || "";
@@ -1985,6 +2096,7 @@ function applyLang() {
   renderRemoteStatus();
   renderRemoteEditor();
   renderPromptsPage();
+  renderPreviewKeyPickers();
 }
 
 function resetLiveConnection() {
@@ -2056,6 +2168,7 @@ function forwardOverlayEvent(message) {
       type: "transcript_final",
       text: message.text || "",
       requiresAction: message.requiresAction === true,
+      confirmHint: previewHintText(),
       lang
     });
     return;
@@ -2065,6 +2178,7 @@ function forwardOverlayEvent(message) {
       type: "status",
       status: message.status,
       text: message.text || "",
+      confirmHint: previewHintText(),
       lang
     });
   }
@@ -2447,6 +2561,16 @@ elements.actionPrompt.addEventListener("change", () => {
   setGestureAction({ type: "prompt", name: elements.actionPrompt.value });
 });
 
+for (const action of PREVIEW_ACTIONS) {
+  const cap = `${action[0].toUpperCase()}${action.slice(1)}`;
+  elements[`pvk${cap}Button`].addEventListener("change", () => {
+    previewKeys[action].button = elements[`pvk${cap}Button`].value;
+  });
+  elements[`pvk${cap}Gesture`].addEventListener("change", () => {
+    previewKeys[action].gesture = elements[`pvk${cap}Gesture`].value;
+  });
+}
+
 elements.promptNewButton.addEventListener("click", () => {
   promptTemplates.push({ name: "", body: "" });
   selectedPromptIndex = promptTemplates.length - 1;
@@ -2683,6 +2807,7 @@ if (elements.actionKey) {
   }
 }
 renderPromptsPage();
+renderPreviewKeyPickers();
 setActiveTab("basic");
 renderLocalMic();
 renderRemoteEditor();

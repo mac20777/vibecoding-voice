@@ -58,6 +58,7 @@ export function buildDesktopFormState(config, desktopSettings = {}) {
     xiaomiRemoteEnabled: config.xiaomiRemoteEnabled === true,
     xiaomiRemoteButtonMap: String(config.xiaomiRemoteButtonMap || ""),
     xiaomiRemotePromptTemplates: String(config.xiaomiRemotePromptTemplates || ""),
+    xiaomiRemotePreviewKeys: String(config.xiaomiRemotePreviewKeys || ""),
     desktopSettings: normalizeDesktopSettings(desktopSettings),
     configIssues: getConfigIssues(config),
     loadedConfigFiles: [...(config.loadedConfigFiles || [])],
@@ -123,6 +124,7 @@ export function buildUserConfigUpdates(formState = {}) {
     CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS: formState.claudeDangerouslySkipPermissions ? "1" : null,
     XIAOMI_REMOTE_ENABLED: formState.xiaomiRemoteEnabled ? "1" : null,
     XIAOMI_REMOTE_BUTTON_MAP: normalizeOptionalText(formState.xiaomiRemoteButtonMap),
-    XIAOMI_REMOTE_PROMPT_TEMPLATES: normalizeOptionalText(formState.xiaomiRemotePromptTemplates)
+    XIAOMI_REMOTE_PROMPT_TEMPLATES: normalizeOptionalText(formState.xiaomiRemotePromptTemplates),
+    XIAOMI_REMOTE_PREVIEW_KEYS: normalizeOptionalText(formState.xiaomiRemotePreviewKeys)
   };
 }

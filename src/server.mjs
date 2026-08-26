@@ -31,6 +31,7 @@ import { spawn } from "node:child_process";
 import { injectKey, injectText, submitTextInput } from "./text-injector.mjs";
 import {
   applyPromptTemplate,
+  parsePreviewKeys,
   parsePromptTemplates,
   parseRemoteActionMap,
   serializeAction
@@ -422,13 +423,14 @@ function resolveSegmentOptions(message = {}) {
   }
 
   if (source === "xiaomi_remote") {
-    // The remote has no on-device confirm UI; "confirm_on_device" means the
-    // transcript is typed without Enter and the remote's OK key (Enter) sends.
+    // "confirm_on_device" for the remote previews the transcript in the
+    // desktop overlay first; the remote's OK click injects and sends it in
+    // one step, Back discards. Nothing touches the focused input before that.
     const confirmOnDevice = config.transcriptDeliveryMode === "confirm_on_device";
     return {
       source,
-      transcriptDeliveryMode: "immediate",
-      textInjectionMode: confirmOnDevice ? "type_only" : config.textInjectionMode
+      transcriptDeliveryMode: confirmOnDevice ? "remote_preview" : "immediate",
+      textInjectionMode: config.textInjectionMode
     };
   }
 
@@ -810,6 +812,33 @@ async function finalizeSegment(ws, state) {
     transform: transcriptTransform
   }));
 
+  if (transcriptDeliveryMode === "remote_preview") {
+    // Segments accumulate: hold the voice key again to append, the undo
+    // gesture pops the last segment, confirm sends the joined text.
+    if (!remotePreview || remotePreview.ws !== ws) {
+      remotePreview = { ws, segments: [] };
+    }
+    remotePreview.segments.push(sendTranscript);
+    const previewText = joinPendingSegments(remotePreview.segments);
+    sendDictationJson(ws, {
+      type: "transcript_final",
+      text: previewText,
+      translatedText: translatedTranscript,
+      originalText: transcript,
+      targetLanguage: translationResult.targetLanguage,
+      translations: translationResult.translations,
+      transform: transcriptTransform,
+      latencyMs: Date.now() - startedAt,
+      requiresAction: true
+    });
+    sendDictationJson(ws, {
+      type: "status",
+      status: "awaiting_action",
+      text: previewText
+    });
+    return;
+  }
+
   if (transcriptDeliveryMode === "confirm_on_device") {
     state.pendingSegments.push(sendTranscript);
     state.pendingTranslatedSegments.push(translatedTranscript);
@@ -1168,6 +1197,84 @@ function launchRemoteApp(command) {
   }
 }
 
+// While a remote preview is pending, the remote's OK/Back clicks are modal:
+// OK injects + sends the previewed transcript, Back discards it.
+let remotePreview = null;
+
+async function confirmRemotePreview(origin) {
+  const preview = remotePreview;
+  if (!preview) {
+    return false;
+  }
+  remotePreview = null;
+  const { ws } = preview;
+  const text = joinPendingSegments(preview.segments);
+  log("remote preview confirmed", origin);
+  if (config.sendTarget === "codex_exec" || config.sendTarget === "claude_code") {
+    const session = config.sendTarget === "codex_exec" ? codexSession : claudeSession;
+    if (session.isRunning()) {
+      sendDictationJson(ws, { type: "status", status: "cli_busy" });
+      return true;
+    }
+    sendDictationJson(ws, { type: "status", status: "typed", text });
+    if (config.sendTarget === "codex_exec") {
+      launchCodexPrompt(text);
+    } else {
+      launchClaudePrompt(text);
+    }
+    return true;
+  }
+  await dispatchPrompt(text, { textInjectionMode: config.textInjectionMode });
+  sendDictationJson(ws, { type: "status", status: "typed", text });
+  return true;
+}
+
+function discardRemotePreview(origin) {
+  if (!remotePreview) {
+    return false;
+  }
+  const { ws } = remotePreview;
+  remotePreview = null;
+  log("remote preview discarded", origin);
+  sendDictationJson(ws, { type: "status", status: "cancelled" });
+  return true;
+}
+
+function undoRemotePreviewSegment(origin) {
+  const preview = remotePreview;
+  if (!preview) {
+    return false;
+  }
+  preview.segments.pop();
+  log("remote preview segment undone", origin);
+  if (preview.segments.length === 0) {
+    remotePreview = null;
+    sendDictationJson(preview.ws, { type: "status", status: "cancelled" });
+    return true;
+  }
+  const text = joinPendingSegments(preview.segments);
+  sendDictationJson(preview.ws, { type: "transcript_final", text, requiresAction: true });
+  sendDictationJson(preview.ws, { type: "status", status: "awaiting_action", text });
+  return true;
+}
+
+const remotePreviewKeys = remoteButtonActions
+  ? parsePreviewKeys(config.xiaomiRemotePreviewKeys)
+  : null;
+
+function previewActionForGesture(button, gesture) {
+  if (!remotePreviewKeys) {
+    return null;
+  }
+  for (const action of ["confirm", "undo", "discard"]) {
+    const binding = remotePreviewKeys[action];
+    if (binding.button === button && binding.gesture === gesture) {
+      return action;
+    }
+  }
+  return null;
+}
+
 function executeRemoteAction(button, gesture, action) {
   const dryRun = config.dryRunTextInjection;
   log("remote_button", `${button}.${gesture}`, "->", serializeAction(action));
@@ -1212,10 +1319,28 @@ const remoteGestureEngine = remoteButtonActions
   ? new RemoteGestureEngine({
       hasGestureAction: (button, gesture) => {
         const action = remoteButtonActions[button]?.[gesture];
-        return Boolean(action && action.type !== "none");
+        if (action && action.type !== "none") {
+          return true;
+        }
+        // While a preview is pending its modal bindings count too, so a
+        // double-click discard is detected instead of firing two undos.
+        return Boolean(remotePreview && previewActionForGesture(button, gesture));
       },
       isRepeatButton: (button) => button === "volume_up" || button === "volume_down",
       onGesture: (button, gesture) => {
+        const previewAction = remotePreview ? previewActionForGesture(button, gesture) : null;
+        if (previewAction === "confirm") {
+          void confirmRemotePreview("gesture");
+          return;
+        }
+        if (previewAction === "undo") {
+          undoRemotePreviewSegment("gesture");
+          return;
+        }
+        if (previewAction === "discard") {
+          discardRemotePreview("gesture");
+          return;
+        }
         const action = gesture === "repeat"
           ? remoteButtonActions[button]?.click
           : remoteButtonActions[button]?.[gesture];
@@ -1410,6 +1535,9 @@ wss.on("connection", (ws, req) => {
             state.segmentTextInjectionMode = segmentOptions.textInjectionMode;
           }
           log("ptt_start", state.deviceId);
+          if (remotePreview && remotePreview.ws !== ws) {
+            discardRemotePreview("new_recording_elsewhere");
+          }
           state.segmentActive = true;
           state.chunks = [];
           sendDictationJson(ws, { type: "status", status: "recording" });
@@ -1445,6 +1573,9 @@ wss.on("connection", (ws, req) => {
             break;
           }
           log("action_send", state.deviceId);
+          if (await confirmRemotePreview("action_send")) {
+            break;
+          }
           await sendPendingTranscript(ws, state);
           break;
         case "action_submit":
@@ -1461,6 +1592,9 @@ wss.on("connection", (ws, req) => {
             break;
           }
           log("action_undo", state.deviceId);
+          if (undoRemotePreviewSegment("action_undo")) {
+            break;
+          }
           undoPendingTranscript(ws, state);
           break;
         case "set_target": {

@@ -289,6 +289,25 @@
                   <div class="remote-note" data-i18n="remoteNote"></div>
                 </div>
               </div>
+              <div class="preview-keys-block">
+                <div class="group-heading" data-i18n="previewKeysTitle">悬浮条预览键位</div>
+                <div class="remote-note" data-i18n="previewKeysHint">选「设备确认后发送」时：说话后文字先出现在悬浮条，再按住语音键可追加；确认 = 上屏并发送，撤销 = 去掉最后一段，取消 = 整段丢弃。</div>
+                <div class="preview-key-row">
+                  <span class="preview-key-label" data-i18n="previewConfirm">确认发送</span>
+                  <select id="pvk-confirm-button"></select>
+                  <select id="pvk-confirm-gesture"></select>
+                </div>
+                <div class="preview-key-row">
+                  <span class="preview-key-label" data-i18n="previewUndo">撤销一段</span>
+                  <select id="pvk-undo-button"></select>
+                  <select id="pvk-undo-gesture"></select>
+                </div>
+                <div class="preview-key-row">
+                  <span class="preview-key-label" data-i18n="previewDiscard">整段取消</span>
+                  <select id="pvk-discard-button"></select>
+                  <select id="pvk-discard-gesture"></select>
+                </div>
+              </div>
               <div class="prompt-footer">
                 <button id="remote-save-button" class="btn btn-primary" type="button" data-i18n="save">保存</button>
               </div>

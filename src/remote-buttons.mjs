@@ -216,6 +216,59 @@ export const DEFAULT_REMOTE_BUTTON_KEYS = Object.freeze(
   )
 );
 
+// While a remote preview is pending (confirm_on_device), these button+gesture
+// combos become modal: confirm injects and sends the previewed text, undo pops
+// the last appended segment, discard cancels the whole preview.
+export const PREVIEW_ACTIONS = Object.freeze(["confirm", "undo", "discard"]);
+
+export const DEFAULT_PREVIEW_KEYS = Object.freeze({
+  confirm: Object.freeze({ button: "ok", gesture: "click" }),
+  undo: Object.freeze({ button: "back", gesture: "click" }),
+  discard: Object.freeze({ button: "back", gesture: "double" })
+});
+
+/**
+ * XIAOMI_REMOTE_PREVIEW_KEYS overrides single entries. Format:
+ *   "confirm:ok.click, undo:back.click, discard:back.double"
+ * Unknown actions/buttons/gestures fall back to the default for that entry.
+ */
+export function parsePreviewKeys(spec) {
+  const keys = { ...DEFAULT_PREVIEW_KEYS };
+  for (const entry of String(spec || "").split(",")) {
+    const trimmed = entry.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const [rawAction, rawTarget] = trimmed.split(":", 2);
+    const action = String(rawAction || "").trim().toLowerCase();
+    const [button, gesture] = String(rawTarget || "").trim().toLowerCase().split(".");
+    if (!PREVIEW_ACTIONS.includes(action)) {
+      continue;
+    }
+    if (!REMOTE_BUTTONS.includes(button) || !REMOTE_GESTURES.includes(gesture)) {
+      continue;
+    }
+    keys[action] = { button, gesture };
+  }
+  return keys;
+}
+
+export function serializePreviewKeys(keys) {
+  const entries = [];
+  for (const action of PREVIEW_ACTIONS) {
+    const value = keys?.[action];
+    if (!value) {
+      continue;
+    }
+    const fallback = DEFAULT_PREVIEW_KEYS[action];
+    if (value.button === fallback.button && value.gesture === fallback.gesture) {
+      continue;
+    }
+    entries.push(`${action}:${value.button}.${value.gesture}`);
+  }
+  return entries.join(", ");
+}
+
 /**
  * XIAOMI_REMOTE_PROMPT_TEMPLATES holds a JSON array:
  *   [{"name": "优化", "body": "优化下面这段话，去掉语气词：{text}"}]
