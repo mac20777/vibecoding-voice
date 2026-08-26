@@ -95,7 +95,10 @@ export class XiaomiRemoteProtocolParser {
     if (handle === BUTTON_HANDLE) {
       const report = parseHidButtonReport(value);
       if (!report) {
-        return [];
+        // A packet on the button handle that is not the standard 8-byte
+        // keyboard report — some keys (power/menu) may use a different report
+        // format. Surface it once so the key can be identified from the log.
+        return [{ type: "unknown_report", handle, valueHex: value.toString("hex") }];
       }
       // A release report is all zeros, so it only makes sense relative to the
       // code currently held down.
@@ -109,7 +112,9 @@ export class XiaomiRemoteProtocolParser {
     }
 
     if (!AUDIO_HANDLES.has(handle)) {
-      return [];
+      // Notifications on any other handle (consumer-control reports, battery,
+      // …) are not parsed yet; surface them so new keys can be identified.
+      return [{ type: "unknown_handle", handle, valueHex: value.toString("hex") }];
     }
 
     const packet = parseMsbcHidPacket(value);

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, screen, session, shell, Tray } from "electron";
 import { WebSocket } from "ws";
 
 import { buildDesktopFormState, buildUserConfigUpdates } from "../src/desktop-config.mjs";
@@ -1441,6 +1441,105 @@ ipcMain.on("desktop:set-tray-language-mode", (_event, mode) => {
   updateTrayLanguageMode(mode);
 });
 
+// ── Floating dictation overlay ──────────────────────────────────────────
+// Frameless, always-on-top, never focusable (so it can't steal the injection
+// target's focus). Draggable anywhere; position persists in desktop settings.
+let overlayWindow = null;
+let overlayHideTimer = null;
+let overlayMoveTimer = null;
+const OVERLAY_WIDTH = 480;
+const OVERLAY_HEIGHT = 148;
+
+function overlayDefaultPosition() {
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  return { x: Math.round(area.x + (area.width - OVERLAY_WIDTH) / 2), y: area.y + 24 };
+}
+
+function overlaySavedPosition(settings) {
+  if (!Number.isFinite(settings.overlayX) || !Number.isFinite(settings.overlayY)) {
+    return null;
+  }
+  // The display the position was saved on may be disconnected — only honor
+  // the saved position if it still lands inside a connected display.
+  const area = screen.getDisplayNearestPoint({ x: settings.overlayX, y: settings.overlayY }).workArea;
+  const inside =
+    settings.overlayX >= area.x &&
+    settings.overlayX < area.x + area.width &&
+    settings.overlayY >= area.y &&
+    settings.overlayY < area.y + area.height;
+  return inside ? { x: settings.overlayX, y: settings.overlayY } : null;
+}
+
+function ensureOverlayWindow() {
+  if (overlayWindow) {
+    return overlayWindow;
+  }
+  const settings = loadDesktopSettings();
+  const { x, y } = overlaySavedPosition(settings) || overlayDefaultPosition();
+  overlayWindow = new BrowserWindow({
+    width: OVERLAY_WIDTH,
+    height: OVERLAY_HEIGHT,
+    x,
+    y,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: false,
+    show: false,
+    webPreferences: {
+      preload: path.join(app.getAppPath(), "desktop", "overlay-preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+  overlayWindow.setAlwaysOnTop(true, "screen-saver");
+  overlayWindow.on("move", () => {
+    clearTimeout(overlayMoveTimer);
+    overlayMoveTimer = setTimeout(() => {
+      if (!overlayWindow) {
+        return;
+      }
+      const [wx, wy] = overlayWindow.getPosition();
+      writeDesktopSettings({ ...loadDesktopSettings(), overlayX: wx, overlayY: wy });
+    }, 400);
+  });
+  overlayWindow.on("closed", () => {
+    overlayWindow = null;
+  });
+  void overlayWindow.loadFile(path.join(app.getAppPath(), "desktop", "overlay.html"));
+  return overlayWindow;
+}
+
+const OVERLAY_SHOW_STATUSES = new Set(["recording", "transcribing", "translating", "awaiting_action"]);
+const OVERLAY_HIDE_STATUSES = new Set(["typed", "cancelled", "empty_segment", "transcript_empty"]);
+
+ipcMain.on("overlay:event", (_event, payload = {}) => {
+  const win = ensureOverlayWindow();
+  win.webContents.send("overlay:event", payload);
+  if (overlayHideTimer) {
+    clearTimeout(overlayHideTimer);
+    overlayHideTimer = null;
+  }
+  if (payload.type === "transcript_final" || OVERLAY_SHOW_STATUSES.has(payload.status)) {
+    if (!win.isVisible()) {
+      if (!overlaySavedPosition(loadDesktopSettings())) {
+        const pos = overlayDefaultPosition();
+        win.setPosition(pos.x, pos.y);
+      }
+      win.showInactive();
+    }
+    return;
+  }
+  if (OVERLAY_HIDE_STATUSES.has(payload.status)) {
+    overlayHideTimer = setTimeout(() => overlayWindow?.hide(), payload.status === "typed" ? 1400 : 500);
+  }
+});
+
 app.on("second-instance", () => {
   writeDesktopLog("app second-instance");
   showMainWindow();
@@ -1483,6 +1582,7 @@ installMediaPermissionHandler();
 await syncAutoLaunch();
 createMainWindow();
 createTray();
+ensureOverlayWindow();
 startGlobalHotkeyMonitor();
 void startBridgeProcess({ revealOnError: !initialLaunchHidden });
 void refreshRemoteInfoOnce("startup");

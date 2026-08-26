@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: transparent; overflow: hidden; }
+  body {
+    font-family: "Manrope", "Microsoft YaHei", "PingFang SC", sans-serif;
+    color: #f6f6fc;
+    padding: 6px;
+  }
+  .pill {
+    -webkit-app-region: drag;
+    height: 100%;
+    display: flex; align-items: center; gap: 12px;
+    background: rgba(17, 19, 24, 0.92);
+    border: 1px solid rgba(70, 72, 77, 0.5);
+    border-radius: 18px;
+    padding: 12px 18px;
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+    user-select: none;
+    cursor: move;
+  }
+  .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #6dddff; flex: none;
+  }
+  .dot.recording { background: #ff8a8a; animation: pulse 1.1s ease-in-out infinite; }
+  .dot.busy { background: #ffd27d; animation: pulse 0.9s ease-in-out infinite; }
+  .dot.ok { background: #7dffa8; }
+  @keyframes pulse { 50% { opacity: 0.35; } }
+  .main { flex: 1; min-width: 0; }
+  .status { font-size: 13px; font-weight: 600; }
+  .text {
+    font-size: 12.5px; color: #a8abb3; line-height: 1.5;
+    max-height: 57px; overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    word-break: break-word;
+  }
+  .hint { font-size: 11px; color: #6dddff; margin-top: 3px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+  <div class="pill">
+    <span class="dot" id="dot"></span>
+    <div class="main">
+      <div class="status" id="status"></div>
+      <div class="text hidden" id="text"></div>
+      <div class="hint hidden" id="hint"></div>
+    </div>
+  </div>
+  <script>
+    const T = {
+      zh: {
+        listening: "正在听…",
+        transcribing: "识别中…",
+        waiting: "待确认",
+        confirmHint: "按确认键发送 · 按返回键撤销",
+        sent: "已发送 ✓",
+        cancelled: "已取消",
+        empty: "没有听清，再试一次"
+      },
+      en: {
+        listening: "Listening…",
+        transcribing: "Transcribing…",
+        waiting: "Confirm",
+        confirmHint: "Press OK to send · Back to cancel",
+        sent: "Sent ✓",
+        cancelled: "Cancelled",
+        empty: "Nothing heard — try again"
+      }
+    };
+
+    const dot = document.getElementById("dot");
+    const statusEl = document.getElementById("status");
+    const textEl = document.getElementById("text");
+    const hintEl = document.getElementById("hint");
+
+    function render(statusKey, dotClass, text = "", hint = "") {
+      dot.className = `dot ${dotClass}`;
+      statusEl.textContent = statusKey;
+      textEl.textContent = text;
+      textEl.classList.toggle("hidden", !text);
+      hintEl.textContent = hint;
+      hintEl.classList.toggle("hidden", !hint);
+    }
+
+    window.vibeOverlay.onEvent((payload = {}) => {
+      const lang = T[payload.lang] ? payload.lang : "zh";
+      const tt = T[lang];
+      if (payload.type === "transcript_final") {
+        if (payload.requiresAction) {
+          render(tt.waiting, "busy", payload.text || "", tt.confirmHint);
+        } else {
+          render(tt.transcribing, "busy", payload.text || "");
+        }
+        return;
+      }
+      switch (payload.status) {
+        case "recording":
+          render(tt.listening, "recording");
+          break;
+        case "transcribing":
+        case "translating":
+          render(tt.transcribing, "busy");
+          break;
+        case "awaiting_action":
+          render(tt.waiting, "busy", payload.text || "", tt.confirmHint);
+          break;
+        case "typed":
+          render(tt.sent, "ok", payload.text || "");
+          break;
+        case "cancelled":
+          render(tt.cancelled, "");
+          break;
+        case "empty_segment":
+        case "transcript_empty":
+          render(tt.empty, "");
+          break;
+        default:
+          break;
+      }
+    });
+  </script>
+</body>
+</html>

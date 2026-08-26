@@ -15,7 +15,7 @@
 // Payloads are percent-encoded so commas and colons survive.
 
 export const REMOTE_BUTTONS = Object.freeze([
-  "up", "down", "left", "right", "ok", "back", "home", "volume_up", "volume_down", "menu"
+  "up", "down", "left", "right", "ok", "back", "home", "volume_up", "volume_down", "menu", "power"
 ]);
 
 export const REMOTE_GESTURES = Object.freeze(["click", "double", "hold"]);
@@ -34,7 +34,10 @@ export const DEFAULT_REMOTE_ACTIONS = Object.freeze({
   home: Object.freeze({ click: keyAction("home") }),
   volume_up: Object.freeze({ click: keyAction("volume_up") }),
   volume_down: Object.freeze({ click: keyAction("volume_down") }),
-  menu: Object.freeze({ click: keyAction("menu") })
+  menu: Object.freeze({ click: keyAction("menu") }),
+  // The power key is disabled by default — a surprise sleep/lock is a footgun.
+  // Its HID code is not known yet; pressing it logs an unparsed-packet line.
+  power: Object.freeze({ click: Object.freeze({ type: "none" }) })
 });
 
 export function cloneDefaultRemoteActions() {
@@ -209,7 +212,7 @@ export function parseRemoteButtonMap(override) {
 // Legacy flat shape kept for older callers/tests: button -> click key name.
 export const DEFAULT_REMOTE_BUTTON_KEYS = Object.freeze(
   Object.fromEntries(
-    REMOTE_BUTTONS.map((button) => [button, DEFAULT_REMOTE_ACTIONS[button].click.key])
+    REMOTE_BUTTONS.map((button) => [button, DEFAULT_REMOTE_ACTIONS[button].click.key ?? "none"])
   )
 );
 

@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("vibeApp", {
   setTrayLanguageMode: (mode) => ipcRenderer.send("desktop:set-tray-language-mode", mode),
   pickDirectory: (currentPath) => ipcRenderer.invoke("desktop:pick-directory", currentPath),
   openConfigFolder: () => ipcRenderer.invoke("desktop:open-config-folder"),
+  overlayEvent: (payload) => ipcRenderer.send("overlay:event", payload),
   onState: (callback) => {
     if (typeof callback !== "function") {
       return;

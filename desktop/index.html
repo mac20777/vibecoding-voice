@@ -51,6 +51,14 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v11H7l-3 3Z" /><path d="M8 9h8M8 12h5" /></svg>
             <span data-i18n="navTranscripts">转写记录</span>
           </button>
+          <button class="nav-item" type="button" data-page="prompts">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h14v16H5z" /><path d="M9 8h6M9 12h6M9 16h3" /></svg>
+            <span data-i18n="navPrompts">提示词</span>
+          </button>
+          <button class="nav-item" type="button" data-page="remote">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="2.5" width="8" height="19" rx="4" /><circle cx="12" cy="8.5" r="2.2" /><path d="M12 14.5v3" /></svg>
+            <span data-i18n="navRemote">遥控器</span>
+          </button>
           <button class="nav-item" type="button" data-page="settings">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" /></svg>
             <span data-i18n="navSettings">设置</span>
@@ -158,6 +166,135 @@
             </div>
           </section>
 
+          <!-- ═══ Prompts ═══ -->
+          <section class="page" id="page-prompts">
+            <div class="page-title" data-i18n="promptsTitle">提示词模板</div>
+            <div class="page-sub" data-i18n="promptsSub">把常用指令存成模板并绑定到遥控器按键：按一下绑定的键，再按住语音键说话，{text} 会被替换成你说的话。</div>
+
+            <div class="card">
+              <div class="prompts-layout">
+                <div class="prompts-list-col">
+                  <div id="prompt-list"></div>
+                  <button id="prompt-new-button" class="btn btn-ghost btn-small" type="button" data-i18n="promptNew">＋ 新建模板</button>
+                  <button id="prompt-seed-button" class="btn btn-ghost btn-small" type="button" data-i18n="promptSeed" hidden>添加示例模板</button>
+                </div>
+                <div class="prompt-editor" id="prompt-editor">
+                  <div class="prompt-select-hint" id="prompt-select-hint" data-i18n="promptSelectHint">从左侧选择一个模板，或新建一个。</div>
+                  <div id="prompt-editor-fields" hidden>
+                    <label class="field-label" for="prompt-name-input" data-i18n="promptNameLabel">名称</label>
+                    <input type="text" id="prompt-name-input" data-i18n-ph="promptNamePh" placeholder="如：润色" maxlength="30" />
+                    <label class="field-label" for="prompt-body-input" data-i18n="promptBodyLabel">模板内容</label>
+                    <textarea id="prompt-body-input" rows="5" data-i18n-ph="promptBodyPh" placeholder="把下面这段话润色得更通顺：{text}"></textarea>
+                    <div class="prompt-body-hint">
+                      <span data-i18n="promptBodyHint">{text} 是语音文字占位符；不写它，语音文字会追加到末尾。</span>
+                      <button id="prompt-insert-text" class="btn btn-ghost btn-small" type="button" data-i18n="promptInsertText">插入 {text}</button>
+                    </div>
+                    <label class="field-label" data-i18n="promptPreviewLabel">预览</label>
+                    <div class="prompt-preview" id="prompt-preview"></div>
+                    <div class="prompt-bindings" id="prompt-bindings"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="prompt-footer">
+                <button id="prompt-save-button" class="btn btn-primary" type="button" data-i18n="save">保存</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- ═══ Remote ═══ -->
+          <section class="page" id="page-remote">
+            <div class="page-title" data-i18n="remoteTitle">遥控器</div>
+            <div class="page-sub" data-i18n="remoteSub">把遥控器按键映射成电脑操作：点左侧按键，给单击 / 双击 / 长按分别配动作，改完点底部「保存」。</div>
+
+            <div class="card">
+              <div class="switch-row remote-enable-row">
+                <input id="xiaomi-remote-enabled" name="xiaomiRemoteEnabled" type="checkbox" class="switch" />
+                <span data-i18n="fXiaomi">启用小米蓝牙遥控器（需 USBPcap 驱动）</span>
+              </div>
+              <div class="remote-layout">
+                <div class="remote-device">
+                  <div class="remote-top">
+                    <button class="rbtn remote-power" type="button" data-btn="power" title="power">⏻</button>
+                    <button class="rbtn remote-voice" type="button" data-btn="voice" title="voice">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
+                        <path d="M5 11a7 7 0 0 0 14 0M12 18v4" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div class="dpad">
+                    <button class="rbtn dpad-dir" type="button" data-btn="up">▲</button>
+                    <button class="rbtn dpad-dir" type="button" data-btn="left">◀</button>
+                    <button class="rbtn dpad-ok" type="button" data-btn="ok">OK</button>
+                    <button class="rbtn dpad-dir" type="button" data-btn="right">▶</button>
+                    <button class="rbtn dpad-dir" type="button" data-btn="down">▼</button>
+                  </div>
+                  <div class="remote-row">
+                    <button class="rbtn" type="button" data-btn="home">⌂</button>
+                    <button class="rbtn" type="button" data-btn="back">↩</button>
+                    <button class="rbtn" type="button" data-btn="menu">☰</button>
+                  </div>
+                  <div class="remote-vol">
+                    <button class="rbtn vol-half" type="button" data-btn="volume_up">＋</button>
+                    <span class="vol-divider"></span>
+                    <button class="rbtn vol-half" type="button" data-btn="volume_down">－</button>
+                  </div>
+                </div>
+                <div class="remote-editor">
+                  <div class="sel-name" id="rsel-name"></div>
+                  <div class="sel-code" id="rsel-code"></div>
+                  <div class="gesture-tabs" id="gesture-tabs">
+                    <button class="gesture-tab" type="button" data-gesture="click">
+                      <b data-i18n="gestureClick">单击</b><i class="gsum"></i>
+                    </button>
+                    <button class="gesture-tab" type="button" data-gesture="double">
+                      <b data-i18n="gestureDouble">双击</b><i class="gsum"></i>
+                    </button>
+                    <button class="gesture-tab" type="button" data-gesture="hold">
+                      <b data-i18n="gestureHold">长按</b><i class="gsum"></i>
+                    </button>
+                  </div>
+                  <div class="action-editor" id="action-editor">
+                    <select id="action-type" class="action-type-select">
+                      <option value="none" data-i18n="actionTypeNone">禁用</option>
+                      <option value="key" data-i18n="actionTypeKey">键盘按键</option>
+                      <option value="combo" data-i18n="actionTypeCombo">组合快捷键</option>
+                      <option value="app" data-i18n="actionTypeApp">打开应用</option>
+                      <option value="text" data-i18n="actionTypeText">输入文本</option>
+                      <option value="prompt" data-i18n="actionTypePrompt">提示词模板</option>
+                    </select>
+                    <div class="action-fields" id="af-key">
+                      <select id="action-key"></select>
+                    </div>
+                    <div class="action-fields" id="af-combo" hidden>
+                      <div class="combo-mods">
+                        <label><input type="checkbox" id="combo-ctrl" /> Ctrl</label>
+                        <label><input type="checkbox" id="combo-alt" /> Alt</label>
+                        <label><input type="checkbox" id="combo-shift" /> Shift</label>
+                        <label><input type="checkbox" id="combo-win" /> Win</label>
+                      </div>
+                      <input type="text" id="combo-key" placeholder="p / enter / f5 …" maxlength="20" />
+                    </div>
+                    <div class="action-fields" id="af-app" hidden>
+                      <input type="text" id="action-app" data-i18n-ph="appPlaceholder" placeholder="chrome / notepad / C:\path\app.exe" />
+                    </div>
+                    <div class="action-fields" id="af-text" hidden>
+                      <input type="text" id="action-text" data-i18n-ph="textPlaceholder" placeholder="按一下就打进这段文字" />
+                    </div>
+                    <div class="action-fields" id="af-prompt" hidden>
+                      <select id="action-prompt"></select>
+                    </div>
+                  </div>
+                  <div class="remote-note" id="voice-fixed-note" data-i18n="voiceFixedNote" hidden>语音键固定为「按住说话」，不参与映射。</div>
+                  <div class="remote-note" data-i18n="remoteNote"></div>
+                </div>
+              </div>
+              <div class="prompt-footer">
+                <button id="remote-save-button" class="btn btn-primary" type="button" data-i18n="save">保存</button>
+              </div>
+            </div>
+          </section>
+
           <!-- ═══ Settings ═══ -->
           <section class="page" id="page-settings">
             <div class="page-title" data-i18n="setTitle">设置</div>
@@ -168,7 +305,6 @@
                 <button class="settings-tab active" type="button" data-tab="basic" data-i18n="tabBasic">基本</button>
                 <button class="settings-tab" type="button" data-tab="speech" data-i18n="tabSpeech">语音与快捷键</button>
                 <button class="settings-tab" type="button" data-tab="translation" data-i18n="tabTranslation">翻译</button>
-                <button class="settings-tab" type="button" data-tab="remote" data-i18n="tabRemote">遥控器</button>
                 <button class="settings-tab" type="button" data-tab="advanced" data-i18n="tabAdvanced">高级</button>
               </div>
 
@@ -211,6 +347,11 @@
                     <input id="close-to-tray" name="closeToTray" type="checkbox" class="switch" />
                     <span data-i18n="fCloseTray">关闭窗口时最小化到托盘</span>
                   </div>
+                  <div class="switch-row field-full">
+                    <input id="record-transcripts" name="recordTranscripts" type="checkbox" class="switch" />
+                    <span data-i18n="fRecordTranscripts">记录转写历史</span>
+                  </div>
+                  <div class="hint field-full" data-i18n="fRecordTranscriptsHint">关闭后，语音转写和回复不再写入「转写记录」。</div>
                 </div>
               </div>
 
@@ -330,97 +471,6 @@
                   <div class="field field-full">
                     <label class="field-label" for="voice-translation-prompt">Prompt</label>
                     <textarea id="voice-translation-prompt" name="voiceTranslationPrompt" rows="5"></textarea>
-                  </div>
-                </div>
-              </div>
-
-              <div class="card settings-page hidden" data-panel="remote">
-                <div class="switch-row remote-enable-row">
-                  <input id="xiaomi-remote-enabled" name="xiaomiRemoteEnabled" type="checkbox" class="switch" />
-                  <span data-i18n="fXiaomi">启用小米蓝牙遥控器（需 USBPcap 驱动）</span>
-                </div>
-                <div class="remote-layout">
-                  <div class="remote-device">
-                    <button class="rbtn remote-voice" type="button" data-btn="voice" title="voice">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
-                        <path d="M5 11a7 7 0 0 0 14 0M12 18v4" />
-                      </svg>
-                    </button>
-                    <div class="dpad">
-                      <button class="rbtn dpad-dir" type="button" data-btn="up">▲</button>
-                      <button class="rbtn dpad-dir" type="button" data-btn="left">◀</button>
-                      <button class="rbtn dpad-ok" type="button" data-btn="ok">OK</button>
-                      <button class="rbtn dpad-dir" type="button" data-btn="right">▶</button>
-                      <button class="rbtn dpad-dir" type="button" data-btn="down">▼</button>
-                    </div>
-                    <div class="remote-row">
-                      <button class="rbtn" type="button" data-btn="back">↩</button>
-                      <button class="rbtn" type="button" data-btn="home">⌂</button>
-                      <button class="rbtn" type="button" data-btn="menu">☰</button>
-                    </div>
-                    <div class="remote-vol">
-                      <button class="rbtn" type="button" data-btn="volume_up">＋</button>
-                      <button class="rbtn" type="button" data-btn="volume_down">－</button>
-                    </div>
-                  </div>
-                  <div class="remote-editor">
-                    <div class="sel-name" id="rsel-name"></div>
-                    <div class="sel-code" id="rsel-code"></div>
-                    <div class="gesture-tabs" id="gesture-tabs">
-                      <button class="gesture-tab" type="button" data-gesture="click">
-                        <b data-i18n="gestureClick">单击</b><i class="gsum"></i>
-                      </button>
-                      <button class="gesture-tab" type="button" data-gesture="double">
-                        <b data-i18n="gestureDouble">双击</b><i class="gsum"></i>
-                      </button>
-                      <button class="gesture-tab" type="button" data-gesture="hold">
-                        <b data-i18n="gestureHold">长按</b><i class="gsum"></i>
-                      </button>
-                    </div>
-                    <div class="action-editor" id="action-editor">
-                      <select id="action-type" class="action-type-select">
-                        <option value="none" data-i18n="actionTypeNone">禁用</option>
-                        <option value="key" data-i18n="actionTypeKey">键盘按键</option>
-                        <option value="combo" data-i18n="actionTypeCombo">组合快捷键</option>
-                        <option value="app" data-i18n="actionTypeApp">打开应用</option>
-                        <option value="text" data-i18n="actionTypeText">输入文本</option>
-                        <option value="prompt" data-i18n="actionTypePrompt">提示词模板</option>
-                      </select>
-                      <div class="action-fields" id="af-key">
-                        <select id="action-key"></select>
-                      </div>
-                      <div class="action-fields" id="af-combo" hidden>
-                        <div class="combo-mods">
-                          <label><input type="checkbox" id="combo-ctrl" /> Ctrl</label>
-                          <label><input type="checkbox" id="combo-alt" /> Alt</label>
-                          <label><input type="checkbox" id="combo-shift" /> Shift</label>
-                          <label><input type="checkbox" id="combo-win" /> Win</label>
-                        </div>
-                        <input type="text" id="combo-key" placeholder="p / enter / f5 …" maxlength="20" />
-                      </div>
-                      <div class="action-fields" id="af-app" hidden>
-                        <input type="text" id="action-app" data-i18n-ph="appPlaceholder" placeholder="chrome / notepad / C:\path\app.exe" />
-                      </div>
-                      <div class="action-fields" id="af-text" hidden>
-                        <input type="text" id="action-text" data-i18n-ph="textPlaceholder" placeholder="按一下就打进这段文字" />
-                      </div>
-                      <div class="action-fields" id="af-prompt" hidden>
-                        <select id="action-prompt"></select>
-                      </div>
-                    </div>
-                    <div class="remote-note" id="voice-fixed-note" data-i18n="voiceFixedNote" hidden>语音键固定为「按住说话」，不参与映射。</div>
-                    <div class="remote-note" data-i18n="remoteNote"></div>
-                  </div>
-                </div>
-                <div class="templates-block">
-                  <div class="group-heading" data-i18n="templatesTitle">提示词模板</div>
-                  <div class="remote-note" data-i18n="templatesHint">模板中的 {text} 会被替换成你说的话。用法：按绑定了模板的遥控器按键，再按住语音键说话。</div>
-                  <div id="template-list"></div>
-                  <div class="template-add">
-                    <input type="text" id="template-name" data-i18n-ph="templateNamePh" placeholder="模板名，如：优化" />
-                    <input type="text" id="template-body" data-i18n-ph="templateBodyPh" placeholder="优化下面这段话，去掉语气词：{text}" />
-                    <button id="template-add-button" class="btn btn-ghost btn-small" type="button" data-i18n="addTemplate">添加</button>
                   </div>
                 </div>
               </div>

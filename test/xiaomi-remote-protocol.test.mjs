@@ -83,6 +83,23 @@ test("notification and mSBC packet parsers reject malformed input", () => {
   assert.equal(notification.value.length, 20);
 });
 
+test("parser surfaces unparsable button reports and unknown handles for key discovery", () => {
+  const parser = new XiaomiRemoteProtocolParser();
+
+  // Standard button report with an unmapped code still yields button: "unknown".
+  const known = parser.pushLine(`0x0017|0000ab0000000000`);
+  assert.deepEqual(known, [{ type: "button", code: 0xab, button: "unknown", pressed: true }]);
+
+  // Non-standard packet on the button handle (e.g. a consumer-control report
+  // from the power key) must surface instead of being dropped.
+  const odd = parser.pushLine(`0x0017|0130`);
+  assert.deepEqual(odd, [{ type: "unknown_report", handle: "0x0017", valueHex: "0130" }]);
+
+  // Notifications on any other handle surface too (battery, consumer control…).
+  const other = parser.pushLine(`0x001b|020064`);
+  assert.deepEqual(other, [{ type: "unknown_handle", handle: "0x001b", valueHex: "020064" }]);
+});
+
 test("Xiaomi remote parser emits one complete zero-loss voice session", () => {
   const parser = new XiaomiRemoteProtocolParser();
   assert.deepEqual(parser.pushLine(CONTROL_START), [{ type: "start", reason: "control" }]);

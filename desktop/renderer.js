@@ -8,13 +8,14 @@ const I18N = {
     dictateTitle: "快速听写", recentTitle: "最近转写", emptyRecent: "还没有收到语音",
     trTitle: "转写记录", trSub: "本次运行的完整语音与回复历史。",
     setTitle: "设置", setSub: "改完记得点底部「保存」。",
-    tabBasic: "基本", tabSpeech: "语音与快捷键", tabTranslation: "翻译", tabRemote: "遥控器", tabAdvanced: "高级",
+    tabBasic: "基本", tabSpeech: "语音与快捷键", tabTranslation: "翻译", tabAdvanced: "高级",
     fTarget: "发送目标", optTargetInject: "输入注入（打字到当前窗口）", fTargetHint: "语音转写后发送到哪里",
     fTiming: "发送时机", optTimingConfirm: "设备确认后发送", optTimingImm: "识别完成立即发送",
     fTimingHint: "ESP32 在墨水屏上确认；遥控器选「设备确认后发送」时，文字先打进输入框，按确认键（默认回车）再发送",
     fInputMode: "输入模式", optTypeEnter: "输入并回车", optTypeOnly: "仅输入文本",
     fInputModeHint: "选「仅输入文本」：文字先打进输入框，按遥控器 OK（回车）再发送",
     fAutoLaunch: "开机自启", fTray: "启动后最小化到托盘", fCloseTray: "关闭窗口时最小化到托盘",
+    fRecordTranscripts: "记录转写历史", fRecordTranscriptsHint: "关闭后，语音转写和回复不再写入「转写记录」。",
     fStt: "语音识别服务", fSttHint: "Volcengine 推荐给中文环境", fLanHint: "局域网设备握手签名，可留空",
     hotkeyGroup: "全局快捷键",
     fHoldKey: "按住说话", fSendKey: "发送", fUndoKey: "撤销", fTransToggleKey: "英文输出", capture: "录入",
@@ -48,6 +49,9 @@ const I18N = {
     micHintCapturing: "按下新的快捷键",
     micHintConnecting: "正在连接本地服务和麦克风",
     micHintError: "麦克风不可用",
+    micHintRemoteRecording: "遥控器正在听写…",
+    micHintRemoteTranscribing: "正在识别遥控器的语音…",
+    micHintRemoteAwaiting: "待确认 — 按遥控器确认键发送",
     scopeGlobal: "后台可用", scopeWindow: "窗口内可用",
     actIdle: "待命", actRecording: "REC", actStt: "STT", actConfirm: "待确认",
     sendWithKey: "发送 {key}", undoWithKey: "撤销 {key}",
@@ -65,7 +69,7 @@ const I18N = {
     remoteOn: "已启用", remoteOff: "未启用",
     remoteBattery: "电量 {level}%", remoteDisconnected: "未连接", remoteReading: "读取中…",
     btnVoice: "语音键", btnUp: "上", btnDown: "下", btnLeft: "左", btnRight: "右", btnOk: "确认",
-    btnBack: "返回", btnHome: "主页", btnMenu: "菜单", btnVolUp: "音量 +", btnVolDown: "音量 −",
+    btnBack: "返回", btnHome: "主页", btnMenu: "菜单", btnVolUp: "音量 +", btnVolDown: "音量 −", btnPower: "电源键",
     actionUp: "方向 ↑", actionDown: "方向 ↓", actionLeft: "方向 ←", actionRight: "方向 →",
     actionEnter: "回车", actionEscape: "Esc", actionHome: "Home", actionMenu: "菜单键",
     actionVolumeUp: "系统音量 +", actionVolumeDown: "系统音量 −", actionNone: "禁用",
@@ -89,14 +93,25 @@ const I18N = {
     actionTypeApp: "打开应用", actionTypeText: "输入文本", actionTypePrompt: "提示词模板",
     actionUnset: "未设置",
     actionAppSummary: "打开 {target}", actionPromptSummary: "模板：{name}",
-    promptListEmpty: "还没有模板，先在下面添加",
-    templatesTitle: "提示词模板",
-    templatesHint: "模板中的 {text} 会被替换成你说的话。用法：按绑定了模板的遥控器按键，再按住语音键说话。",
-    templateNamePh: "模板名，如：优化", templateBodyPh: "优化下面这段话，去掉语气词：{text}",
+    promptListEmpty: "还没有模板，去「提示词」页添加",
     appPlaceholder: "chrome / notepad / C:\\path\\app.exe", textPlaceholder: "按一下就打进这段文字",
-    addTemplate: "添加", deleteTemplate: "删除",
+    deleteTemplate: "删除",
     promptArmed: "模板「{name}」已就位 — 按住语音键说话",
-    voiceFixedNote: "语音键固定为「按住说话」，不参与映射。"
+    voiceFixedNote: "语音键固定为「按住说话」，不参与映射。",
+    navPrompts: "提示词", navRemote: "遥控器",
+    promptsTitle: "提示词模板",
+    promptsSub: "把常用指令存成模板并绑定到遥控器按键：按一下绑定的键，再按住语音键说话，{text} 会被替换成你说的话。",
+    promptNew: "＋ 新建模板", promptSeed: "添加示例模板",
+    promptSelectHint: "从左侧选择一个模板，或新建一个。",
+    promptUnnamed: "未命名",
+    promptNameLabel: "名称", promptNamePh: "如：润色",
+    promptBodyLabel: "模板内容", promptBodyPh: "把下面这段话润色得更通顺：{text}",
+    promptBodyHint: "{text} 是语音文字占位符；不写它，语音文字会追加到末尾。",
+    promptInsertText: "插入 {text}", promptPreviewLabel: "预览",
+    promptSample: "嗯……那个，明天下午三点提醒我开会，千万别忘了",
+    promptBindingsLabel: "已绑定到：", promptNoBinding: "还没有按键绑定这个模板", promptGoBind: "去绑定 →",
+    remoteTitle: "遥控器",
+    remoteSub: "把遥控器按键映射成电脑操作：点左侧按键，给单击 / 双击 / 长按分别配动作，改完点底部「保存」。"
   },
   en: {
     openLogs: "Open Logs Folder",
@@ -107,13 +122,14 @@ const I18N = {
     dictateTitle: "Quick dictate", recentTitle: "Recent transcripts", emptyRecent: "No voice received yet",
     trTitle: "Transcripts", trSub: "Full voice and reply history of this run.",
     setTitle: "Settings", setSub: "Remember to hit Save at the bottom.",
-    tabBasic: "Basics", tabSpeech: "Speech & Hotkeys", tabTranslation: "Translation", tabRemote: "Remote", tabAdvanced: "Advanced",
+    tabBasic: "Basics", tabSpeech: "Speech & Hotkeys", tabTranslation: "Translation", tabAdvanced: "Advanced",
     fTarget: "Send target", optTargetInject: "Text injection (type into focused window)", fTargetHint: "Where transcripts go",
     fTiming: "Delivery timing", optTimingConfirm: "Confirm on device first", optTimingImm: "Send right after recognition",
     fTimingHint: "ESP32 confirms on the e-paper screen; with “Confirm on device first”, the remote types text into the input box and the OK key (Enter by default) sends it",
     fInputMode: "Input mode", optTypeEnter: "Type + Enter", optTypeOnly: "Type only",
     fInputModeHint: "With “Type only”, text lands in the input box first — press the remote OK key (Enter) to send",
     fAutoLaunch: "Launch on Windows start", fTray: "Minimize to tray on launch", fCloseTray: "Close window to tray",
+    fRecordTranscripts: "Record transcript history", fRecordTranscriptsHint: "When off, transcripts and replies are not added to the Transcripts page.",
     fStt: "Speech recognition", fSttHint: "Volcengine recommended for Chinese", fLanHint: "HMAC handshake secret for LAN devices, optional",
     hotkeyGroup: "Global hotkeys",
     fHoldKey: "Hold to dictate", fSendKey: "Send", fUndoKey: "Undo", fTransToggleKey: "English output", capture: "Record",
@@ -147,6 +163,9 @@ const I18N = {
     micHintCapturing: "Press the new hotkey",
     micHintConnecting: "Connecting to the local service and microphone",
     micHintError: "Microphone unavailable",
+    micHintRemoteRecording: "Remote is dictating…",
+    micHintRemoteTranscribing: "Transcribing the remote's audio…",
+    micHintRemoteAwaiting: "Waiting — press the remote OK key to send",
     scopeGlobal: "works in background", scopeWindow: "works in this window",
     actIdle: "Idle", actRecording: "REC", actStt: "STT", actConfirm: "Confirm",
     sendWithKey: "Send {key}", undoWithKey: "Undo {key}",
@@ -164,7 +183,7 @@ const I18N = {
     remoteOn: "Enabled", remoteOff: "Disabled",
     remoteBattery: "Battery {level}%", remoteDisconnected: "Disconnected", remoteReading: "Reading…",
     btnVoice: "Voice key", btnUp: "Up", btnDown: "Down", btnLeft: "Left", btnRight: "Right", btnOk: "OK",
-    btnBack: "Back", btnHome: "Home", btnMenu: "Menu", btnVolUp: "Volume +", btnVolDown: "Volume −",
+    btnBack: "Back", btnHome: "Home", btnMenu: "Menu", btnVolUp: "Volume +", btnVolDown: "Volume −", btnPower: "Power",
     actionUp: "Arrow ↑", actionDown: "Arrow ↓", actionLeft: "Arrow ←", actionRight: "Arrow →",
     actionEnter: "Enter", actionEscape: "Esc", actionHome: "Home", actionMenu: "Menu key",
     actionVolumeUp: "Volume +", actionVolumeDown: "Volume −", actionNone: "Disabled",
@@ -188,14 +207,25 @@ const I18N = {
     actionTypeApp: "Launch app", actionTypeText: "Type text", actionTypePrompt: "Prompt template",
     actionUnset: "Not set",
     actionAppSummary: "Open {target}", actionPromptSummary: "Template: {name}",
-    promptListEmpty: "No templates yet — add one below",
-    templatesTitle: "Prompt templates",
-    templatesHint: "{text} in a template is replaced by what you say. Usage: press a remote button bound to a template, then hold the voice key and speak.",
-    templateNamePh: "Name, e.g. Polish", templateBodyPh: "Polish this paragraph and remove filler words: {text}",
+    promptListEmpty: "No templates yet — add one on the Prompts page",
     appPlaceholder: "chrome / notepad / C:\\path\\app.exe", textPlaceholder: "Text typed on each press",
-    addTemplate: "Add", deleteTemplate: "Delete",
+    deleteTemplate: "Delete",
     promptArmed: "Template \"{name}\" armed — hold the voice key and speak",
-    voiceFixedNote: "The voice key is fixed to push-to-talk and cannot be remapped."
+    voiceFixedNote: "The voice key is fixed to push-to-talk and cannot be remapped.",
+    navPrompts: "Prompts", navRemote: "Remote",
+    promptsTitle: "Prompt Templates",
+    promptsSub: "Save common instructions as templates and bind them to remote buttons: press the bound button, then hold the voice key and speak — {text} is replaced by what you said.",
+    promptNew: "+ New template", promptSeed: "Add example templates",
+    promptSelectHint: "Select a template on the left, or create a new one.",
+    promptUnnamed: "Untitled",
+    promptNameLabel: "Name", promptNamePh: "e.g. Polish",
+    promptBodyLabel: "Template body", promptBodyPh: "Polish this text: {text}",
+    promptBodyHint: "{text} marks where your spoken words go; without it they are appended at the end.",
+    promptInsertText: "Insert {text}", promptPreviewLabel: "Preview",
+    promptSample: "um, remind me about the meeting tomorrow at 3pm",
+    promptBindingsLabel: "Bound to:", promptNoBinding: "No button bound to this template yet", promptGoBind: "Bind →",
+    remoteTitle: "Remote",
+    remoteSub: "Map remote buttons to computer actions: pick a button on the left, assign actions to click / double-click / long-press, then hit Save."
   }
 };
 
@@ -254,6 +284,7 @@ const elements = {
   autoLaunch: document.querySelector("#auto-launch"),
   launchToTray: document.querySelector("#launch-to-tray"),
   closeToTray: document.querySelector("#close-to-tray"),
+  recordTranscripts: document.querySelector("#record-transcripts"),
   codexSkipGitRepoCheck: document.querySelector("#codex-skip-git-repo-check"),
   claudeDangerouslySkipPermissions: document.querySelector("#claude-dangerously-skip-permissions"),
   xiaomiRemoteEnabled: document.querySelector("#xiaomi-remote-enabled"),
@@ -322,10 +353,18 @@ const elements = {
   actionApp: document.querySelector("#action-app"),
   actionText: document.querySelector("#action-text"),
   actionPrompt: document.querySelector("#action-prompt"),
-  templateList: document.querySelector("#template-list"),
-  templateName: document.querySelector("#template-name"),
-  templateBody: document.querySelector("#template-body"),
-  templateAddButton: document.querySelector("#template-add-button")
+  promptList: document.querySelector("#prompt-list"),
+  promptNewButton: document.querySelector("#prompt-new-button"),
+  promptSeedButton: document.querySelector("#prompt-seed-button"),
+  promptEditorFields: document.querySelector("#prompt-editor-fields"),
+  promptSelectHint: document.querySelector("#prompt-select-hint"),
+  promptNameInput: document.querySelector("#prompt-name-input"),
+  promptBodyInput: document.querySelector("#prompt-body-input"),
+  promptInsertText: document.querySelector("#prompt-insert-text"),
+  promptPreview: document.querySelector("#prompt-preview"),
+  promptBindings: document.querySelector("#prompt-bindings"),
+  promptSaveButton: document.querySelector("#prompt-save-button"),
+  remoteSaveButton: document.querySelector("#remote-save-button")
 };
 
 const DEFAULT_LOCAL_MIC_HOLD_KEY = "F8";
@@ -405,8 +444,9 @@ const localMic = {
 };
 
 // Mirror of src/remote-buttons.mjs action model — keep in sync.
-const REMOTE_BUTTONS = ["up", "down", "left", "right", "ok", "back", "home", "volume_up", "volume_down", "menu"];
+const REMOTE_BUTTONS = ["up", "down", "left", "right", "ok", "back", "home", "volume_up", "volume_down", "menu", "power"];
 const REMOTE_GESTURES = ["click", "double", "hold"];
+const REMOTE_ACTION_TYPES = ["none", "key", "combo", "app", "text", "prompt"];
 const DEFAULT_REMOTE_ACTIONS = Object.freeze({
   up: { click: { type: "key", key: "up" } },
   down: { click: { type: "key", key: "down" } },
@@ -417,13 +457,15 @@ const DEFAULT_REMOTE_ACTIONS = Object.freeze({
   home: { click: { type: "key", key: "home" } },
   volume_up: { click: { type: "key", key: "volume_up" } },
   volume_down: { click: { type: "key", key: "volume_down" } },
-  menu: { click: { type: "key", key: "menu" } }
+  menu: { click: { type: "key", key: "menu" } },
+  power: { click: { type: "none" } }
 });
 const REMOTE_KEY_OPTIONS = [
   "up", "down", "left", "right", "enter", "escape", "tab", "space", "backspace",
   "delete", "home", "end", "pageup", "pagedown", "menu", "volume_up", "volume_down"
 ];
 const REMOTE_BUTTON_DEFS = [
+  { id: "power", code: null, nameKey: "btnPower" },
   { id: "voice", code: "HID 0x3E", nameKey: "btnVoice" },
   { id: "up", code: "HID 0x52", nameKey: "btnUp" },
   { id: "down", code: "HID 0x51", nameKey: "btnDown" },
@@ -440,6 +482,23 @@ let remoteButtonActions = defaultRemoteActions();
 let promptTemplates = [];
 let selectedRemoteButton = "ok";
 let selectedGesture = "click";
+let selectedPromptIndex = -1;
+let loadedPromptName = "";
+let remoteVoiceStatus = "idle";
+let recordTranscriptsEnabled = true;
+
+const EXAMPLE_PROMPTS = {
+  zh: [
+    { name: "润色", body: "把下面这段话润色得更通顺、专业，保持原意，只输出润色后的文本：\n{text}" },
+    { name: "翻译", body: "把下面这段话翻译成自然流畅的英文，只输出译文：\n{text}" },
+    { name: "待办", body: "把下面这段话整理成简洁的待办清单，每行一条：\n{text}" }
+  ],
+  en: [
+    { name: "Polish", body: "Polish the following text for clarity and professionalism, keep the meaning, output only the polished text:\n{text}" },
+    { name: "Translate", body: "Translate the following into natural Chinese, output only the translation:\n{text}" },
+    { name: "To-do list", body: "Turn the following into a concise to-do list, one item per line:\n{text}" }
+  ]
+};
 
 function defaultRemoteActions() {
   const map = {};
@@ -815,6 +874,15 @@ function localMicStatusText() {
   if (localMic.status === "error") {
     return { state: t("micError"), hint: localMic.error || t("micHintError") };
   }
+  if (remoteVoiceStatus === "recording") {
+    return { state: t("micRecording"), hint: t("micHintRemoteRecording") };
+  }
+  if (remoteVoiceStatus === "transcribing") {
+    return { state: t("micTranscribing"), hint: t("micHintRemoteTranscribing") };
+  }
+  if (remoteVoiceStatus === "awaiting") {
+    return { state: t("micAwaiting"), hint: t("micHintRemoteAwaiting") };
+  }
   return {
     state: t("micIdle"),
     hint: t("micHintIdle", {
@@ -843,17 +911,15 @@ function renderLocalMic() {
   elements.captureLocalMicUndoKeyButton.textContent = localMic.capturingHotkey === "undo" ? "…" : t("capture");
   elements.captureLocalMicTranslationToggleKeyButton.textContent =
     localMic.capturingHotkey === "translationToggle" ? "…" : t("capture");
-  elements.localMicActivity.textContent = localMic.recording
-    ? t("actRecording")
-    : localMic.status === "transcribing"
-      ? t("actStt")
-      : localMic.status === "awaiting_action"
-        ? t("actConfirm")
-        : t("actIdle");
-  elements.localMicActivity.classList.toggle(
-    "hidden",
-    !localMic.recording && !["transcribing", "awaiting_action"].includes(localMic.status)
-  );
+  const micActivity = localMic.recording || remoteVoiceStatus === "recording"
+    ? "actRecording"
+    : localMic.status === "transcribing" || remoteVoiceStatus === "transcribing"
+      ? "actStt"
+      : localMic.status === "awaiting_action" || remoteVoiceStatus === "awaiting"
+        ? "actConfirm"
+        : "actIdle";
+  elements.localMicActivity.textContent = t(micActivity);
+  elements.localMicActivity.classList.toggle("hidden", micActivity === "actIdle");
   elements.localMicDb.textContent = localMic.db === null ? "-- dB" : `${Math.round(localMic.db)} dB`;
 
   const baseLevel = localMic.recording ? Math.max(localMic.level, 0.04) : 0.04;
@@ -1297,12 +1363,15 @@ function collectFormPayload() {
       claudeDangerouslySkipPermissions: elements.claudeDangerouslySkipPermissions.checked,
       xiaomiRemoteEnabled: elements.xiaomiRemoteEnabled.checked,
       xiaomiRemoteButtonMap: serializeRemoteActions(),
-      xiaomiRemotePromptTemplates: JSON.stringify(promptTemplates)
+      xiaomiRemotePromptTemplates: JSON.stringify(
+        promptTemplates.filter((template) => template.name.trim() && template.body.trim())
+      )
     },
     desktopSettings: {
       autoLaunch: elements.autoLaunch.checked,
       launchToTray: elements.launchToTray.checked,
       closeToTray: elements.closeToTray.checked,
+      recordTranscripts: elements.recordTranscripts.checked,
       localMicHoldKey: localMic.holdKey,
       localMicSendKey: localMic.sendKey,
       localMicUndoKey: localMic.undoKey,
@@ -1334,13 +1403,19 @@ function fillForm(form, desktopSettingsPath) {
   elements.autoLaunch.checked = Boolean(form.desktopSettings?.autoLaunch);
   elements.launchToTray.checked = Boolean(form.desktopSettings?.launchToTray);
   elements.closeToTray.checked = Boolean(form.desktopSettings?.closeToTray);
+  elements.recordTranscripts.checked = form.desktopSettings?.recordTranscripts !== false;
+  recordTranscriptsEnabled = elements.recordTranscripts.checked;
   setLocalMicHotkeys(form.desktopSettings);
   elements.codexSkipGitRepoCheck.checked = Boolean(form.codexSkipGitRepoCheck);
   elements.claudeDangerouslySkipPermissions.checked = Boolean(form.claudeDangerouslySkipPermissions);
   elements.xiaomiRemoteEnabled.checked = Boolean(form.xiaomiRemoteEnabled);
   remoteButtonActions = parseRemoteActions(form.xiaomiRemoteButtonMap);
   promptTemplates = parsePromptTemplates(form.xiaomiRemotePromptTemplates);
+  if (selectedPromptIndex >= promptTemplates.length) {
+    selectedPromptIndex = promptTemplates.length ? promptTemplates.length - 1 : -1;
+  }
   renderRemoteEditor();
+  renderPromptsPage();
   elements.userConfigPath.textContent = form.userConfigPath || "";
   elements.desktopSettingsPath.textContent = desktopSettingsPath || "";
   updateFormAffordances();
@@ -1373,10 +1448,10 @@ function renderBanner() {
   const service = appState.service || appState.bootstrap?.service;
   let stateKey = "bannerStopped";
   let active = false;
-  if (localMic.recording) {
+  if (localMic.recording || remoteVoiceStatus === "recording") {
     stateKey = "bannerListening";
     active = true;
-  } else if (localMic.status === "transcribing") {
+  } else if (localMic.status === "transcribing" || remoteVoiceStatus === "transcribing") {
     stateKey = "bannerTranscribing";
     active = true;
   } else if (service?.status === "running") {
@@ -1469,6 +1544,9 @@ function formatTime(date) {
 }
 
 function pushTranscript(who, text) {
+  if (!recordTranscriptsEnabled) {
+    return;
+  }
   const value = String(text || "").trim();
   if (!value) {
     return;
@@ -1563,7 +1641,7 @@ function renderChecklist() {
       icon: remoteOn ? "ok" : "miss",
       title: remoteOn ? t("checkRemoteOk") : t("checkRemoteMiss"),
       desc: t("checkRemoteHint"),
-      fix: remoteOn ? null : { label: t("checkRemoteFix"), page: "settings", tab: "remote" }
+      fix: remoteOn ? null : { label: t("checkRemoteFix"), page: "remote" }
     },
     {
       icon: "tip",
@@ -1683,8 +1761,11 @@ function renderRemoteEditor() {
     tab.querySelector(".gsum").textContent = remoteActionSummary(remoteButtonActions[selectedRemoteButton]?.[gesture]);
   }
 
-  const action = normalizeRemoteAction(remoteButtonActions[selectedRemoteButton]?.[selectedGesture])
-    || { type: "none" };
+  // Use the RAW stored action for the editor (not the normalized one), so a
+  // just-picked type with an empty payload (e.g. "app" before typing the path)
+  // keeps its fields visible instead of snapping back to "none".
+  const rawAction = remoteButtonActions[selectedRemoteButton]?.[selectedGesture];
+  const action = rawAction && REMOTE_ACTION_TYPES.includes(rawAction.type) ? rawAction : { type: "none" };
   elements.actionType.value = action.type;
   elements.afKey.hidden = action.type !== "key";
   elements.afCombo.hidden = action.type !== "combo";
@@ -1693,20 +1774,20 @@ function renderRemoteEditor() {
   elements.afPrompt.hidden = action.type !== "prompt";
 
   if (action.type === "key") {
-    elements.actionKey.value = action.key;
+    elements.actionKey.value = action.key || "enter";
   } else if (action.type === "combo") {
-    const parts = action.combo.split("+").map((part) => part.trim()).filter(Boolean);
+    const parts = String(action.combo || "").split("+").map((part) => part.trim()).filter(Boolean);
     elements.comboCtrl.checked = parts.includes("ctrl");
     elements.comboAlt.checked = parts.includes("alt");
     elements.comboShift.checked = parts.includes("shift");
     elements.comboWin.checked = parts.includes("win");
     elements.comboKey.value = parts.find((part) => !["ctrl", "alt", "shift", "win"].includes(part)) || "";
   } else if (action.type === "app") {
-    elements.actionApp.value = action.command;
+    elements.actionApp.value = action.command || "";
   } else if (action.type === "text") {
-    elements.actionText.value = action.text;
+    elements.actionText.value = action.text || "";
   } else if (action.type === "prompt") {
-    renderPromptOptions(action.name);
+    renderPromptOptions(action.name || "");
   }
 }
 
@@ -1731,52 +1812,148 @@ function currentCombo() {
 
 function renderPromptOptions(selectedName = "") {
   elements.actionPrompt.innerHTML = "";
-  if (promptTemplates.length === 0) {
+  const usable = promptTemplates.filter((template) => template.name.trim());
+  if (usable.length === 0) {
     const empty = document.createElement("option");
     empty.value = "";
     empty.textContent = t("promptListEmpty");
     elements.actionPrompt.appendChild(empty);
     return;
   }
-  for (const template of promptTemplates) {
+  for (const template of usable) {
     const opt = document.createElement("option");
     opt.value = template.name;
     opt.textContent = template.name;
     elements.actionPrompt.appendChild(opt);
   }
-  elements.actionPrompt.value = selectedName || promptTemplates[0].name;
+  elements.actionPrompt.value = selectedName || usable[0].name;
 }
 
-function renderPromptTemplates() {
-  elements.templateList.innerHTML = "";
-  if (promptTemplates.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "template-empty";
-    empty.textContent = t("promptListEmpty");
-    elements.templateList.appendChild(empty);
+function gestureLabel(gesture) {
+  return t(`gesture${gesture[0].toUpperCase()}${gesture.slice(1)}`);
+}
+
+function buttonLabel(button) {
+  const def = REMOTE_BUTTON_DEFS.find((entry) => entry.id === button);
+  return def ? t(def.nameKey) : button;
+}
+
+function promptBindingsFor(name) {
+  const bindings = [];
+  if (!name) {
+    return bindings;
+  }
+  for (const button of REMOTE_BUTTONS) {
+    for (const gesture of REMOTE_GESTURES) {
+      const action = remoteButtonActions[button]?.[gesture];
+      if (action?.type === "prompt" && action.name === name) {
+        bindings.push(`${buttonLabel(button)} · ${gestureLabel(gesture)}`);
+      }
+    }
+  }
+  return bindings;
+}
+
+function applyTemplateLocal(body, text) {
+  const template = String(body || "");
+  const value = String(text || "").trim();
+  if (template.includes("{text}")) {
+    return template.replaceAll("{text}", value);
+  }
+  return `${template.trim()}\n${value}`.trim();
+}
+
+function renderPromptPreview() {
+  const selected = promptTemplates[selectedPromptIndex];
+  if (!selected) {
     return;
   }
+  elements.promptPreview.textContent = selected.body.trim()
+    ? applyTemplateLocal(selected.body, t("promptSample"))
+    : "";
+}
+
+function renderPromptBindings() {
+  elements.promptBindings.innerHTML = "";
+  const selected = promptTemplates[selectedPromptIndex];
+  const name = selected?.name.trim();
+  if (!name) {
+    return;
+  }
+  const bindings = promptBindingsFor(name);
+  const label = document.createElement("span");
+  label.textContent = bindings.length ? t("promptBindingsLabel") : t("promptNoBinding");
+  elements.promptBindings.appendChild(label);
+  for (const binding of bindings) {
+    const badge = document.createElement("span");
+    badge.className = "prompt-badge";
+    badge.textContent = binding;
+    elements.promptBindings.appendChild(badge);
+  }
+  if (!bindings.length) {
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "prompt-go-bind";
+    go.textContent = t("promptGoBind");
+    go.addEventListener("click", () => gotoPage("remote"));
+    elements.promptBindings.appendChild(go);
+  }
+}
+
+function renderPromptsPage() {
+  if (!elements.promptList) {
+    return;
+  }
+  if (selectedPromptIndex >= promptTemplates.length) {
+    selectedPromptIndex = promptTemplates.length ? promptTemplates.length - 1 : -1;
+  }
+
+  elements.promptList.innerHTML = "";
   promptTemplates.forEach((template, index) => {
-    const row = document.createElement("div");
-    row.className = "template-row";
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "prompt-row";
+    row.classList.toggle("active", index === selectedPromptIndex);
     const name = document.createElement("span");
-    name.className = "template-name";
-    name.textContent = template.name;
+    name.className = "prompt-row-name";
+    name.textContent = template.name.trim() || t("promptUnnamed");
     const body = document.createElement("span");
-    body.className = "template-body";
+    body.className = "prompt-row-body";
     body.textContent = template.body;
-    const del = document.createElement("button");
-    del.type = "button";
-    del.className = "template-del";
+    const del = document.createElement("span");
+    del.className = "prompt-row-del";
     del.textContent = "×";
     del.title = t("deleteTemplate");
-    del.addEventListener("click", () => {
+    del.addEventListener("click", (event) => {
+      event.stopPropagation();
       promptTemplates.splice(index, 1);
-      renderPromptTemplates();
+      if (selectedPromptIndex === index) {
+        selectedPromptIndex = -1;
+      } else if (selectedPromptIndex > index) {
+        selectedPromptIndex -= 1;
+      }
+      renderPromptsPage();
     });
     row.append(name, body, del);
-    elements.templateList.appendChild(row);
+    row.addEventListener("click", () => {
+      selectedPromptIndex = index;
+      renderPromptsPage();
+    });
+    elements.promptList.appendChild(row);
   });
+  elements.promptSeedButton.hidden = promptTemplates.length > 0;
+
+  const selected = promptTemplates[selectedPromptIndex];
+  elements.promptEditorFields.hidden = !selected;
+  elements.promptSelectHint.hidden = Boolean(selected);
+  if (!selected) {
+    return;
+  }
+  elements.promptNameInput.value = selected.name;
+  elements.promptBodyInput.value = selected.body;
+  loadedPromptName = selected.name;
+  renderPromptPreview();
+  renderPromptBindings();
 }
 
 function applyLang() {
@@ -1807,10 +1984,11 @@ function applyLang() {
   renderAbout();
   renderRemoteStatus();
   renderRemoteEditor();
-  renderPromptTemplates();
+  renderPromptsPage();
 }
 
 function resetLiveConnection() {
+  remoteVoiceStatus = "idle";
   if (appState.socket) {
     if (localMic.recording || localMic.starting) {
       void stopLocalMicRecording({ sendStop: false });
@@ -1836,8 +2014,66 @@ function scheduleReconnect() {
   }, 1200);
 }
 
+// Relayed dictation events from the remote / ESP32 carry a `source` field
+// (the desktop's own desktop_mic events don't). They drive the home status
+// widget and the banner; transcript_final is recorded by the normal branch.
+function handleRemoteVoiceEvent(message) {
+  const source = String(message.source || "");
+  if (!source || source === "desktop_mic") {
+    return;
+  }
+  if (message.type === "transcript_final") {
+    remoteVoiceStatus = "idle";
+  } else if (message.type === "status") {
+    if (message.status === "recording") {
+      remoteVoiceStatus = "recording";
+    } else if (["transcribing", "translating"].includes(message.status)) {
+      remoteVoiceStatus = "transcribing";
+    } else if (message.status === "awaiting_action") {
+      remoteVoiceStatus = "awaiting";
+    } else {
+      remoteVoiceStatus = "idle";
+    }
+  } else {
+    return;
+  }
+  renderLocalMic();
+  renderBanner();
+}
+
+// Forward dictation lifecycle to the floating overlay window — the main
+// window may be hidden in the tray while dictation happens.
+const OVERLAY_FORWARD_STATUSES = new Set([
+  "recording", "transcribing", "translating", "awaiting_action",
+  "typed", "cancelled", "empty_segment", "transcript_empty"
+]);
+function forwardOverlayEvent(message) {
+  if (typeof window.vibeApp.overlayEvent !== "function") {
+    return;
+  }
+  if (message.type === "transcript_final") {
+    window.vibeApp.overlayEvent({
+      type: "transcript_final",
+      text: message.text || "",
+      requiresAction: message.requiresAction === true,
+      lang
+    });
+    return;
+  }
+  if (message.type === "status" && OVERLAY_FORWARD_STATUSES.has(message.status)) {
+    window.vibeApp.overlayEvent({
+      type: "status",
+      status: message.status,
+      text: message.text || "",
+      lang
+    });
+  }
+}
+
 function handleBridgeMessage(message) {
   finishLocalMicSessionFromBridge(message);
+  handleRemoteVoiceEvent(message);
+  forwardOverlayEvent(message);
 
   if (message.type === "hello_ack") {
     appState.socketReady = true;
@@ -2085,10 +2321,9 @@ elements.volcengineAppKey.addEventListener("input", renderChecklist);
 elements.volcengineAccessKey.addEventListener("input", renderChecklist);
 elements.openaiApiKey.addEventListener("input", renderChecklist);
 
-elements.form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  elements.saveSettingsButton.disabled = true;
-  elements.saveSettingsButton.textContent = t("saving");
+async function saveConfigFlow(button) {
+  button.disabled = true;
+  button.textContent = t("saving");
   try {
     const bootstrap = await window.vibeApp.saveConfig(collectFormPayload());
     appState.bootstrap = bootstrap;
@@ -2098,14 +2333,23 @@ elements.form.addEventListener("submit", async (event) => {
     renderService();
     renderChecklist();
     connectLiveSocket();
-    elements.saveSettingsButton.textContent = t("saved");
+    button.textContent = t("saved");
     setTimeout(() => {
-      elements.saveSettingsButton.textContent = t("save");
+      button.textContent = t("save");
     }, 1600);
   } finally {
-    elements.saveSettingsButton.disabled = false;
+    button.disabled = false;
   }
+}
+
+elements.form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await saveConfigFlow(elements.saveSettingsButton);
 });
+
+elements.promptSaveButton.addEventListener("click", () => saveConfigFlow(elements.promptSaveButton));
+
+elements.remoteSaveButton.addEventListener("click", () => saveConfigFlow(elements.remoteSaveButton));
 
 elements.discardSettingsButton.addEventListener("click", () => {
   if (appState.bootstrap?.form) {
@@ -2203,21 +2447,68 @@ elements.actionPrompt.addEventListener("change", () => {
   setGestureAction({ type: "prompt", name: elements.actionPrompt.value });
 });
 
-elements.templateAddButton.addEventListener("click", () => {
-  const name = elements.templateName.value.trim();
-  const body = elements.templateBody.value.trim();
-  if (!name || !body) {
+elements.promptNewButton.addEventListener("click", () => {
+  promptTemplates.push({ name: "", body: "" });
+  selectedPromptIndex = promptTemplates.length - 1;
+  renderPromptsPage();
+  elements.promptNameInput.focus();
+});
+
+elements.promptSeedButton.addEventListener("click", () => {
+  const examples = EXAMPLE_PROMPTS[lang] || EXAMPLE_PROMPTS.zh;
+  promptTemplates.push(...examples.map((template) => ({ ...template })));
+  selectedPromptIndex = 0;
+  renderPromptsPage();
+});
+
+elements.promptNameInput.addEventListener("input", () => {
+  const selected = promptTemplates[selectedPromptIndex];
+  if (!selected) {
     return;
   }
-  const existing = promptTemplates.findIndex((entry) => entry.name === name);
-  if (existing >= 0) {
-    promptTemplates[existing] = { name, body };
-  } else {
-    promptTemplates.push({ name, body });
+  const newName = elements.promptNameInput.value;
+  selected.name = newName;
+  // Prompt actions reference templates by name — keep bindings in sync on rename.
+  if (loadedPromptName && loadedPromptName !== newName) {
+    for (const button of REMOTE_BUTTONS) {
+      for (const gesture of REMOTE_GESTURES) {
+        const action = remoteButtonActions[button]?.[gesture];
+        if (action?.type === "prompt" && action.name === loadedPromptName) {
+          remoteButtonActions[button][gesture] = { ...action, name: newName };
+        }
+      }
+    }
+    renderRemoteEditor();
   }
-  elements.templateName.value = "";
-  elements.templateBody.value = "";
-  renderPromptTemplates();
+  loadedPromptName = newName;
+  const row = elements.promptList.children[selectedPromptIndex];
+  if (row) {
+    row.querySelector(".prompt-row-name").textContent = newName.trim() || t("promptUnnamed");
+  }
+  renderPromptBindings();
+});
+
+elements.promptBodyInput.addEventListener("input", () => {
+  const selected = promptTemplates[selectedPromptIndex];
+  if (!selected) {
+    return;
+  }
+  selected.body = elements.promptBodyInput.value;
+  renderPromptPreview();
+  const row = elements.promptList.children[selectedPromptIndex];
+  if (row) {
+    row.querySelector(".prompt-row-body").textContent = selected.body;
+  }
+});
+
+elements.promptInsertText.addEventListener("click", () => {
+  const input = elements.promptBodyInput;
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? start;
+  input.value = `${input.value.slice(0, start)}{text}${input.value.slice(end)}`;
+  input.focus();
+  input.selectionStart = input.selectionEnd = start + 6;
+  input.dispatchEvent(new Event("input"));
 });
 
 function beginHotkeyCapture(target) {
@@ -2391,7 +2682,7 @@ if (elements.actionKey) {
     elements.actionKey.append(option);
   }
 }
-renderPromptTemplates();
+renderPromptsPage();
 setActiveTab("basic");
 renderLocalMic();
 renderRemoteEditor();

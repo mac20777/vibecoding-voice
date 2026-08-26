@@ -359,9 +359,38 @@ function broadcastJson(payload) {
   }
 }
 
+// Dictation lifecycle events normally go only to the client that originated
+// the audio. Relay them to desktop-window clients so the desktop UI (and its
+// floating overlay) can show live dictation status and record transcripts.
+function relayDictationEvent(originWs, payload) {
+  for (const client of wss.clients) {
+    if (
+      client !== originWs &&
+      client.readyState === WebSocket.OPEN &&
+      client.clientState?.authenticated &&
+      client.clientState?.boardType === "desktop-window"
+    ) {
+      sendJson(client, payload);
+    }
+  }
+}
+
+function sendDictationJson(ws, payload) {
+  sendJson(ws, payload);
+  const state = ws.clientState;
+  if (!state || state.boardType === "desktop-window") {
+    return;
+  }
+  relayDictationEvent(ws, {
+    ...payload,
+    source: payload.source || state.segmentSource || state.boardType
+  });
+}
+
 function createClientState() {
   return {
     deviceId: "unknown",
+    boardType: "unknown",
     authenticated: !config.lanSharedSecret,
     voiceMode: "normal",
     segmentActive: false,
@@ -727,11 +756,11 @@ async function finalizeSegment(ws, state) {
   const textInjectionMode = getSegmentTextInjectionMode(state);
 
   if (pcmBuffer.length === 0) {
-    sendJson(ws, { type: "status", status: "empty_segment" });
+    sendDictationJson(ws, { type: "status", status: "empty_segment" });
     return;
   }
 
-  sendJson(ws, {
+  sendDictationJson(ws, {
     type: "status",
     status: "transcribing",
     bytes: pcmBuffer.length
@@ -742,7 +771,7 @@ async function finalizeSegment(ws, state) {
   const hadPendingTranscript = Boolean(String(state.pendingTranscript || "").trim());
 
   if (!transcript) {
-    sendJson(ws, {
+    sendDictationJson(ws, {
       type: "status",
       status: hadPendingTranscript ? "empty_segment" : "transcript_empty",
       text: state.pendingTranscript,
@@ -754,7 +783,7 @@ async function finalizeSegment(ws, state) {
   }
 
   if (voiceMode === "todo") {
-    sendJson(ws, {
+    sendDictationJson(ws, {
       type: "transcript_final",
       text: transcript,
       latencyMs: Date.now() - startedAt,
@@ -787,7 +816,7 @@ async function finalizeSegment(ws, state) {
     state.pendingOriginalSegments.push(transcript);
     state.pendingTransform = transcriptTransform;
     const pendingTranscript = updatePendingTranscript(state);
-    sendJson(ws, {
+    sendDictationJson(ws, {
       type: "transcript_final",
       text: pendingTranscript,
       translatedText: state.pendingTranslatedTranscript,
@@ -797,7 +826,7 @@ async function finalizeSegment(ws, state) {
       latencyMs: Date.now() - startedAt,
       requiresAction: true
     });
-    sendJson(ws, {
+    sendDictationJson(ws, {
       type: "status",
       status: "awaiting_action",
       text: pendingTranscript,
@@ -809,7 +838,7 @@ async function finalizeSegment(ws, state) {
     return;
   }
 
-  sendJson(ws, {
+  sendDictationJson(ws, {
     type: "transcript_final",
     text: sendTranscript,
     translatedText: translatedTranscript,
@@ -826,7 +855,7 @@ async function finalizeSegment(ws, state) {
       throw new Error("Codex session is busy");
     }
     state.pendingTranscript = "";
-    sendJson(ws, {
+    sendDictationJson(ws, {
       type: "status",
       status: "typed",
       text: sendTranscript,
@@ -845,7 +874,7 @@ async function finalizeSegment(ws, state) {
       throw new Error("Claude session is busy");
     }
     state.pendingTranscript = "";
-    sendJson(ws, {
+    sendDictationJson(ws, {
       type: "status",
       status: "typed",
       text: sendTranscript,
@@ -861,7 +890,7 @@ async function finalizeSegment(ws, state) {
 
   await dispatchPrompt(sendTranscript, { textInjectionMode });
   state.pendingTranscript = "";
-  sendJson(ws, {
+  sendDictationJson(ws, {
     type: "status",
     status: "typed",
     text: sendTranscript,
@@ -989,7 +1018,7 @@ async function translateVoiceTranscript(ws, transcript) {
     return { text: transcript, transform: "none" };
   }
 
-  sendJson(ws, { type: "status", status: "translating", text: transcript });
+  sendDictationJson(ws, { type: "status", status: "translating", text: transcript });
   try {
     const targetLanguage = getVoiceTranslationTargetLanguage();
     const requestLanguages = getVoiceTranslationRequestLanguages();
@@ -1255,7 +1284,7 @@ async function sendPendingTranscript(ws, state) {
     return;
   }
 
-  sendJson(ws, {
+  sendDictationJson(ws, {
     type: "status",
     status: "typed",
     text: transcript,
@@ -1287,7 +1316,7 @@ function undoPendingTranscript(ws, state) {
   state.pendingOriginalSegments.pop();
   const transcript = updatePendingTranscript(state);
   if (transcript) {
-    sendJson(ws, {
+    sendDictationJson(ws, {
       type: "status",
       status: "awaiting_action",
       text: transcript,
@@ -1354,6 +1383,7 @@ wss.on("connection", (ws, req) => {
       switch (message.type) {
         case "hello":
           state.deviceId = message.deviceId || "unknown";
+          state.boardType = String(message.boardType || "unknown");
           {
             const authResult = validateHello(message, req.socket.remoteAddress);
             if (!authResult.ok) {
@@ -1382,7 +1412,7 @@ wss.on("connection", (ws, req) => {
           log("ptt_start", state.deviceId);
           state.segmentActive = true;
           state.chunks = [];
-          sendJson(ws, { type: "status", status: "recording" });
+          sendDictationJson(ws, { type: "status", status: "recording" });
           break;
         case "ptt_stop":
           if (!state.authenticated) {
@@ -1400,7 +1430,7 @@ wss.on("connection", (ws, req) => {
           log("ptt_cancel", state.deviceId, state.chunks.length);
           state.segmentActive = false;
           state.chunks = [];
-          sendJson(ws, { type: "status", status: "cancelled" });
+          sendDictationJson(ws, { type: "status", status: "cancelled" });
           break;
         case "remote_button":
           if (!state.authenticated) {
@@ -1603,7 +1633,7 @@ wss.on("connection", (ws, req) => {
           }
           void dispatchUserPrompt(ws, promptText, state).then((route) => {
             if (route === "normal") {
-              sendJson(ws, { type: "status", status: "typed", text: promptText });
+              sendDictationJson(ws, { type: "status", status: "typed", text: promptText });
             }
           }).catch((e) => {
             const msg = e instanceof Error ? e.message : String(e);

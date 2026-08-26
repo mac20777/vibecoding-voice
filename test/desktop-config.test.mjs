@@ -10,6 +10,9 @@ test("normalizeDesktopSettings applies safe defaults", () => {
     autoLaunch: false,
     launchToTray: false,
     closeToTray: false,
+    recordTranscripts: true,
+    overlayX: null,
+    overlayY: null,
     localMicHoldKey: "F8",
     localMicSendKey: "F9",
     localMicUndoKey: "F10",
@@ -36,6 +39,9 @@ test("normalizeDesktopSettings applies safe defaults", () => {
       localMicSendKey: "F11",
       localMicUndoKey: "Ctrl+Backspace",
       localMicTranslationToggleKey: "Ctrl+Alt+E",
+      recordTranscripts: true,
+      overlayX: null,
+      overlayY: null,
       uiLanguage: "zh",
       hasUsedVoice: false
     }
@@ -97,6 +103,9 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
   assert.equal(formState.voiceTranslationSendBilingual, true);
   assert.deepEqual(formState.overrideFiles, ["D:/github/app/.env"]);
   assert.deepEqual(formState.desktopSettings, {
+    recordTranscripts: true,
+    overlayX: null,
+    overlayY: null,
     autoLaunch: true,
     launchToTray: true,
     closeToTray: false,

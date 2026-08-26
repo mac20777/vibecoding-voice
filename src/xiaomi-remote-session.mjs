@@ -29,6 +29,7 @@ export class XiaomiRemoteSessionController {
     this.session = null;
     this.decoding = false;
     this.inactivityTimer = null;
+    this.seenUnknownPackets = new Set();
   }
 
   pushLine(line) {
@@ -81,6 +82,21 @@ export class XiaomiRemoteSessionController {
         button: event.button,
         code: `0x${event.code.toString(16).padStart(2, "0")}`
       });
+      return;
+    }
+
+    if (event.type === "unknown_report" || event.type === "unknown_handle") {
+      // Unparsed HID traffic (a key whose report format or handle we do not
+      // know yet, e.g. power/menu). Log each unique packet once so users can
+      // press the key and report the line.
+      const key = `${event.handle}:${event.valueHex}`;
+      if (!this.seenUnknownPackets.has(key)) {
+        this.seenUnknownPackets.add(key);
+        this.log("unparsed HID packet — press a mapped key and report this line", {
+          handle: event.handle,
+          value: event.valueHex
+        });
+      }
       return;
     }
 

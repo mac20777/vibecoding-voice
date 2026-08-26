@@ -65,6 +65,8 @@ server.mjs (entry point — HTTP + WebSocket server)
 - **Text injection**: Uses clipboard + Ctrl+V + restores previous clipboard (Windows PowerShell only)
 - **Codex session**: Spawns via PowerShell wrapper, tracks thread ID for `codex exec resume` continuity
 - **CLI projector**: Maintains rolling 8-line log buffer, truncates for e-paper constraints
+- **Dictation relay**: Lifecycle events (recording/transcribing/typed/transcript_final…) are sent to the originating client and relayed to `desktop-window` clients (`sendDictationJson` in server.mjs) so the desktop UI can show live status, record transcripts, and drive the floating overlay
+- **Floating overlay**: `desktop/overlay.html` + `overlay-preload.cjs` — frameless always-on-top window, `focusable: false` so it never steals the injection target's focus; draggable, position persisted in desktop-settings.json (`overlayX/overlayY`)
 
 ## Configuration (.env)
 
