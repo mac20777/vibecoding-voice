@@ -27,7 +27,15 @@
             <span class="sep">·</span>
             <span id="cli-status">尚未连接</span>
             <span class="sep" id="remote-status-sep" hidden>·</span>
-            <span id="remote-status" hidden></span>
+            <span id="remote-status" hidden>
+              <span id="remote-status-text"></span>
+              <svg id="remote-battery" viewBox="0 0 24 12" aria-hidden="true" hidden>
+                <rect class="rb-shell" x="0.7" y="0.7" width="19.6" height="10.6" rx="2.6" />
+                <rect id="remote-battery-fill" x="2.6" y="2.6" width="15.8" height="6.8" rx="1.4" />
+                <path d="M21.9 4v4" />
+              </svg>
+              <span id="remote-battery-label"></span>
+            </span>
           </div>
         </div>
         <div class="title-actions">
@@ -211,6 +219,13 @@
                 <input id="xiaomi-remote-enabled" name="xiaomiRemoteEnabled" type="checkbox" class="switch" />
                 <span data-i18n="fXiaomi">启用小米蓝牙遥控器（需 USBPcap 驱动）</span>
               </div>
+              <div class="remote-hid-warning" id="remote-hid-warning" hidden>
+                <span class="remote-hid-warning-text">
+                  <span data-i18n="remoteHidWarning">Windows 报告遥控器「驱动程序错误」。通常不影响本软件的语音和按键；如需消除可尝试修复（会弹出管理员授权）。</span>
+                  <span id="remote-hid-fix-result"></span>
+                </span>
+                <button id="remote-hid-fix" class="btn btn-ghost" type="button" data-i18n="remoteHidFix">修复驱动</button>
+              </div>
               <div class="remote-layout">
                 <div class="remote-device">
                   <div class="remote-top">
@@ -353,7 +368,7 @@
                       <option value="confirm_on_device" data-i18n="optTimingConfirm">设备确认后发送</option>
                       <option value="immediate" data-i18n="optTimingImm">识别完成立即发送</option>
                     </select>
-                    <div class="hint" data-i18n="fTimingHint">仅对 ESP32 墨水屏设备生效；电脑麦克风和遥控器总是识别后立即发送</div>
+                    <div class="hint" data-i18n="fTimingHint">确认模式：转写先在悬浮窗预览，按发送键（F9）上屏；立即模式：识别完直接发送</div>
                   </div>
                   <div class="field" data-mode-visible="text_injector">
                     <label class="field-label" for="text-injection-mode" data-i18n="fInputMode">输入模式</label>
@@ -423,6 +438,17 @@
                       <label class="field-label" for="volcengine-access-key">Volcengine Access Key</label>
                       <input id="volcengine-access-key" name="volcengineAccessKey" type="password" autocomplete="off" />
                     </div>
+                  </div>
+                </div>
+
+                <div class="group-heading" data-i18n="micDeviceGroup">电脑麦克风</div>
+                <div class="field-grid">
+                  <div class="field">
+                    <label class="field-label" for="local-mic-device" data-i18n="micDeviceLabel">麦克风设备</label>
+                    <select id="local-mic-device">
+                      <option value="" data-i18n="micDeviceDefault">系统默认</option>
+                    </select>
+                    <div class="hint" data-i18n="micDeviceHint">选择 F8 录音用的麦克风；蓝牙遥控器走独立通道，无需选择</div>
                   </div>
                 </div>
 

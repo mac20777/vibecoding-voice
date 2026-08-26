@@ -11,12 +11,16 @@ const I18N = {
     tabBasic: "基本", tabSpeech: "语音与快捷键", tabTranslation: "翻译", tabAdvanced: "高级",
     fTarget: "发送目标", optTargetInject: "输入注入（打字到当前窗口）", fTargetHint: "语音转写后发送到哪里",
     fTiming: "发送时机", optTimingConfirm: "设备确认后发送", optTimingImm: "识别完成立即发送",
-    fTimingHint: "ESP32 在墨水屏上确认；遥控器选「设备确认后发送」时，文字先出现在悬浮条里预览，按确认键上屏并发送",
+    fTimingHint: "确认模式：转写先在悬浮窗/设备上预览，按确认键（桌面默认 F9）上屏；立即模式：识别完直接发送",
     fInputMode: "输入模式", optTypeEnter: "输入并回车", optTypeOnly: "仅输入文本",
     fInputModeHint: "选「仅输入文本」：文字先打进输入框，按遥控器 OK（回车）再发送",
     fAutoLaunch: "开机自启", fTray: "启动后最小化到托盘", fCloseTray: "关闭窗口时最小化到托盘",
     fRecordTranscripts: "记录转写历史", fRecordTranscriptsHint: "关闭后，语音转写和回复不再写入「转写记录」。",
     fStt: "语音识别服务", fSttHint: "Volcengine 推荐给中文环境", fLanHint: "局域网设备握手签名，可留空",
+    micDeviceGroup: "电脑麦克风",
+    micDeviceLabel: "麦克风设备", micDeviceDefault: "系统默认",
+    micDeviceHint: "选择 F8 录音用的麦克风；蓝牙遥控器走独立通道，无需选择",
+    micDeviceUnknown: "麦克风 {index}",
     hotkeyGroup: "全局快捷键",
     fHoldKey: "按住说话", fSendKey: "发送", fUndoKey: "撤销", fTransToggleKey: "英文输出", capture: "录入",
     fTransEnable: "启用中文翻译（识别后翻译成目标语言再发送）",
@@ -68,6 +72,9 @@ const I18N = {
     voiceFixed: "固定为「按住说话」", remoteCodeUnknown: "HID — 待识别",
     remoteOn: "已启用", remoteOff: "未启用",
     remoteBattery: "电量 {level}%", remoteDisconnected: "未连接", remoteReading: "读取中…",
+    remoteHidWarning: "Windows 报告遥控器「驱动程序错误」。通常不影响本软件的语音和按键；如需消除可尝试修复（会弹出管理员授权）。",
+    remoteHidFix: "修复驱动", remoteHidFixing: "修复中…", remoteHidFixed: "已修复",
+    remoteHidFixFailed: "未修复，可能需要重启电脑",
     btnVoice: "语音键", btnUp: "上", btnDown: "下", btnLeft: "左", btnRight: "右", btnOk: "确认",
     btnBack: "返回", btnHome: "主页", btnMenu: "菜单", btnVolUp: "音量 +", btnVolDown: "音量 −", btnPower: "电源键",
     actionUp: "方向 ↑", actionDown: "方向 ↓", actionLeft: "方向 ←", actionRight: "方向 →",
@@ -75,6 +82,7 @@ const I18N = {
     actionVolumeUp: "系统音量 +", actionVolumeDown: "系统音量 −", actionNone: "禁用",
     notConnected: "尚未连接。", waitingStart: "等待启动。", waitingData: "等待中",
     connReady: "已连接 · {mode}", connNoService: "服务未连接", connClosed: "连接已断开", connFailed: "无法连接到本地服务",
+    connError: "出错了 · 详见日志页",
     saving: "保存中…", saved: "已保存 ✓",
     englishOn: "已切换为英文输出。", englishOff: "已关闭英文输出。",
     configIssuePrefix: "当前配置不完整：",
@@ -110,6 +118,7 @@ const I18N = {
     wizSttNeedKey: "请先把 Key 填上（点右侧「获取 Key」去控制台复制）",
     wizOptVolc: "Volcengine（推荐中文）",
     overlayPreviewHint: "{confirm} 发送 · {undo} 撤销一段 · {discard} 整段取消",
+    overlayPreviewHintLocal: "{send} 发送 · {undo} 撤销",
     navPrompts: "提示词", navRemote: "遥控器",
     promptsTitle: "提示词模板",
     promptsSub: "把常用指令存成模板并绑定到遥控器按键：按一下绑定的键，再按住语音键说话，{text} 会被替换成你说的话。",
@@ -137,12 +146,16 @@ const I18N = {
     tabBasic: "Basics", tabSpeech: "Speech & Hotkeys", tabTranslation: "Translation", tabAdvanced: "Advanced",
     fTarget: "Send target", optTargetInject: "Text injection (type into focused window)", fTargetHint: "Where transcripts go",
     fTiming: "Delivery timing", optTimingConfirm: "Confirm on device first", optTimingImm: "Send right after recognition",
-    fTimingHint: "ESP32 confirms on the e-paper screen; with “Confirm on device first”, remote transcripts preview in the floating bar — the OK key types and sends them",
+    fTimingHint: "Confirm mode: transcripts preview in the floating bar / on the device first — the confirm key (F9 on desktop) types them; Immediate mode sends right after recognition",
     fInputMode: "Input mode", optTypeEnter: "Type + Enter", optTypeOnly: "Type only",
     fInputModeHint: "With “Type only”, text lands in the input box first — press the remote OK key (Enter) to send",
     fAutoLaunch: "Launch on Windows start", fTray: "Minimize to tray on launch", fCloseTray: "Close window to tray",
     fRecordTranscripts: "Record transcript history", fRecordTranscriptsHint: "When off, transcripts and replies are not added to the Transcripts page.",
     fStt: "Speech recognition", fSttHint: "Volcengine recommended for Chinese", fLanHint: "HMAC handshake secret for LAN devices, optional",
+    micDeviceGroup: "Desktop microphone",
+    micDeviceLabel: "Microphone", micDeviceDefault: "System default",
+    micDeviceHint: "Pick the mic used by F8 dictation; the Bluetooth remote uses its own channel and needs no selection",
+    micDeviceUnknown: "Microphone {index}",
     hotkeyGroup: "Global hotkeys",
     fHoldKey: "Hold to dictate", fSendKey: "Send", fUndoKey: "Undo", fTransToggleKey: "English output", capture: "Record",
     fTransEnable: "Translate Chinese dictation before sending",
@@ -194,6 +207,9 @@ const I18N = {
     voiceFixed: "Fixed to push-to-talk", remoteCodeUnknown: "HID — to be identified",
     remoteOn: "Enabled", remoteOff: "Disabled",
     remoteBattery: "Battery {level}%", remoteDisconnected: "Disconnected", remoteReading: "Reading…",
+    remoteHidWarning: "Windows reports a \"driver error\" for the remote. Voice and buttons in this app usually keep working; repair only if you want it gone (admin prompt).",
+    remoteHidFix: "Repair driver", remoteHidFixing: "Repairing…", remoteHidFixed: "Repaired",
+    remoteHidFixFailed: "Still broken — a PC restart may be needed",
     btnVoice: "Voice key", btnUp: "Up", btnDown: "Down", btnLeft: "Left", btnRight: "Right", btnOk: "OK",
     btnBack: "Back", btnHome: "Home", btnMenu: "Menu", btnVolUp: "Volume +", btnVolDown: "Volume −", btnPower: "Power",
     actionUp: "Arrow ↑", actionDown: "Arrow ↓", actionLeft: "Arrow ←", actionRight: "Arrow →",
@@ -201,6 +217,7 @@ const I18N = {
     actionVolumeUp: "Volume +", actionVolumeDown: "Volume −", actionNone: "Disabled",
     notConnected: "Not connected yet.", waitingStart: "Waiting to start.", waitingData: "Waiting",
     connReady: "Connected · {mode}", connNoService: "Service not connected", connClosed: "Disconnected", connFailed: "Cannot connect to the local service",
+    connError: "Error · see Logs page",
     saving: "Saving…", saved: "Saved ✓",
     englishOn: "English output enabled.", englishOff: "English output disabled.",
     configIssuePrefix: "Configuration is incomplete: ",
@@ -236,6 +253,7 @@ const I18N = {
     wizSttNeedKey: "Paste your API key first (use the Get Key link to open the console)",
     wizOptVolc: "Volcengine (best for Chinese)",
     overlayPreviewHint: "{confirm} send · {undo} undo last · {discard} discard all",
+    overlayPreviewHintLocal: "{send} send · {undo} undo",
     navPrompts: "Prompts", navRemote: "Remote",
     promptsTitle: "Prompt Templates",
     promptsSub: "Save common instructions as templates and bind them to remote buttons: press the bound button, then hold the voice key and speak — {text} is replaced by what you said.",
@@ -272,6 +290,13 @@ const elements = {
   cliStatus: document.querySelector("#cli-status"),
   remoteStatus: document.querySelector("#remote-status"),
   remoteStatusSep: document.querySelector("#remote-status-sep"),
+  remoteStatusText: document.querySelector("#remote-status-text"),
+  remoteBattery: document.querySelector("#remote-battery"),
+  remoteBatteryFill: document.querySelector("#remote-battery-fill"),
+  remoteBatteryLabel: document.querySelector("#remote-battery-label"),
+  remoteHidWarning: document.querySelector("#remote-hid-warning"),
+  remoteHidFix: document.querySelector("#remote-hid-fix"),
+  remoteHidFixResult: document.querySelector("#remote-hid-fix-result"),
   langToggle: document.querySelector("#lang-toggle"),
   bannerPulse: document.querySelector("#banner-pulse"),
   bannerState: document.querySelector("#banner-state"),
@@ -335,6 +360,7 @@ const elements = {
   localMicSendKey: document.querySelector("#local-mic-send-key"),
   localMicUndoKey: document.querySelector("#local-mic-undo-key"),
   localMicTranslationToggleKey: document.querySelector("#local-mic-translation-toggle-key"),
+  localMicDevice: document.querySelector("#local-mic-device"),
   captureLocalMicHoldKeyButton: document.querySelector("#capture-local-mic-hold-key-button"),
   resetLocalMicHoldKeyButton: document.querySelector("#reset-local-mic-hold-key-button"),
   captureLocalMicSendKeyButton: document.querySelector("#capture-local-mic-send-key-button"),
@@ -476,6 +502,7 @@ const localMic = {
   sendKey: DEFAULT_LOCAL_MIC_SEND_KEY,
   undoKey: DEFAULT_LOCAL_MIC_UNDO_KEY,
   translationToggleKey: DEFAULT_LOCAL_MIC_TRANSLATION_TOGGLE_KEY,
+  deviceId: "",
   recording: false,
   starting: false,
   stopping: false,
@@ -507,14 +534,14 @@ const DEFAULT_REMOTE_ACTIONS = Object.freeze({
   volume_up: { click: { type: "key", key: "volume_up" } },
   volume_down: { click: { type: "key", key: "volume_down" } },
   menu: { click: { type: "key", key: "menu" } },
-  power: { click: { type: "none" }, hold: { type: "system", command: "shutdown" } }
+  power: { click: { type: "system", command: "shutdown" } }
 });
 const REMOTE_KEY_OPTIONS = [
   "up", "down", "left", "right", "enter", "escape", "tab", "space", "backspace",
   "delete", "home", "end", "pageup", "pagedown", "menu", "volume_up", "volume_down"
 ];
 const REMOTE_BUTTON_DEFS = [
-  { id: "power", code: null, nameKey: "btnPower" },
+  { id: "power", code: "HID 0x66", nameKey: "btnPower" },
   { id: "voice", code: "HID 0x3E", nameKey: "btnVoice" },
   { id: "up", code: "HID 0x52", nameKey: "btnUp" },
   { id: "down", code: "HID 0x51", nameKey: "btnDown" },
@@ -593,6 +620,19 @@ function previewHintText() {
     confirm: fmt(previewKeys.confirm),
     undo: fmt(previewKeys.undo),
     discard: fmt(previewKeys.discard)
+  });
+}
+
+// The desktop mic confirms with its own keyboard shortcuts (default F9/F10),
+// so its overlay hint shows keys instead of remote buttons.
+function overlayConfirmHint(message) {
+  const source = String(message?.source || "");
+  if (source && source !== "desktop_mic") {
+    return previewHintText();
+  }
+  return t("overlayPreviewHintLocal", {
+    send: displayHotkey(localMic.sendKey),
+    undo: displayHotkey(localMic.undoKey)
   });
 }
 
@@ -998,6 +1038,42 @@ function setLocalMicHotkeys(settings = {}) {
   renderLocalMic();
 }
 
+// Populate the mic picker from enumerateDevices. Labels are hidden until mic
+// permission has been granted in this session — they fill in after the first
+// recording, so this is re-run whenever a recording starts.
+async function refreshLocalMicDevices() {
+  if (!elements.localMicDevice || !navigator.mediaDevices?.enumerateDevices) {
+    return;
+  }
+  let inputs = [];
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    inputs = devices.filter((device) => device.kind === "audioinput");
+  } catch {
+    return;
+  }
+  const select = elements.localMicDevice;
+  select.innerHTML = "";
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = t("micDeviceDefault");
+  select.appendChild(defaultOption);
+  inputs.forEach((device, index) => {
+    if (!device.deviceId) {
+      return;
+    }
+    const option = document.createElement("option");
+    option.value = device.deviceId;
+    option.textContent = device.label || t("micDeviceUnknown", { index: index + 1 });
+    select.appendChild(option);
+  });
+  // A saved mic that has been unplugged drops back to the system default.
+  if (![...select.options].some((option) => option.value === localMic.deviceId)) {
+    localMic.deviceId = "";
+  }
+  select.value = localMic.deviceId;
+}
+
 function setLocalMicStatus(status, error = "") {
   localMic.status = status;
   localMic.error = error;
@@ -1203,6 +1279,33 @@ function handleLocalMicAudio(event) {
   }
 }
 
+const LOCAL_MIC_AUDIO_CONSTRAINTS = {
+  channelCount: 1,
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true
+};
+
+// Record from the mic picked in Settings; if that device was unplugged,
+// getUserMedia with an exact deviceId fails — fall back to the system default
+// and clear the saved choice.
+async function getLocalMicStream() {
+  if (!localMic.deviceId) {
+    return navigator.mediaDevices.getUserMedia({ audio: LOCAL_MIC_AUDIO_CONSTRAINTS, video: false });
+  }
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      audio: { ...LOCAL_MIC_AUDIO_CONSTRAINTS, deviceId: { exact: localMic.deviceId } },
+      video: false
+    });
+  } catch {
+    localMic.deviceId = "";
+    void window.vibeApp.updateDesktopSettings({ localMicDeviceId: "" }).catch(() => {});
+    void refreshLocalMicDevices();
+    return navigator.mediaDevices.getUserMedia({ audio: LOCAL_MIC_AUDIO_CONSTRAINTS, video: false });
+  }
+}
+
 async function startLocalMicRecording() {
   if (localMic.recording || localMic.starting) {
     return;
@@ -1225,15 +1328,7 @@ async function startLocalMicRecording() {
       throw new Error(t("micHintError"));
     }
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      },
-      video: false
-    });
+    const stream = await getLocalMicStream();
     const context = new AudioContextCtor();
     const source = context.createMediaStreamSource(stream);
     const processor = context.createScriptProcessor(4096, 1, 1);
@@ -1246,9 +1341,7 @@ async function startLocalMicRecording() {
     processor.onaudioprocess = handleLocalMicAudio;
     sendBridgeJson({
       type: "ptt_start",
-      source: "desktop_mic",
-      transcriptDeliveryMode: "immediate",
-      textInjectionMode: "type_only"
+      source: "desktop_mic"
     });
     sentStart = true;
     localMic.recording = true;
@@ -1256,6 +1349,9 @@ async function startLocalMicRecording() {
     processor.connect(context.destination);
     await context.resume();
     setLocalMicStatus("recording");
+    // Mic permission is now granted — re-enumerate so the settings picker
+    // shows real device names instead of generic placeholders.
+    void refreshLocalMicDevices();
 
     if (localMic.stopAfterStart) {
       void stopLocalMicRecording();
@@ -1367,7 +1463,7 @@ function finishLocalMicSessionFromBridge(message) {
       setLocalMicStatus("awaiting_action");
       return;
     }
-    if (["typed", "empty_segment", "transcript_empty"].includes(message.status)) {
+    if (["typed", "cancelled", "empty_segment", "transcript_empty"].includes(message.status)) {
       localMic.awaitingAction = false;
       localMic.sessionActive = false;
       setLocalMicStatus("idle");
@@ -1504,6 +1600,11 @@ function gotoPage(pageName, settingsTab = null) {
   if (pageName === "settings" && settingsTab) {
     setActiveTab(settingsTab);
   }
+  if (pageName === "remote") {
+    // Re-check the remote's HID child health so a "driver error" that appeared
+    // after pairing surfaces the repair warning as soon as the page opens.
+    void window.vibeApp.refreshRemoteHid?.();
+  }
 }
 
 function setActiveTab(tabName) {
@@ -1513,6 +1614,9 @@ function setActiveTab(tabName) {
   elements.tabPanels.forEach((panel) => {
     panel.classList.toggle("hidden", panel.dataset.panel !== tabName);
   });
+  if (tabName === "speech") {
+    void refreshLocalMicDevices();
+  }
 }
 
 function updateProviderVisibility() {
@@ -1681,6 +1785,8 @@ function fillForm(form, desktopSettingsPath) {
   recordTranscriptsEnabled = elements.recordTranscripts.checked;
   hasOnboarded = form.desktopSettings?.hasOnboarded === true;
   setLocalMicHotkeys(form.desktopSettings);
+  localMic.deviceId = form.desktopSettings?.localMicDeviceId || "";
+  void refreshLocalMicDevices();
   elements.codexSkipGitRepoCheck.checked = Boolean(form.codexSkipGitRepoCheck);
   elements.claudeDangerouslySkipPermissions.checked = Boolean(form.claudeDangerouslySkipPermissions);
   elements.xiaomiRemoteEnabled.checked = Boolean(form.xiaomiRemoteEnabled);
@@ -1781,9 +1887,25 @@ function remoteDisplayName(remote) {
   return remote?.name || remote?.model || t("aboutRemote");
 }
 
+// Remote page warning for a broken HID child device — the PnP problem code
+// behind the "driver error" Windows Settings shows after a re-pair.
+function renderRemoteHidWarning() {
+  const enabled = elements.xiaomiRemoteEnabled.checked
+    || appState.bootstrap?.form?.xiaomiRemoteEnabled === true;
+  const problem = appState.remoteHidProblem;
+  const show = enabled && typeof problem === "number" && problem > 0;
+  if (elements.remoteHidWarning) {
+    elements.remoteHidWarning.hidden = !show;
+  }
+  if (!show && elements.remoteHidFixResult) {
+    elements.remoteHidFixResult.textContent = "";
+  }
+}
+
 // Title-bar chip + About cell for the Xiaomi remote: model and battery are
 // read once at startup via BLE GATT (queried in the main process).
 function renderRemoteStatus() {
+  renderRemoteHidWarning();
   const enabled = elements.xiaomiRemoteEnabled.checked
     || appState.bootstrap?.form?.xiaomiRemoteEnabled === true;
   const remote = appState.remote;
@@ -1796,21 +1918,37 @@ function renderRemoteStatus() {
 
   elements.remoteStatus.hidden = false;
   elements.remoteStatusSep.hidden = false;
+
+  const level = remote?.connected && remote.batteryLevel != null
+    ? Math.max(0, Math.min(100, Math.round(remote.batteryLevel)))
+    : null;
+  // Note: SVG elements don't reflect a `.hidden` property — toggle the
+  // attribute explicitly or it stays hidden forever.
+  elements.remoteBattery.toggleAttribute("hidden", level === null);
+  elements.remoteBatteryLabel.textContent = level === null ? "" : `${level}%`;
+  if (level !== null) {
+    // Fill track is 15.8 units wide inside the 24x12 battery glyph.
+    elements.remoteBatteryFill.setAttribute("width", (15.8 * level / 100).toFixed(1));
+    elements.remoteStatus.classList.toggle("low", level <= 20);
+  } else {
+    elements.remoteStatus.classList.remove("low");
+  }
+
   if (!remote) {
-    elements.remoteStatus.textContent = `${t("aboutRemote")} · ${t("remoteReading")}`;
+    elements.remoteStatusText.textContent = `${t("aboutRemote")} · ${t("remoteReading")}`;
     elements.remoteStatus.classList.add("dim");
     return;
   }
 
   const name = remoteDisplayName(remote);
-  if (remote.connected && remote.batteryLevel != null) {
-    elements.remoteStatus.textContent = `${name} · ${remote.batteryLevel}%`;
+  if (level !== null) {
+    elements.remoteStatusText.textContent = name;
     elements.remoteStatus.classList.remove("dim");
   } else if (remote.connected) {
-    elements.remoteStatus.textContent = `${name} · ${t("remoteOn")}`;
+    elements.remoteStatusText.textContent = `${name} · ${t("remoteOn")}`;
     elements.remoteStatus.classList.remove("dim");
   } else {
-    elements.remoteStatus.textContent = `${name} · ${t("remoteDisconnected")}`;
+    elements.remoteStatusText.textContent = `${name} · ${t("remoteDisconnected")}`;
     elements.remoteStatus.classList.add("dim");
   }
   renderAbout();
@@ -2338,7 +2476,7 @@ function forwardOverlayEvent(message) {
       type: "transcript_final",
       text: message.text || "",
       requiresAction: message.requiresAction === true,
-      confirmHint: previewHintText(),
+      confirmHint: overlayConfirmHint(message),
       lang
     });
     return;
@@ -2350,7 +2488,7 @@ function forwardOverlayEvent(message) {
       text: message.text || "",
       command: message.command || "",
       seconds: message.seconds || 0,
-      confirmHint: previewHintText(),
+      confirmHint: overlayConfirmHint(message),
       lang
     });
   }
@@ -2385,7 +2523,14 @@ function handleBridgeMessage(message) {
   }
 
   if (message.type === "cli_session_state") {
-    setCliStatusRaw(message.statusLine || message.phase || t("micIdle"));
+    // Error statusLines carry raw provider dumps (HTTP codes, API messages) —
+    // keep the title bar to a short label; the full text is in the Logs page
+    // (cli_log_tail "error: ..." and the bridge's own service log).
+    if (message.phase === "error") {
+      setCliStatusKey("connError");
+    } else {
+      setCliStatusRaw(message.statusLine || message.phase || t("micIdle"));
+    }
     renderService();
     return;
   }
@@ -2492,6 +2637,7 @@ async function refreshBootstrap() {
   appState.bootstrap = bootstrap;
   appState.service = bootstrap.service;
   appState.remote = bootstrap.remote ?? appState.remote;
+  appState.remoteHidProblem = bootstrap.remoteHidProblem ?? appState.remoteHidProblem;
   const savedLang = bootstrap.form?.desktopSettings?.uiLanguage;
   if ((savedLang === "en" || savedLang === "zh") && savedLang !== lang) {
     lang = savedLang;
@@ -2582,6 +2728,16 @@ elements.tabButtons.forEach((button) => {
   button.addEventListener("click", () => setActiveTab(button.dataset.tab));
 });
 
+elements.localMicDevice.addEventListener("change", () => {
+  localMic.deviceId = elements.localMicDevice.value;
+  void window.vibeApp.updateDesktopSettings({ localMicDeviceId: localMic.deviceId }).catch(() => {});
+});
+
+// Plugging in / removing a USB mic or camera updates the picker live.
+navigator.mediaDevices?.addEventListener?.("devicechange", () => {
+  void refreshLocalMicDevices();
+});
+
 elements.langToggle.addEventListener("click", () => {
   lang = lang === "zh" ? "en" : "zh";
   applyLang();
@@ -2643,6 +2799,20 @@ elements.form.addEventListener("submit", async (event) => {
 elements.promptSaveButton.addEventListener("click", () => saveConfigFlow(elements.promptSaveButton));
 
 elements.remoteSaveButton.addEventListener("click", () => saveConfigFlow(elements.remoteSaveButton));
+
+elements.remoteHidFix?.addEventListener("click", async () => {
+  elements.remoteHidFix.disabled = true;
+  elements.remoteHidFixResult.textContent = t("remoteHidFixing");
+  try {
+    const result = await window.vibeApp.fixRemoteHid?.();
+    elements.remoteHidFixResult.textContent =
+      result?.healthy ? t("remoteHidFixed") : t("remoteHidFixFailed");
+  } catch {
+    elements.remoteHidFixResult.textContent = t("remoteHidFixFailed");
+  } finally {
+    elements.remoteHidFix.disabled = false;
+  }
+});
 
 elements.discardSettingsButton.addEventListener("click", () => {
   if (appState.bootstrap?.form) {
@@ -3004,6 +3174,9 @@ window.vibeApp.onState((payload) => {
   appState.service = payload.service;
   if (payload.remote !== undefined) {
     appState.remote = payload.remote;
+  }
+  if (payload.remoteHidProblem !== undefined) {
+    appState.remoteHidProblem = payload.remoteHidProblem;
   }
   renderService();
   renderRemoteStatus();

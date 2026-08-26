@@ -67,7 +67,7 @@ test("elevated USBPcap launcher safely quotes paths and uses the named-pipe help
     usbPcapPath: String.raw`C:\Program Files\USBPcap\USBPcapCMD.exe`,
     interfaceName: String.raw`\\.\USBPcap1`,
     deviceAddress: "3"
-  }, "vibecoding-test-pipe");
+  }, "vibecoding-test-pipe", 4242);
   assert.match(command, /Start-Process/);
   assert.match(command, /-Verb RunAs/);
   assert.match(command, /-WindowStyle Hidden/);
@@ -77,6 +77,38 @@ test("elevated USBPcap launcher safely quotes paths and uses the named-pipe help
   assert.match(inner, /xiaomi|helper\.ps1/);
   assert.match(inner, /vibecoding-test-pipe/);
   assert.match(inner, /\\\\\.\\USBPcap1/);
+  // The helper gets the listener PID so it can stop the capture when the
+  // owner exits instead of orphaning an elevated USBPcapCMD.
+  assert.match(inner, /-OwnerPid 4242/);
+
+  const withWatchdog = buildElevatedUsbPcapCommand({
+    pipeHelperPath: "helper.ps1",
+    usbPcapPath: "USBPcapCMD.exe",
+    interfaceName: String.raw`\\.\USBPcap1`,
+    deviceAddress: "3",
+    hidDeviceMatch: "VID&012717_PID&32B8"
+  }, "pipe", 4242);
+  const watchdogInner = Buffer.from(
+    withWatchdog.match(/'([A-Za-z0-9+/=]+)'\) -Verb RunAs/)?.[1],
+    "base64"
+  ).toString("utf16le");
+  // The device needle goes to the elevated helper so its watchdog can repair a
+  // broken HID child ("driver error") in place, sharing the capture's UAC
+  // prompt; ampersands must stay quoted.
+  assert.match(watchdogInner, /-HidDeviceMatch 'VID&012717_PID&32B8'/);
+
+  const noOwner = buildElevatedUsbPcapCommand({
+    pipeHelperPath: "helper.ps1",
+    usbPcapPath: "USBPcapCMD.exe",
+    interfaceName: String.raw`\\.\USBPcap1`,
+    deviceAddress: "3"
+  }, "pipe");
+  const noOwnerInner = Buffer.from(
+    noOwner.match(/'([A-Za-z0-9+/=]+)'\) -Verb RunAs/)?.[1],
+    "base64"
+  ).toString("utf16le");
+  assert.ok(!noOwnerInner.includes("-OwnerPid"));
+  assert.ok(!noOwnerInner.includes("-HidDeviceMatch"));
 });
 
 test("notification and mSBC packet parsers reject malformed input", () => {
@@ -104,6 +136,18 @@ test("parser surfaces unparsable button reports and unknown handles for key disc
   // Notifications on any other handle surface too (battery, consumer control…).
   const other = parser.pushLine(`0x001b|020064`);
   assert.deepEqual(other, [{ type: "unknown_handle", handle: "0x001b", valueHex: "020064" }]);
+});
+
+test("physical power key HID code is emitted as a normal mappable button", () => {
+  const parser = new XiaomiRemoteProtocolParser();
+  assert.deepEqual(
+    parser.pushLine("0x0017|0000660000000000"),
+    [{ type: "button", code: 0x66, button: "power", pressed: true }]
+  );
+  assert.deepEqual(
+    parser.pushLine("0x0017|0000000000000000"),
+    [{ type: "button", code: 0x66, button: "power", pressed: false }]
+  );
 });
 
 test("Xiaomi remote parser emits one complete zero-loss voice session", () => {

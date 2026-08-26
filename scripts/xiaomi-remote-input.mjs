@@ -135,21 +135,6 @@ async function fixHidChild(match) {
   process.exitCode = 1;
 }
 
-async function warnOnUnhealthyHidChild(match) {
-  try {
-    const entries = await checkXiaomiRemoteHidHealth(match);
-    const broken = entries.find((entry) => entry.problem !== 0);
-    if (broken) {
-      log("warning: remote HID child device has a problem", {
-        problem: broken.problem,
-        fix: "node scripts/xiaomi-remote-input.mjs --fix-hid"
-      });
-    }
-  } catch (error) {
-    log("hid health check skipped", error.message);
-  }
-}
-
 async function main() {
   if (isFixHid) {
     await fixHidChild(config.xiaomiRemoteHidDeviceMatch);
@@ -179,7 +164,9 @@ async function main() {
     return;
   }
 
-  await warnOnUnhealthyHidChild(config.xiaomiRemoteHidDeviceMatch);
+  // A broken HID child (the "driver error" after a re-pair) is repaired by the
+  // elevated capture helper's own watchdog (-HidDeviceMatch), so the fix needs
+  // no extra UAC prompt regardless of when the remote was paired.
 
   const { ws, serverReady } = await waitForBridge();
   log("connected to VibeCoding Voice", `ws://127.0.0.1:${config.port}`);

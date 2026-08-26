@@ -12,6 +12,10 @@ import { getConfigIssues, loadConfig, writeUserConfigValues } from "../src/confi
 import { getDesktopSettingsPath, loadDesktopSettings, writeDesktopSettings } from "../src/desktop-settings.mjs";
 import { getUserConfigDir } from "../src/paths.mjs";
 import { queryXiaomiRemoteInfo } from "../src/xiaomi-remote-info.mjs";
+import {
+  checkXiaomiRemoteHidHealth,
+  restartXiaomiRemoteHidChild
+} from "../src/xiaomi-remote-hid-health.mjs";
 
 const APP_ID = "com.mac20777.vibecodingvoice";
 const HIDDEN_LAUNCH_ARG = "--hidden";
@@ -103,6 +107,99 @@ async function refreshRemoteInfoOnce(reason = "startup") {
   latestRemoteInfo = { ...info, updatedAt: Date.now() };
   writeDesktopLog("remote info", { reason, ...info });
   emitState();
+}
+
+let latestRemoteHidProblem = null;
+
+// Reads the PnP problem code of the remote's HID-over-GATT child device (see
+// src/xiaomi-remote-hid-health.mjs). A problem code is what Windows Settings
+// shows as "driver error" after a re-pair. The USBPcap voice/button path does
+// not depend on that child device, but the remote page offers a one-click
+// repair so users do not have to reboot to clear the error.
+async function refreshRemoteHidHealth(reason = "startup") {
+  if (process.platform !== "win32") {
+    return;
+  }
+  const config = loadEffectiveConfig();
+  if (!config.xiaomiRemoteEnabled) {
+    if (latestRemoteHidProblem !== null) {
+      latestRemoteHidProblem = null;
+      emitState();
+    }
+    return;
+  }
+  try {
+    const entries = await checkXiaomiRemoteHidHealth(config.xiaomiRemoteHidDeviceMatch);
+    const broken = entries.find((entry) => entry.problem !== 0);
+    const problem = broken ? broken.problem : entries.length > 0 ? 0 : null;
+    if (problem !== latestRemoteHidProblem) {
+      latestRemoteHidProblem = problem;
+      writeDesktopLog("remote hid health", { reason, problem, entries: entries.length });
+      emitState();
+    }
+  } catch (error) {
+    writeDesktopLog("remote hid health check failed", { reason, error: error?.message });
+  }
+}
+
+let remoteHidRepairInFlight = false;
+
+// Repairs the remote's broken HID child (the "driver error" Windows Settings
+// shows after a re-pair) with an elevated pnputil /restart-device. Used by the
+// Remote page's manual repair button; the automatic path lives inside the
+// elevated capture helper so it shares that single UAC prompt.
+async function maybeRepairRemoteHid(reason = "service-start") {
+  if (remoteHidRepairInFlight || process.platform !== "win32") {
+    return;
+  }
+  const config = loadEffectiveConfig();
+  if (!config.xiaomiRemoteEnabled) {
+    return;
+  }
+  remoteHidRepairInFlight = true;
+  try {
+    const entries = await checkXiaomiRemoteHidHealth(config.xiaomiRemoteHidDeviceMatch);
+    const broken = entries.find((entry) => entry.problem !== 0);
+    if (!broken) {
+      const problem = entries.length > 0 ? 0 : null;
+      if (problem !== latestRemoteHidProblem) {
+        latestRemoteHidProblem = problem;
+        emitState();
+      }
+      return;
+    }
+    writeDesktopLog("remote hid broken; manual repair follows (UAC)", {
+      reason,
+      instanceId: broken.instanceId,
+      problem: broken.problem
+    });
+    appendProcessLog(
+      "xiaomi-remote",
+      "Remote driver error detected; repairing (approve the Windows admin prompt)."
+    );
+    const result = await restartXiaomiRemoteHidChild(
+      broken.instanceId,
+      config.xiaomiRemoteHidDeviceMatch
+    );
+    latestRemoteHidProblem = result.healthy ? 0 : broken.problem;
+    writeDesktopLog("remote hid manual repair finished", {
+      reason,
+      healthy: result.healthy,
+      exitCode: result.exitCode,
+      output: result.output
+    });
+    appendProcessLog(
+      "xiaomi-remote",
+      result.healthy
+        ? "Remote driver repaired."
+        : "Remote driver repair did not clear the error; a Windows restart may be needed."
+    );
+    emitState();
+  } catch (error) {
+    writeDesktopLog("remote hid auto-repair failed", { reason, error: error?.message });
+  } finally {
+    remoteHidRepairInFlight = false;
+  }
 }
 
 const NAMED_KEY_VKS = new Map([
@@ -522,7 +619,8 @@ function snapshotServiceState() {
 function emitState() {
   const payload = {
     service: snapshotServiceState(),
-    remote: latestRemoteInfo
+    remote: latestRemoteInfo,
+    remoteHidProblem: latestRemoteHidProblem
   };
 
   for (const window of BrowserWindow.getAllWindows()) {
@@ -924,6 +1022,15 @@ function startXiaomiRemoteProcess(config) {
   });
   xiaomiRemoteChild = child;
   void refreshRemoteInfoOnce("remote-start");
+  // A broken HID child is repaired inside the capture helper's single UAC
+  // prompt (see scripts/xiaomi-remote-input.mjs); here we only track the
+  // state for the UI warning, re-checking once the helper had time to repair.
+  void refreshRemoteHidHealth("remote-start");
+  setTimeout(() => {
+    if (xiaomiRemoteChild === child) {
+      void refreshRemoteHidHealth("remote-start-delayed");
+    }
+  }, 15_000);
   writeDesktopLog("xiaomi remote child forked", {
     pid: child.pid ?? null,
     entry: xiaomiRemoteEntryPath()
@@ -1260,7 +1367,8 @@ async function buildBootstrap() {
       settings: selectDesktopHotkeySettings(desktopSettings)
     },
     service: snapshotServiceState(),
-    remote: latestRemoteInfo
+    remote: latestRemoteInfo,
+    remoteHidProblem: latestRemoteHidProblem
   };
 }
 
@@ -1457,6 +1565,27 @@ ipcMain.handle("desktop:update-desktop-settings", async (_event, patch = {}) => 
   return buildBootstrap();
 });
 
+ipcMain.handle("desktop:refresh-remote-hid", async () => {
+  await refreshRemoteHidHealth("ui");
+  return latestRemoteHidProblem;
+});
+
+// One-click repair for the remote's broken HID child device (the "driver
+// error" Windows Settings shows after a re-pair). Same path as the automatic
+// repair on service (re)start: elevated `pnputil /restart-device`, one UAC
+// prompt, then a re-check.
+ipcMain.handle("desktop:fix-remote-hid", async () => {
+  if (process.platform !== "win32") {
+    return { healthy: false, unsupported: true };
+  }
+  // Join an in-flight auto repair instead of stacking a second UAC prompt.
+  for (let i = 0; i < 100 && remoteHidRepairInFlight; i += 1) {
+    await wait(300);
+  }
+  await maybeRepairRemoteHid("manual");
+  return { healthy: latestRemoteHidProblem === 0 };
+});
+
 ipcMain.on("desktop:set-tray-language-mode", (_event, mode) => {
   updateTrayLanguageMode(mode);
 });
@@ -1606,3 +1735,4 @@ ensureOverlayWindow();
 startGlobalHotkeyMonitor();
 void startBridgeProcess({ revealOnError: !initialLaunchHidden });
 void refreshRemoteInfoOnce("startup");
+void refreshRemoteHidHealth("startup");

@@ -18,6 +18,7 @@ test("normalizeDesktopSettings applies safe defaults", () => {
     localMicSendKey: "F9",
     localMicUndoKey: "F10",
     localMicTranslationToggleKey: "F7",
+    localMicDeviceId: "",
     uiLanguage: "zh",
     hasUsedVoice: false
   });
@@ -30,7 +31,8 @@ test("normalizeDesktopSettings applies safe defaults", () => {
       localMicHoldKey: "Ctrl+Alt+M",
       localMicSendKey: "F11",
       localMicUndoKey: "Ctrl+Backspace",
-      localMicTranslationToggleKey: "Ctrl+Alt+E"
+      localMicTranslationToggleKey: "Ctrl+Alt+E",
+      localMicDeviceId: "usb-mic-1"
     }),
     {
       autoLaunch: true,
@@ -40,6 +42,7 @@ test("normalizeDesktopSettings applies safe defaults", () => {
       localMicSendKey: "F11",
       localMicUndoKey: "Ctrl+Backspace",
       localMicTranslationToggleKey: "Ctrl+Alt+E",
+      localMicDeviceId: "usb-mic-1",
       recordTranscripts: true,
       overlayX: null,
       overlayY: null,
@@ -116,6 +119,7 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
     localMicSendKey: "F9",
     localMicUndoKey: "F10",
     localMicTranslationToggleKey: "F7",
+    localMicDeviceId: "",
     uiLanguage: "zh",
     hasUsedVoice: false
   });

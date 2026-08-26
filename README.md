@@ -18,7 +18,7 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 
 `vibecoding-voice` now works even without the ESP32 board. The Windows desktop app can use a normal PC microphone or USB microphone as a second voice input device, then sends the audio through the same STT, translation, confirmation, and Inject / Codex / Claude pipeline.
 
-- **Global push-to-talk**: hold `F8` anywhere on Windows to record, release to transcribe and insert text.
+- **Global push-to-talk**: hold `F8` anywhere on Windows to record, release to transcribe. With confirmation enabled (the default), the transcript previews in the floating overlay first — press `F9` to insert it or `F10` to discard; with immediate delivery it is inserted right away.
 - **Desktop send shortcut**: press `F9` to submit the active text field, or to send pending text when confirmation is enabled; press `F10` to undo pending text.
 - **English-output shortcut**: press `F7` to toggle Chinese speech -> English-only output; press it again to return to normal transcript output.
 - **Configurable keys**: change record / send / undo / English-output shortcuts from the desktop app's Speech tab.
@@ -542,7 +542,7 @@ node scripts/console.mjs
 
 现在即使没有 ESP32 板子，也可以直接使用 `vibecoding-voice`。Windows 桌面版可以把普通电脑麦克风或 USB 麦克风作为第二种语音输入设备，录到的音频会进入同一套语音识别、翻译、确认和 Inject / Codex / Claude 发送链路。
 
-- **后台全局按住说话**：在 Windows 任意窗口按住 `F8` 录音，松开后自动转写并输入到当前文本框。
+- **后台全局按住说话**：在 Windows 任意窗口按住 `F8` 录音，松开后自动转写。确认模式（默认）下转写先在悬浮窗预览，按 `F9` 上屏、`F10` 撤销；立即模式下松开即直接输入到当前文本框。
 - **桌面发送快捷键**：按 `F9` 提交当前文本框；开启确认模式时，`F9` 发送待确认文本，`F10` 撤销。
 - **英文输出快捷键**：按 `F7` 切换到“中文说话，只输出英文”；再次按 `F7` 回到普通转写输出。
 - **快捷键可配置**：录音 / 发送 / 撤销 / 英文输出快捷键都可以在桌面端“识别”页修改。

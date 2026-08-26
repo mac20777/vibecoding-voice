@@ -416,9 +416,13 @@ function createClientState() {
 function resolveSegmentOptions(message = {}) {
   const source = String(message.source || "").trim();
   if (source === "desktop_mic") {
+    // The desktop mic follows the same delivery setting as the remote: with
+    // confirm_on_device the transcript waits in the floating overlay until
+    // the send key (default F9) confirms it, the undo key (F10) discards it.
+    const confirmOnDevice = config.transcriptDeliveryMode === "confirm_on_device";
     return {
       source,
-      transcriptDeliveryMode: "immediate",
+      transcriptDeliveryMode: confirmOnDevice ? "remote_preview" : "immediate",
       textInjectionMode: "type_only"
     };
   }
@@ -817,7 +821,7 @@ async function finalizeSegment(ws, state) {
     // Segments accumulate: hold the voice key again to append, the undo
     // gesture pops the last segment, confirm sends the joined text.
     if (!remotePreview || remotePreview.ws !== ws) {
-      remotePreview = { ws, segments: [] };
+      remotePreview = { ws, segments: [], textInjectionMode };
     }
     remotePreview.segments.push(sendTranscript);
     const previewText = joinPendingSegments(remotePreview.segments);
@@ -1225,7 +1229,9 @@ async function confirmRemotePreview(origin) {
     }
     return true;
   }
-  await dispatchPrompt(text, { textInjectionMode: config.textInjectionMode });
+  await dispatchPrompt(text, {
+    textInjectionMode: preview.textInjectionMode || config.textInjectionMode
+  });
   sendDictationJson(ws, { type: "status", status: "typed", text });
   return true;
 }
@@ -1382,7 +1388,11 @@ const remoteGestureEngine = remoteButtonActions
         }
         // Same for a pending power confirm: OK/Back must stay responsive
         // even if the user unmapped their normal actions.
-        return Boolean(pendingSystemAction && (button === "ok" || button === "back"));
+        return Boolean(
+          pendingSystemAction &&
+          gesture === "click" &&
+          (button === "ok" || button === "back")
+        );
       },
       isRepeatButton: (button) => button === "volume_up" || button === "volume_down",
       onGesture: (button, gesture) => {

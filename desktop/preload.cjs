@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld("vibeApp", {
   saveConfig: (payload) => ipcRenderer.invoke("desktop:save-config", payload),
   setMode: (mode) => ipcRenderer.invoke("desktop:set-mode", mode),
   updateDesktopSettings: (patch) => ipcRenderer.invoke("desktop:update-desktop-settings", patch),
+  fixRemoteHid: () => ipcRenderer.invoke("desktop:fix-remote-hid"),
+  refreshRemoteHid: () => ipcRenderer.invoke("desktop:refresh-remote-hid"),
   setTrayLanguageMode: (mode) => ipcRenderer.send("desktop:set-tray-language-mode", mode),
   pickDirectory: (currentPath) => ipcRenderer.invoke("desktop:pick-directory", currentPath),
   openConfigFolder: () => ipcRenderer.invoke("desktop:open-config-folder"),

@@ -76,15 +76,26 @@ export function encodePowerShellCommand(command) {
   return Buffer.from(String(command), "utf16le").toString("base64");
 }
 
-export function buildElevatedUsbPcapCommand(runtime, pipeName) {
-  const innerCommand = [
-    "$ErrorActionPreference='Stop';",
-    "$ProgressPreference='SilentlyContinue';",
-    `& ${quotePowerShellSingle(runtime.pipeHelperPath)}`,
+export function buildElevatedUsbPcapCommand(runtime, pipeName, ownerPid = 0) {
+  const helperArgs = [
     `-PipeName ${quotePowerShellSingle(pipeName)}`,
     `-UsbPcapPath ${quotePowerShellSingle(runtime.usbPcapPath)}`,
     `-InterfaceName ${quotePowerShellSingle(runtime.interfaceName)}`,
     `-DeviceAddress ${quotePowerShellSingle(runtime.deviceAddress)}`
+  ];
+  if (Number.isInteger(ownerPid) && ownerPid > 0) {
+    helperArgs.push(`-OwnerPid ${ownerPid}`);
+  }
+  // The helper watches the remote's HID child device while elevated and
+  // repairs a "driver error" in place — no second UAC prompt, any pair order.
+  if (runtime.hidDeviceMatch) {
+    helperArgs.push(`-HidDeviceMatch ${quotePowerShellSingle(runtime.hidDeviceMatch)}`);
+  }
+  const innerCommand = [
+    "$ErrorActionPreference='Stop';",
+    "$ProgressPreference='SilentlyContinue';",
+    `& ${quotePowerShellSingle(runtime.pipeHelperPath)}`,
+    ...helperArgs
   ].join(" ");
   const innerEncoded = encodePowerShellCommand(innerCommand);
   return [
@@ -153,6 +164,9 @@ export async function resolveXiaomiRemoteRuntime(config) {
   return {
     usbPcapPath,
     pipeHelperPath: DEFAULT_USBPCAP_PIPE_HELPER,
+    // Lets the elevated helper watch/repair the remote's HID child device
+    // (see the -HidDeviceMatch param of the pipe helper).
+    hidDeviceMatch: config.xiaomiRemoteHidDeviceMatch,
     ...captureTarget
   };
 }
@@ -267,7 +281,7 @@ export async function startXiaomiRemoteCapture(runtime, handlers = {}) {
       });
     });
 
-    const elevatedCommand = buildElevatedUsbPcapCommand(runtime, pipeName);
+    const elevatedCommand = buildElevatedUsbPcapCommand(runtime, pipeName, process.pid);
     launcher = spawn("powershell.exe", [
       "-NoProfile",
       "-NonInteractive",

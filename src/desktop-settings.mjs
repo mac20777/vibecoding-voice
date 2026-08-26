@@ -14,6 +14,7 @@ export const DEFAULT_DESKTOP_SETTINGS = Object.freeze({
   localMicSendKey: "F9",
   localMicUndoKey: "F10",
   localMicTranslationToggleKey: "F7",
+  localMicDeviceId: "",
   uiLanguage: "zh",
   hasUsedVoice: false,
   hasOnboarded: false
@@ -38,6 +39,7 @@ export function normalizeDesktopSettings(value = {}) {
       value.localMicTranslationToggleKey,
       DEFAULT_DESKTOP_SETTINGS.localMicTranslationToggleKey
     ),
+    localMicDeviceId: normalizeLocalMicDeviceId(value.localMicDeviceId),
     uiLanguage: value.uiLanguage === "en" ? "en" : "zh",
     hasUsedVoice: value.hasUsedVoice === true,
     hasOnboarded: value.hasOnboarded === true
@@ -50,6 +52,12 @@ function normalizeLocalMicHotkey(value, fallback) {
     return fallback;
   }
   return normalized;
+}
+
+// A WebRTC deviceId is an opaque string; "" means the system default mic.
+function normalizeLocalMicDeviceId(value) {
+  const normalized = String(value || "").trim();
+  return normalized.length > 256 ? "" : normalized;
 }
 
 export function loadDesktopSettings() {

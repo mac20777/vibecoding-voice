@@ -148,23 +148,34 @@ Restart the remote input listener afterwards so it re-detects the adapter's USB 
 ### Pairing succeeds but Settings shows "driver error"
 
 On the tested stack the remote's BLE GATT HID child device sometimes fails to start (PnP problem
-code 10) after a re-pair. Run:
+code 10) after a re-pair. This does not break the app's voice capture or button mapping — those
+ride the USBPcap path, not the HID child — so try the remote first before rebooting anything.
+
+To clear the error itself, no action is needed while the bridge service is running: the elevated
+USBPcap capture helper watches the remote's HID child for the whole capture lifetime and restarts
+it with `pnputil /restart-device` when Windows reports a problem — no extra UAC prompt, and the
+pairing order does not matter (pair before or after installing, both heal). The check is
+self-throttled (every 5 s for the first two minutes after capture start, then once a minute)
+because one WMI lookup costs a few hundred milliseconds. Independently, the Remote page shows a
+warning with a repair button whenever the child reports a problem. From a checkout, the manual
+equivalent is:
 
 ```powershell
 npm run remote:xiaomi:fix-hid
 ```
 
-It locates the remote's HID child, restarts it with an elevated `pnputil /restart-device` (one UAC
-prompt), and re-checks the problem code. `npm run remote:xiaomi:doctor` reports the same state
-read-only. If the child stays unhealthy afterwards, do a full Windows restart.
+`npm run remote:xiaomi:doctor` reports the same state read-only. If the child stays unhealthy
+afterwards, do a full Windows restart.
 
 ### The listener connects and immediately exits
 
 If the log shows `listening` followed at once by `usbpcap exited {"code":0}` (earlier builds logged
 `tshark exited {"code":0}`), a leftover `USBPcapCMD.exe`
 from a previous run still holds the capture driver. Stop it from an elevated terminal
-(`Get-Process USBPcapCMD | Stop-Process -Force`) and restart the app. The bundled pipe helper now
-watches the pipe while idle, so it stops its capture child instead of being orphaned.
+(`Get-Process USBPcapCMD | Stop-Process -Force`) and restart the app. The bundled pipe helper
+watches the listener process id (`-OwnerPid`) in addition to the pipe itself, so it stops its
+capture child within about a second of the app exiting — even when the pipe is idle (remote asleep
+or unpaired), where a broken pipe would otherwise go unnoticed until the next write.
 
 ## Current boundary
 
