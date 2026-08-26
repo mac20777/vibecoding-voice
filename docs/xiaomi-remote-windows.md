@@ -143,7 +143,10 @@ capture pipeline, because the USBPcap filter tracks the USB adapter address, not
 
 After deleting the remote in Windows Settings, unplug the USB adapter and plug it back into the same
 port before pairing again; the radio stack otherwise keeps stale BLE state and the new pairing fails.
-Restart the remote input listener afterwards so it re-detects the adapter's USB address.
+
+Unplugging and replugging the adapter while the app runs needs no manual restart: the elevated
+capture helper notices the adapter leaving and returning (USB change events, with a slow poll as
+fallback) and restarts the capture at the adapter's — possibly new — USB address on its own.
 
 ### Pairing succeeds but Settings shows "driver error"
 

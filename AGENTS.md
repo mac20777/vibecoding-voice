@@ -34,7 +34,10 @@ server.mjs (entry point — HTTP + WebSocket server)
 ├── cli-projector.mjs    — formats CLI state for device e-paper display
 ├── codex-rate-limits.mjs— reads quota from ~/.codex/sessions .jsonl files
 ├── xiaomi-remote-runtime.mjs — Xiaomi remote capture (USBPcap named pipe; ATT parsing and mSBC
-│   │                             decoding are in-process, no tshark/ffmpeg)
+│   │                             decoding are in-process, no tshark/ffmpeg). The elevated pipe
+│   │                             helper (scripts/windows/xiaomi-usbpcap-pipe.ps1) self-heals:
+│   │                             owner-PID watchdog on app exit, HID-child "driver error" repair,
+│   │                             and capture restart when the BT adapter is unplugged/replugged
 │   ├── usbpcap-att-parser.mjs — streaming pcap → ATT notification lines (replaces tshark)
 │   ├── msbc-decoder.mjs     — pure-JS mSBC → PCM16 decoder (replaces ffmpeg)
 │   ├── xiaomi-remote-session.mjs — PTT session state machine (inactivity watchdog)

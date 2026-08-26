@@ -28,10 +28,13 @@ const DEFAULT_USBPCAP_PIPE_HELPER = resolveAsarUnpackedPath(
 );
 
 async function runText(command, args) {
+  // Hard timeout: a contended/wedged USBPcap driver can hang these queries
+  // for good, which would otherwise wedge the whole listener at startup.
   const { stdout } = await execFileAsync(command, args, {
     encoding: "utf8",
     windowsHide: true,
-    maxBuffer: 2 * 1024 * 1024
+    maxBuffer: 2 * 1024 * 1024,
+    timeout: 10_000
   });
   return stdout;
 }
@@ -90,6 +93,11 @@ export function buildElevatedUsbPcapCommand(runtime, pipeName, ownerPid = 0) {
   // repairs a "driver error" in place — no second UAC prompt, any pair order.
   if (runtime.hidDeviceMatch) {
     helperArgs.push(`-HidDeviceMatch ${quotePowerShellSingle(runtime.hidDeviceMatch)}`);
+  }
+  // The helper re-resolves the Bluetooth adapter after an unplug/replug and
+  // restarts the capture at the (possibly new) USB address by itself.
+  if (runtime.usbAdapterMatch) {
+    helperArgs.push(`-AdapterMatch ${quotePowerShellSingle(runtime.usbAdapterMatch)}`);
   }
   const innerCommand = [
     "$ErrorActionPreference='Stop';",
@@ -167,6 +175,8 @@ export async function resolveXiaomiRemoteRuntime(config) {
     // Lets the elevated helper watch/repair the remote's HID child device
     // (see the -HidDeviceMatch param of the pipe helper).
     hidDeviceMatch: config.xiaomiRemoteHidDeviceMatch,
+    // Lets the helper re-find the adapter after an unplug/replug.
+    usbAdapterMatch: config.xiaomiRemoteUsbAdapterMatch,
     ...captureTarget
   };
 }

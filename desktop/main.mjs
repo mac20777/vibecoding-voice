@@ -43,6 +43,9 @@ let mainWindow = null;
 let tray = null;
 let bridgeChild = null;
 let xiaomiRemoteChild = null;
+let xiaomiRemoteStopRequested = false;
+let xiaomiRemoteRestartTimer = null;
+let xiaomiRemoteRestartDelayMs = 5_000;
 let globalHotkeyChild = null;
 let globalHotkeyRestartTimer = null;
 let globalHotkeysReady = false;
@@ -962,6 +965,7 @@ async function stopBridgeProcess() {
   if (xiaomiRemoteChild) {
     const child = xiaomiRemoteChild;
     xiaomiRemoteChild = null;
+    xiaomiRemoteStopRequested = true;
     writeDesktopLog("stopXiaomiRemoteProcess", { pid: child.pid ?? null });
     child.kill();
   }
@@ -1010,6 +1014,7 @@ function startXiaomiRemoteProcess(config) {
     return;
   }
 
+  xiaomiRemoteStopRequested = false;
   const child = fork(xiaomiRemoteEntryPath(), [], {
     cwd: DEFAULT_INVOKE_CWD,
     env: {
@@ -1021,6 +1026,13 @@ function startXiaomiRemoteProcess(config) {
     windowsHide: false
   });
   xiaomiRemoteChild = child;
+  // Once a child survives a minute, treat it as healthy and reset the
+  // restart backoff.
+  setTimeout(() => {
+    if (xiaomiRemoteChild === child) {
+      xiaomiRemoteRestartDelayMs = 5_000;
+    }
+  }, 60_000);
   void refreshRemoteInfoOnce("remote-start");
   // A broken HID child is repaired inside the capture helper's single UAC
   // prompt (see scripts/xiaomi-remote-input.mjs); here we only track the
@@ -1051,8 +1063,35 @@ function startXiaomiRemoteProcess(config) {
         "xiaomi-remote",
         `Remote input exited${code != null ? ` with code ${code}` : ""}${signal ? ` (${signal})` : ""}.`
       );
+      if (!xiaomiRemoteStopRequested) {
+        scheduleXiaomiRemoteRestart();
+      }
     }
   });
+}
+
+// Restarts the remote input child after an unexpected exit (crashed capture,
+// lost bridge connection, ...). An adapter unplug/replug normally needs no
+// restart — the elevated capture helper re-resolves the adapter itself — so
+// this is the safety net for everything else. Exponential backoff, reset once
+// a child stays alive for a minute.
+function scheduleXiaomiRemoteRestart() {
+  if (xiaomiRemoteRestartTimer || isQuitting) {
+    return;
+  }
+  const config = loadEffectiveConfig();
+  if (!config.xiaomiRemoteEnabled || !bridgeChild) {
+    return;
+  }
+  const delayMs = xiaomiRemoteRestartDelayMs;
+  xiaomiRemoteRestartDelayMs = Math.min(30_000, xiaomiRemoteRestartDelayMs * 2);
+  writeDesktopLog("xiaomi remote restart scheduled", { delayMs });
+  xiaomiRemoteRestartTimer = setTimeout(() => {
+    xiaomiRemoteRestartTimer = null;
+    if (!isQuitting && !xiaomiRemoteStopRequested && bridgeChild && !xiaomiRemoteChild) {
+      startXiaomiRemoteProcess(loadEffectiveConfig());
+    }
+  }, delayMs);
 }
 
 async function startBridgeProcess({ revealOnError = true } = {}) {

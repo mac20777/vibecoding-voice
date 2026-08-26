@@ -97,6 +97,21 @@ test("elevated USBPcap launcher safely quotes paths and uses the named-pipe help
   // prompt; ampersands must stay quoted.
   assert.match(watchdogInner, /-HidDeviceMatch 'VID&012717_PID&32B8'/);
 
+  const withAdapterMatch = buildElevatedUsbPcapCommand({
+    pipeHelperPath: "helper.ps1",
+    usbPcapPath: "USBPcapCMD.exe",
+    interfaceName: String.raw`\\.\USBPcap1`,
+    deviceAddress: "3",
+    usbAdapterMatch: "Bluetooth"
+  }, "pipe", 4242);
+  const adapterInner = Buffer.from(
+    withAdapterMatch.match(/'([A-Za-z0-9+/=]+)'\) -Verb RunAs/)?.[1],
+    "base64"
+  ).toString("utf16le");
+  // The adapter needle lets the helper re-resolve the USB address after an
+  // unplug/replug and restart the capture on its own.
+  assert.match(adapterInner, /-AdapterMatch 'Bluetooth'/);
+
   const noOwner = buildElevatedUsbPcapCommand({
     pipeHelperPath: "helper.ps1",
     usbPcapPath: "USBPcapCMD.exe",
@@ -109,6 +124,7 @@ test("elevated USBPcap launcher safely quotes paths and uses the named-pipe help
   ).toString("utf16le");
   assert.ok(!noOwnerInner.includes("-OwnerPid"));
   assert.ok(!noOwnerInner.includes("-HidDeviceMatch"));
+  assert.ok(!noOwnerInner.includes("-AdapterMatch"));
 });
 
 test("notification and mSBC packet parsers reject malformed input", () => {
