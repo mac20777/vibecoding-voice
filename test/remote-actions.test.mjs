@@ -25,18 +25,18 @@ test("parseRemoteActionMap fills defaults for every button", () => {
   assert.equal(map.ok.double, undefined);
 });
 
-test("power button defaults to hold-to-shutdown with click disabled", () => {
+test("power button is a regular mapping that defaults to click-to-shutdown", () => {
   const map = parseRemoteActionMap("");
-  assert.deepEqual(map.power.click, { type: "none" });
-  assert.deepEqual(map.power.hold, { type: "system", command: "shutdown" });
+  assert.deepEqual(map.power.click, { type: "system", command: "shutdown" });
+  assert.equal(map.power.hold, undefined);
 });
 
 test("system action validates against SYSTEM_COMMANDS", () => {
   assert.equal(normalizeAction({ type: "system", command: "wipe" }), null);
   assert.equal(serializeAction({ type: "system", command: "wipe" }), "");
   // An invalid spec in the override string keeps the default in place.
-  const map = parseRemoteActionMap("power.hold=system:wipe");
-  assert.deepEqual(map.power.hold, DEFAULT_REMOTE_ACTIONS.power.hold);
+  const map = parseRemoteActionMap("power.click=system:wipe");
+  assert.deepEqual(map.power.click, DEFAULT_REMOTE_ACTIONS.power.click);
   // Valid override wins.
   const locked = parseRemoteActionMap("power.click=system:lock");
   assert.deepEqual(locked.power.click, { type: "system", command: "lock" });
@@ -91,14 +91,17 @@ test("serializeRemoteActionMap only emits non-default entries", () => {
 
   map.ok.double = { type: "app", command: "chrome" };
   map.back.click = { type: "none" };
+  map.power.click = { type: "key", key: "escape" };
   const serialized = serializeRemoteActionMap(map);
   assert.ok(serialized.includes("ok.double=app:chrome"));
   assert.ok(serialized.includes("back.click=none"));
+  assert.ok(serialized.includes("power.click=key:escape"));
   assert.ok(!serialized.includes("up.click"), "defaults must not be serialized");
 
   const reparsed = parseRemoteActionMap(serialized);
   assert.deepEqual(reparsed.ok.double, { type: "app", command: "chrome" });
   assert.deepEqual(reparsed.back.click, { type: "none" });
+  assert.deepEqual(reparsed.power.click, { type: "key", key: "escape" });
   assert.deepEqual(reparsed.up.click, { type: "key", key: "up" });
 });
 

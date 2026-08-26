@@ -42,11 +42,9 @@ export const DEFAULT_REMOTE_ACTIONS = Object.freeze({
   volume_up: Object.freeze({ click: keyAction("volume_up") }),
   volume_down: Object.freeze({ click: keyAction("volume_down") }),
   menu: Object.freeze({ click: keyAction("menu") }),
-  // Hold-to-shutdown mirrors real devices (phones/TVs) and avoids accidental
-  // triggers: a single press does nothing, holding arms an on-screen confirm.
-  // The power key's HID code is not known yet; pressing it logs an
-  // unparsed-packet line, so this mapping stays inert until the code is added.
-  power: Object.freeze({ click: Object.freeze({ type: "none" }), hold: Object.freeze({ type: "system", command: "shutdown" }) })
+  // Power is a regular configurable button. Its default click action requests
+  // shutdown, which still goes through the shared on-screen confirmation flow.
+  power: Object.freeze({ click: Object.freeze({ type: "system", command: "shutdown" }) })
 });
 
 export function cloneDefaultRemoteActions() {
@@ -228,7 +226,10 @@ export function parseRemoteButtonMap(override) {
 // Legacy flat shape kept for older callers/tests: button -> click key name.
 export const DEFAULT_REMOTE_BUTTON_KEYS = Object.freeze(
   Object.fromEntries(
-    REMOTE_BUTTONS.map((button) => [button, DEFAULT_REMOTE_ACTIONS[button].click.key ?? "none"])
+    REMOTE_BUTTONS.map((button) => {
+      const click = DEFAULT_REMOTE_ACTIONS[button].click;
+      return [button, click.type === "key" ? click.key : click.type === "none" ? "none" : ""];
+    })
   )
 );
 

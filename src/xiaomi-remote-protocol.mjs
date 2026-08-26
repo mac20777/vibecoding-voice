@@ -15,6 +15,10 @@ const BUTTON_CODES = Object.freeze({
   0x4a: "home",
   0x80: "volume_up",
   0x81: "volume_down",
+  // Observed from the Xiaomi remote's standard HID report in the desktop log.
+  // Keep this as a normal mappable button; its default action lives in
+  // remote-buttons.mjs rather than being hard-coded in the protocol parser.
+  0x66: "power",
   // The voice key also mirrors onto 0x0017; the 0x0025 control channel owns it,
   // so it is parsed but never reported as a mappable button.
   0x3e: "voice"

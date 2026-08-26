@@ -168,3 +168,58 @@ test("server handles remote_button messages and dry-run injects the mapped key",
     `server should handle remote_button natively\n${output}`
   );
 });
+
+test("default power click uses the configurable shutdown action and requires confirmation", async (t) => {
+  const port = await getFreePort();
+  const appDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-remote-power-"));
+  const server = spawn(process.execPath, ["src/server.mjs"], {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      APPDATA: appDataRoot,
+      LAN_SHARED_SECRET: "",
+      LAN_DISCOVERY_ENABLED: "0",
+      LAN_VOICE_BIND: "127.0.0.1",
+      LAN_VOICE_PORT: String(port),
+      SEND_TARGET: "text_injector",
+      DRY_RUN_TEXT_INJECTION: "1"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  const serverOutput = [];
+  server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
+  server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
+
+  t.after(async () => {
+    await stopServer(server);
+    fs.rmSync(appDataRoot, { recursive: true, force: true });
+  });
+
+  const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
+  t.after(() => {
+    if (ws.readyState !== WebSocket.CLOSED) {
+      ws.close();
+    }
+  });
+
+  ws.send(JSON.stringify({ type: "hello", deviceId: "xiaomi-power-test", boardType: "xiaomi-remote-msbc" }));
+  await sleep(250);
+
+  ws.send(JSON.stringify({ type: "remote_button", button: "power", code: 0x66, pressed: true, ts: Date.now() }));
+  ws.send(JSON.stringify({ type: "remote_button", button: "power", code: 0x66, pressed: false, ts: Date.now() }));
+  await sleep(250);
+
+  let output = serverOutput.join("");
+  assert.ok(output.includes("remote_button power.click -> system:shutdown"), output);
+  assert.ok(output.includes("system action armed, awaiting confirm: shutdown power.click"), output);
+  assert.equal(output.includes("[dry-run] system command shutdown"), false, "shutdown must wait for OK");
+
+  ws.send(JSON.stringify({ type: "remote_button", button: "ok", code: 0x28, pressed: true, ts: Date.now() }));
+  ws.send(JSON.stringify({ type: "remote_button", button: "ok", code: 0x28, pressed: false, ts: Date.now() }));
+  await sleep(250);
+
+  output = serverOutput.join("");
+  assert.ok(output.includes("system action confirmed: shutdown gesture"), output);
+  assert.ok(output.includes("[dry-run] system command shutdown"), output);
+});
