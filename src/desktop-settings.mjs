@@ -15,7 +15,8 @@ export const DEFAULT_DESKTOP_SETTINGS = Object.freeze({
   localMicUndoKey: "F10",
   localMicTranslationToggleKey: "F7",
   uiLanguage: "zh",
-  hasUsedVoice: false
+  hasUsedVoice: false,
+  hasOnboarded: false
 });
 
 export function getDesktopSettingsPath() {
@@ -38,7 +39,8 @@ export function normalizeDesktopSettings(value = {}) {
       DEFAULT_DESKTOP_SETTINGS.localMicTranslationToggleKey
     ),
     uiLanguage: value.uiLanguage === "en" ? "en" : "zh",
-    hasUsedVoice: value.hasUsedVoice === true
+    hasUsedVoice: value.hasUsedVoice === true,
+    hasOnboarded: value.hasOnboarded === true
   };
 }
 

@@ -8,6 +8,9 @@
 //   { type: "text", text: "…" }               — type a preset snippet
 //   { type: "prompt", name: "优化" }          — wrap the NEXT voice transcript
 //                                               in the named prompt template
+//   { type: "system", command: "shutdown" }   — power/session action; shutdown
+//                                               and restart ask for on-screen
+//                                               confirmation first (server.mjs)
 //
 // XIAOMI_REMOTE_BUTTON_MAP overrides single entries. Format:
 //   new:  "ok.click=key:enter, ok.double=app:chrome, back.hold=none"
@@ -20,7 +23,11 @@ export const REMOTE_BUTTONS = Object.freeze([
 
 export const REMOTE_GESTURES = Object.freeze(["click", "double", "hold"]);
 
-export const ACTION_TYPES = Object.freeze(["none", "key", "combo", "app", "text", "prompt"]);
+export const ACTION_TYPES = Object.freeze(["none", "key", "combo", "app", "text", "prompt", "system"]);
+
+// Values accepted by { type: "system", command }. Shutdown/restart go through
+// a confirmation step before executing; sleep/lock run immediately.
+export const SYSTEM_COMMANDS = Object.freeze(["shutdown", "restart", "sleep", "lock"]);
 
 const keyAction = (key) => Object.freeze({ type: "key", key });
 
@@ -35,9 +42,11 @@ export const DEFAULT_REMOTE_ACTIONS = Object.freeze({
   volume_up: Object.freeze({ click: keyAction("volume_up") }),
   volume_down: Object.freeze({ click: keyAction("volume_down") }),
   menu: Object.freeze({ click: keyAction("menu") }),
-  // The power key is disabled by default — a surprise sleep/lock is a footgun.
-  // Its HID code is not known yet; pressing it logs an unparsed-packet line.
-  power: Object.freeze({ click: Object.freeze({ type: "none" }) })
+  // Hold-to-shutdown mirrors real devices (phones/TVs) and avoids accidental
+  // triggers: a single press does nothing, holding arms an on-screen confirm.
+  // The power key's HID code is not known yet; pressing it logs an
+  // unparsed-packet line, so this mapping stays inert until the code is added.
+  power: Object.freeze({ click: Object.freeze({ type: "none" }), hold: Object.freeze({ type: "system", command: "shutdown" }) })
 });
 
 export function cloneDefaultRemoteActions() {
@@ -75,6 +84,10 @@ export function normalizeAction(action) {
       const name = String(action.name || "").trim();
       return name ? { type: "prompt", name } : null;
     }
+    case "system": {
+      const command = String(action.command || "").trim().toLowerCase();
+      return SYSTEM_COMMANDS.includes(command) ? { type: "system", command } : null;
+    }
     default:
       return null;
   }
@@ -95,7 +108,8 @@ function parseActionSpec(spec) {
   }
   const type = raw.slice(0, sepIndex).trim().toLowerCase();
   const payload = decodeURIComponent(raw.slice(sepIndex + 1));
-  return normalizeAction({ type, [type === "key" ? "key" : type === "combo" ? "combo" : type === "app" ? "command" : type === "text" ? "text" : "name"]: payload });
+  const field = { key: "key", combo: "combo", app: "command", text: "text", prompt: "name", system: "command" }[type];
+  return field ? normalizeAction({ type, [field]: payload }) : null;
 }
 
 export function serializeAction(action) {
@@ -116,6 +130,8 @@ export function serializeAction(action) {
       return `text:${encodeURIComponent(normalized.text)}`;
     case "prompt":
       return `prompt:${encodeURIComponent(normalized.name)}`;
+    case "system":
+      return `system:${encodeURIComponent(normalized.command)}`;
     default:
       return "";
   }

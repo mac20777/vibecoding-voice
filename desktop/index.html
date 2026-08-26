@@ -262,6 +262,7 @@
                       <option value="app" data-i18n="actionTypeApp">打开应用</option>
                       <option value="text" data-i18n="actionTypeText">输入文本</option>
                       <option value="prompt" data-i18n="actionTypePrompt">提示词模板</option>
+                      <option value="system" data-i18n="actionTypeSystem">系统操作</option>
                     </select>
                     <div class="action-fields" id="af-key">
                       <select id="action-key"></select>
@@ -283,6 +284,14 @@
                     </div>
                     <div class="action-fields" id="af-prompt" hidden>
                       <select id="action-prompt"></select>
+                    </div>
+                    <div class="action-fields" id="af-system" hidden>
+                      <select id="action-system">
+                        <option value="shutdown" data-i18n="sysCmdShutdown">关机</option>
+                        <option value="restart" data-i18n="sysCmdRestart">重启</option>
+                        <option value="sleep" data-i18n="sysCmdSleep">睡眠</option>
+                        <option value="lock" data-i18n="sysCmdLock">锁屏</option>
+                      </select>
                     </div>
                   </div>
                   <div class="remote-note" id="voice-fixed-note" data-i18n="voiceFixedNote" hidden>语音键固定为「按住说话」，不参与映射。</div>
@@ -391,7 +400,10 @@
                   </div>
                   <div class="field-group" data-provider-section="openai">
                     <div class="field">
-                      <label class="field-label" for="openai-api-key">OpenAI API Key</label>
+                      <div class="field-head">
+                        <label class="field-label" for="openai-api-key">OpenAI API Key</label>
+                        <button type="button" class="key-link" data-open-url="https://platform.openai.com/api-keys" data-i18n="getApiKey">获取 Key →</button>
+                      </div>
                       <input id="openai-api-key" name="openaiApiKey" type="password" autocomplete="off" />
                     </div>
                     <div class="field">
@@ -401,7 +413,10 @@
                   </div>
                   <div class="field-group" data-provider-section="volcengine">
                     <div class="field">
-                      <label class="field-label" for="volcengine-app-key">Volcengine App Key</label>
+                      <div class="field-head">
+                        <label class="field-label" for="volcengine-app-key">Volcengine App Key</label>
+                        <button type="button" class="key-link" data-open-url="https://console.volcengine.com/speech/app" data-i18n="getApiKey">获取 Key →</button>
+                      </div>
                       <input id="volcengine-app-key" name="volcengineAppKey" type="password" autocomplete="off" />
                     </div>
                     <div class="field">
@@ -472,7 +487,10 @@
                     </select>
                   </div>
                   <div class="field">
-                    <label class="field-label" for="voice-translation-api-key">DeepSeek API Key</label>
+                    <div class="field-head">
+                      <label class="field-label" for="voice-translation-api-key">DeepSeek API Key</label>
+                      <button type="button" class="key-link" data-open-url="https://platform.deepseek.com/api_keys" data-i18n="getApiKey">获取 Key →</button>
+                    </div>
                     <input id="voice-translation-api-key" name="voiceTranslationApiKey" type="password" autocomplete="off" />
                   </div>
                   <div class="field">
@@ -592,8 +610,91 @@
                 <div class="s">127.0.0.1</div>
               </div>
             </div>
+            <div class="about-actions">
+              <button id="reopen-wizard-button" class="btn btn-ghost btn-small" type="button" data-i18n="reopenWizard">重新打开新手引导</button>
+            </div>
           </section>
         </main>
+      </div>
+    </div>
+
+    <div class="wizard-overlay" id="wizard" hidden>
+      <div class="wizard-card">
+        <div class="wizard-head">
+          <div class="wizard-title" id="wizard-title"></div>
+          <div class="wizard-dots" id="wizard-dots"></div>
+        </div>
+
+        <div class="wizard-step" data-wstep="welcome">
+          <div class="wizard-hero">🎙️</div>
+          <p class="wizard-text" data-i18n="wizWelcome">花一分钟完成基础配置：填语音识别的 Key → 试说一句话 →（可选）配遥控器。</p>
+        </div>
+
+        <div class="wizard-step" data-wstep="stt" hidden>
+          <div class="field">
+            <label class="field-label" for="wiz-stt-provider" data-i18n="fStt">语音识别服务</label>
+            <select id="wiz-stt-provider">
+              <option value="volcengine" data-i18n="wizOptVolc">Volcengine（推荐中文）</option>
+              <option value="openai">OpenAI Whisper</option>
+            </select>
+          </div>
+          <div data-wiz-provider="volcengine">
+            <div class="field">
+              <div class="field-head">
+                <label class="field-label" for="wiz-volc-app-key">Volcengine App Key</label>
+                <button type="button" class="key-link" data-open-url="https://console.volcengine.com/speech/app" data-i18n="getApiKey">获取 Key →</button>
+              </div>
+              <input id="wiz-volc-app-key" type="password" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label class="field-label" for="wiz-volc-access-key">Volcengine Access Key</label>
+              <input id="wiz-volc-access-key" type="password" autocomplete="off" />
+            </div>
+            <div class="hint" data-i18n="wizSttVolcNote">打开火山引擎控制台 → 语音识别 → 创建应用，把 App Key 和 Access Key 复制到这里。</div>
+          </div>
+          <div data-wiz-provider="openai" hidden>
+            <div class="field">
+              <div class="field-head">
+                <label class="field-label" for="wiz-openai-key">OpenAI API Key</label>
+                <button type="button" class="key-link" data-open-url="https://platform.openai.com/api-keys" data-i18n="getApiKey">获取 Key →</button>
+              </div>
+              <input id="wiz-openai-key" type="password" autocomplete="off" />
+            </div>
+            <div class="hint" data-i18n="wizSttOpenaiNote">打开 OpenAI 平台创建 API Key，复制到这里。</div>
+          </div>
+          <div class="wizard-error" id="wiz-stt-error" hidden></div>
+        </div>
+
+        <div class="wizard-step" data-wstep="test" hidden>
+          <p class="wizard-text" data-i18n="wizTestHint">按住 F8（或首页的麦克风按钮）说一句话，比如「你好」。</p>
+          <div class="wizard-test-status" id="wiz-test-status" data-i18n="wizTestWaiting">等待你说一句话…</div>
+          <button id="wiz-start-service" class="btn btn-ghost" type="button" data-i18n="wizStartService" hidden>启动服务</button>
+        </div>
+
+        <div class="wizard-step" data-wstep="remote" hidden>
+          <div class="switch-row">
+            <input id="wiz-remote-enabled" type="checkbox" class="switch" />
+            <span data-i18n="wizRemoteEnable">启用小米蓝牙遥控器</span>
+          </div>
+          <div class="hint" data-i18n="wizRemoteNote">有遥控器就打开：先在 Windows 蓝牙设置里配对遥控器。没有就直接下一步，之后随时可在「遥控器」页配置。</div>
+        </div>
+
+        <div class="wizard-step" data-wstep="done" hidden>
+          <div class="wizard-hero">✅</div>
+          <div class="switch-row">
+            <input id="wiz-auto-launch" type="checkbox" class="switch" />
+            <span data-i18n="fAutoLaunch">开机自启</span>
+          </div>
+          <div class="hint" data-i18n="wizDoneNote">建议开启开机自启，语音功能随系统就绪。点「完成并保存」开始用。</div>
+        </div>
+
+        <div class="wizard-actions">
+          <button id="wizard-skip" class="btn btn-ghost btn-small" type="button" data-i18n="wizSkip">跳过</button>
+          <div class="wizard-nav">
+            <button id="wizard-back" class="btn btn-ghost btn-small" type="button" data-i18n="wizBack">上一步</button>
+            <button id="wizard-next" class="btn btn-primary btn-small" type="button" data-i18n="wizNext">下一步</button>
+          </div>
+        </div>
       </div>
     </div>
 

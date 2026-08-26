@@ -13,6 +13,7 @@ test("normalizeDesktopSettings applies safe defaults", () => {
     recordTranscripts: true,
     overlayX: null,
     overlayY: null,
+    hasOnboarded: false,
     localMicHoldKey: "F8",
     localMicSendKey: "F9",
     localMicUndoKey: "F10",
@@ -42,6 +43,7 @@ test("normalizeDesktopSettings applies safe defaults", () => {
       recordTranscripts: true,
       overlayX: null,
       overlayY: null,
+      hasOnboarded: false,
       uiLanguage: "zh",
       hasUsedVoice: false
     }
@@ -106,6 +108,7 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
     recordTranscripts: true,
     overlayX: null,
     overlayY: null,
+    hasOnboarded: false,
     autoLaunch: true,
     launchToTray: true,
     closeToTray: false,

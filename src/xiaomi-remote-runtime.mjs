@@ -47,7 +47,10 @@ export function parseExtcapInterfaces(output) {
   return interfaces;
 }
 
-export function findUsbDeviceAddress(output, adapterMatch = "BARROT Bluetooth") {
+// The default needle matches any Bluetooth adapter brand (Barrot, Realtek,
+// Intel, CSR…); XIAOMI_REMOTE_USB_ADAPTER_MATCH overrides it when a machine has
+// several Bluetooth adapters and the wrong one gets picked.
+export function findUsbDeviceAddress(output, adapterMatch = "Bluetooth") {
   const needle = String(adapterMatch || "").trim().toLowerCase();
   if (!needle) {
     return null;

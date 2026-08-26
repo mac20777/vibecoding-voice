@@ -61,7 +61,10 @@
         confirmHint: "按确认键发送 · 按返回键撤销",
         sent: "已发送 ✓",
         cancelled: "已取消",
-        empty: "没有听清，再试一次"
+        empty: "没有听清，再试一次",
+        power: { shutdown: "关机", restart: "重启" },
+        powerHint: "按确定键执行 · 按返回键取消",
+        powerNow: { shutdown: "正在关机…", restart: "正在重启…" }
       },
       en: {
         listening: "Listening…",
@@ -70,7 +73,10 @@
         confirmHint: "Press OK to send · Back to cancel",
         sent: "Sent ✓",
         cancelled: "Cancelled",
-        empty: "Nothing heard — try again"
+        empty: "Nothing heard — try again",
+        power: { shutdown: "Shut down", restart: "Restart" },
+        powerHint: "OK to confirm · Back to cancel",
+        powerNow: { shutdown: "Shutting down…", restart: "Restarting…" }
       }
     };
 
@@ -88,9 +94,18 @@
       hintEl.classList.toggle("hidden", !hint);
     }
 
+    let powerCountdown = null;
+    function clearPowerCountdown() {
+      if (powerCountdown) {
+        clearInterval(powerCountdown);
+        powerCountdown = null;
+      }
+    }
+
     window.vibeOverlay.onEvent((payload = {}) => {
       const lang = T[payload.lang] ? payload.lang : "zh";
       const tt = T[lang];
+      clearPowerCountdown();
       if (payload.type === "transcript_final") {
         if (payload.requiresAction) {
           render(tt.waiting, "busy", payload.text || "", payload.confirmHint || tt.confirmHint);
@@ -119,6 +134,24 @@
         case "empty_segment":
         case "transcript_empty":
           render(tt.empty, "");
+          break;
+        case "power_confirm": {
+          const label = tt.power[payload.command] || payload.command || "";
+          let left = Number(payload.seconds) || 10;
+          const paint = () => render(`${label}?`, "recording", "", `${tt.powerHint} · ${left}s`);
+          paint();
+          powerCountdown = setInterval(() => {
+            left -= 1;
+            if (left <= 0) {
+              clearPowerCountdown();
+              return;
+            }
+            paint();
+          }, 1000);
+          break;
+        }
+        case "power_executing":
+          render(tt.powerNow[payload.command] || "…", "busy");
           break;
         default:
           break;

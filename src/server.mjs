@@ -37,6 +37,7 @@ import {
   serializeAction
 } from "./remote-buttons.mjs";
 import { RemoteGestureEngine } from "./remote-gestures.mjs";
+import { runSystemCommand } from "./system-actions.mjs";
 
 const config = loadConfig();
 
@@ -1275,6 +1276,51 @@ function previewActionForGesture(button, gesture) {
   return null;
 }
 
+// ── System (power/session) actions ─────────────────────────────────────
+// shutdown/restart are destructive, so they arm an on-screen confirmation
+// first: the overlay counts down while OK confirms and Back cancels.
+// sleep/lock run immediately.
+const SYSTEM_CONFIRM_TIMEOUT_MS = 10_000;
+const SYSTEM_CONFIRM_COMMANDS = new Set(["shutdown", "restart"]);
+let pendingSystemAction = null; // { command, timer }
+
+function broadcastSystemActionStatus(status, command = "", seconds = 0) {
+  relayDictationEvent(null, { type: "status", status, command, seconds, source: "xiaomi_remote" });
+}
+
+function armSystemAction(command, origin) {
+  cancelSystemAction("replaced");
+  const timer = setTimeout(() => cancelSystemAction("timeout"), SYSTEM_CONFIRM_TIMEOUT_MS);
+  pendingSystemAction = { command, timer };
+  log("system action armed, awaiting confirm:", command, origin);
+  broadcastSystemActionStatus("power_confirm", command, SYSTEM_CONFIRM_TIMEOUT_MS / 1000);
+}
+
+function confirmSystemAction(origin) {
+  const pending = pendingSystemAction;
+  if (!pending) {
+    return false;
+  }
+  clearTimeout(pending.timer);
+  pendingSystemAction = null;
+  log("system action confirmed:", pending.command, origin);
+  broadcastSystemActionStatus("power_executing", pending.command);
+  runSystemCommand(pending.command, { dryRun: config.dryRunTextInjection, log });
+  return true;
+}
+
+function cancelSystemAction(origin) {
+  const pending = pendingSystemAction;
+  if (!pending) {
+    return false;
+  }
+  clearTimeout(pending.timer);
+  pendingSystemAction = null;
+  log("system action cancelled:", pending.command, origin);
+  broadcastSystemActionStatus("cancelled");
+  return true;
+}
+
 function executeRemoteAction(button, gesture, action) {
   const dryRun = config.dryRunTextInjection;
   log("remote_button", `${button}.${gesture}`, "->", serializeAction(action));
@@ -1310,6 +1356,13 @@ function executeRemoteAction(button, gesture, action) {
       broadcastRemoteAction({ action: "prompt_armed", name: template.name });
       return;
     }
+    case "system":
+      if (SYSTEM_CONFIRM_COMMANDS.has(action.command)) {
+        armSystemAction(action.command, `${button}.${gesture}`);
+      } else {
+        runSystemCommand(action.command, { dryRun, log });
+      }
+      return;
     default:
       return;
   }
@@ -1324,10 +1377,25 @@ const remoteGestureEngine = remoteButtonActions
         }
         // While a preview is pending its modal bindings count too, so a
         // double-click discard is detected instead of firing two undos.
-        return Boolean(remotePreview && previewActionForGesture(button, gesture));
+        if (remotePreview && previewActionForGesture(button, gesture)) {
+          return true;
+        }
+        // Same for a pending power confirm: OK/Back must stay responsive
+        // even if the user unmapped their normal actions.
+        return Boolean(pendingSystemAction && (button === "ok" || button === "back"));
       },
       isRepeatButton: (button) => button === "volume_up" || button === "volume_down",
       onGesture: (button, gesture) => {
+        // A pending power confirm is modal: OK executes, Back cancels, and
+        // every other key is swallowed so nothing leaks into the focused app.
+        if (pendingSystemAction) {
+          if (button === "ok" && gesture === "click") {
+            confirmSystemAction("gesture");
+          } else if (button === "back" && gesture === "click") {
+            cancelSystemAction("gesture");
+          }
+          return;
+        }
         const previewAction = remotePreview ? previewActionForGesture(button, gesture) : null;
         if (previewAction === "confirm") {
           void confirmRemotePreview("gesture");

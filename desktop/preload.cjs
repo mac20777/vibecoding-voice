@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("vibeApp", {
   pickDirectory: (currentPath) => ipcRenderer.invoke("desktop:pick-directory", currentPath),
   openConfigFolder: () => ipcRenderer.invoke("desktop:open-config-folder"),
   overlayEvent: (payload) => ipcRenderer.send("overlay:event", payload),
+  openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
   onState: (callback) => {
     if (typeof callback !== "function") {
       return;

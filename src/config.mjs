@@ -427,7 +427,7 @@ export function loadConfig(options = {}) {
     xiaomiRemoteTsharkPath: process.env.XIAOMI_REMOTE_TSHARK_PATH || "",
     xiaomiRemoteUsbPcapInterface: process.env.XIAOMI_REMOTE_USBPCAP_INTERFACE || "",
     xiaomiRemoteUsbDevice: process.env.XIAOMI_REMOTE_USB_DEVICE || "",
-    xiaomiRemoteUsbAdapterMatch: process.env.XIAOMI_REMOTE_USB_ADAPTER_MATCH || "BARROT Bluetooth",
+    xiaomiRemoteUsbAdapterMatch: process.env.XIAOMI_REMOTE_USB_ADAPTER_MATCH || "Bluetooth",
     xiaomiRemoteFfmpegPath: process.env.XIAOMI_REMOTE_FFMPEG_PATH || "",
     xiaomiRemoteWslDistro: process.env.XIAOMI_REMOTE_WSL_DISTRO || "Ubuntu",
     xiaomiRemoteInactivityMs: Number(process.env.XIAOMI_REMOTE_INACTIVITY_MS || "900"),

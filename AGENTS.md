@@ -41,8 +41,10 @@ server.mjs (entry point — HTTP + WebSocket server)
 │   ├── xiaomi-remote-info.mjs — reads remote model + battery over WinRT GATT (once at startup)
 │   ├── remote-gestures.mjs  — turns raw button down/up into click/double/hold gestures
 │   │                          (volume keys auto-repeat while held)
-│   └── remote-buttons.mjs   — maps button gestures to actions: key/combo/app/text/prompt
-│                              (inject-key.ps1 handles single keys and modifier chords)
+│   └── remote-buttons.mjs   — maps button gestures to actions: key/combo/app/text/prompt/system
+│                              (inject-key.ps1 handles single keys and modifier chords;
+│                              system-actions.mjs runs shutdown/restart/sleep/lock —
+│                              shutdown/restart get an on-screen confirm, OK=run, Back=cancel)
 ├── stt.mjs              — speech-to-text (OpenAI Whisper / Volcengine ASR)
 │   ├── wav.mjs          — PCM16 → WAV header conversion
 │   └── paths.mjs        — resolves project root from import.meta.url

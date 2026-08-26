@@ -42,6 +42,12 @@ test("USBPcap parsers find interfaces and the Bluetooth adapter address", () => 
     "value {arg=99}{value=3_16}{display=Xiaomi voice remote}{enabled=false}{parent=3}"
   ].join("\n");
   assert.equal(findUsbDeviceAddress(tree, "BARROT Bluetooth"), "3");
+  // The default needle is brand-agnostic.
+  assert.equal(findUsbDeviceAddress(tree), "3");
+  assert.equal(
+    findUsbDeviceAddress("value {arg=99}{value=7}{display=[7] Realtek Bluetooth 5.3 Radio}{enabled=true}"),
+    "7"
+  );
   assert.equal(findUsbDeviceAddress(tree, "Xiaomi voice remote"), "3");
 });
 

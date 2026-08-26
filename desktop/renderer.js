@@ -91,6 +91,7 @@ const I18N = {
     gestureClick: "单击", gestureDouble: "双击", gestureHold: "长按",
     actionTypeNone: "禁用", actionTypeKey: "键盘按键", actionTypeCombo: "组合快捷键",
     actionTypeApp: "打开应用", actionTypeText: "输入文本", actionTypePrompt: "提示词模板",
+    actionTypeSystem: "系统操作", sysCmdShutdown: "关机", sysCmdRestart: "重启", sysCmdSleep: "睡眠", sysCmdLock: "锁屏",
     actionUnset: "未设置",
     actionAppSummary: "打开 {target}", actionPromptSummary: "模板：{name}",
     promptListEmpty: "还没有模板，去「提示词」页添加",
@@ -101,6 +102,13 @@ const I18N = {
     previewKeysTitle: "悬浮条预览键位",
     previewKeysHint: "选「设备确认后发送」时：说话后文字先出现在悬浮条，再按住语音键可追加；确认 = 上屏并发送，撤销 = 去掉最后一段，取消 = 整段丢弃。",
     previewConfirm: "确认发送", previewUndo: "撤销一段", previewDiscard: "整段取消",
+    getApiKey: "获取 Key →", reopenWizard: "重新打开新手引导",
+    wizTitleWelcome: "欢迎使用", wizTitleStt: "语音识别服务", wizTitleTest: "试说一句话",
+    wizTitleRemote: "遥控器（可选）", wizTitleDone: "完成",
+    wizBack: "上一步", wizNext: "下一步", wizSkip: "跳过", wizFinish: "完成并保存",
+    wizStartService: "启动服务", wizTestOk: "✓ 收到！语音识别工作正常",
+    wizSttNeedKey: "请先把 Key 填上（点右侧「获取 Key」去控制台复制）",
+    wizOptVolc: "Volcengine（推荐中文）",
     overlayPreviewHint: "{confirm} 发送 · {undo} 撤销一段 · {discard} 整段取消",
     navPrompts: "提示词", navRemote: "遥控器",
     promptsTitle: "提示词模板",
@@ -209,6 +217,7 @@ const I18N = {
     gestureClick: "Click", gestureDouble: "Double-click", gestureHold: "Long-press",
     actionTypeNone: "Disabled", actionTypeKey: "Key", actionTypeCombo: "Shortcut",
     actionTypeApp: "Launch app", actionTypeText: "Type text", actionTypePrompt: "Prompt template",
+    actionTypeSystem: "System action", sysCmdShutdown: "Shut down", sysCmdRestart: "Restart", sysCmdSleep: "Sleep", sysCmdLock: "Lock",
     actionUnset: "Not set",
     actionAppSummary: "Open {target}", actionPromptSummary: "Template: {name}",
     promptListEmpty: "No templates yet — add one on the Prompts page",
@@ -219,6 +228,13 @@ const I18N = {
     previewKeysTitle: "Overlay preview keys",
     previewKeysHint: "With 'Confirm on device first': speech lands in the floating bar first; hold the voice key again to append. Confirm = type & send, Undo = drop the last segment, Discard = cancel everything.",
     previewConfirm: "Confirm & send", previewUndo: "Undo last", previewDiscard: "Discard all",
+    getApiKey: "Get API key →", reopenWizard: "Reopen the setup guide",
+    wizTitleWelcome: "Welcome", wizTitleStt: "Speech recognition", wizTitleTest: "Say something",
+    wizTitleRemote: "Remote (optional)", wizTitleDone: "Done",
+    wizBack: "Back", wizNext: "Next", wizSkip: "Skip", wizFinish: "Finish & save",
+    wizStartService: "Start service", wizTestOk: "✓ Got it — recognition works",
+    wizSttNeedKey: "Paste your API key first (use the Get Key link to open the console)",
+    wizOptVolc: "Volcengine (best for Chinese)",
     overlayPreviewHint: "{confirm} send · {undo} undo last · {discard} discard all",
     navPrompts: "Prompts", navRemote: "Remote",
     promptsTitle: "Prompt Templates",
@@ -352,6 +368,7 @@ const elements = {
   afApp: document.querySelector("#af-app"),
   afText: document.querySelector("#af-text"),
   afPrompt: document.querySelector("#af-prompt"),
+  afSystem: document.querySelector("#af-system"),
   actionKey: document.querySelector("#action-key"),
   comboCtrl: document.querySelector("#combo-ctrl"),
   comboAlt: document.querySelector("#combo-alt"),
@@ -361,6 +378,7 @@ const elements = {
   actionApp: document.querySelector("#action-app"),
   actionText: document.querySelector("#action-text"),
   actionPrompt: document.querySelector("#action-prompt"),
+  actionSystem: document.querySelector("#action-system"),
   promptList: document.querySelector("#prompt-list"),
   promptNewButton: document.querySelector("#prompt-new-button"),
   promptSeedButton: document.querySelector("#prompt-seed-button"),
@@ -373,6 +391,22 @@ const elements = {
   promptBindings: document.querySelector("#prompt-bindings"),
   promptSaveButton: document.querySelector("#prompt-save-button"),
   remoteSaveButton: document.querySelector("#remote-save-button"),
+  wizard: document.querySelector("#wizard"),
+  wizardTitle: document.querySelector("#wizard-title"),
+  wizardDots: document.querySelector("#wizard-dots"),
+  wizardBack: document.querySelector("#wizard-back"),
+  wizardNext: document.querySelector("#wizard-next"),
+  wizardSkip: document.querySelector("#wizard-skip"),
+  wizSttProvider: document.querySelector("#wiz-stt-provider"),
+  wizVolcAppKey: document.querySelector("#wiz-volc-app-key"),
+  wizVolcAccessKey: document.querySelector("#wiz-volc-access-key"),
+  wizOpenaiKey: document.querySelector("#wiz-openai-key"),
+  wizSttError: document.querySelector("#wiz-stt-error"),
+  wizTestStatus: document.querySelector("#wiz-test-status"),
+  wizStartService: document.querySelector("#wiz-start-service"),
+  wizRemoteEnabled: document.querySelector("#wiz-remote-enabled"),
+  wizAutoLaunch: document.querySelector("#wiz-auto-launch"),
+  reopenWizardButton: document.querySelector("#reopen-wizard-button"),
   pvkConfirmButton: document.querySelector("#pvk-confirm-button"),
   pvkConfirmGesture: document.querySelector("#pvk-confirm-gesture"),
   pvkUndoButton: document.querySelector("#pvk-undo-button"),
@@ -460,7 +494,8 @@ const localMic = {
 // Mirror of src/remote-buttons.mjs action model — keep in sync.
 const REMOTE_BUTTONS = ["up", "down", "left", "right", "ok", "back", "home", "volume_up", "volume_down", "menu", "power"];
 const REMOTE_GESTURES = ["click", "double", "hold"];
-const REMOTE_ACTION_TYPES = ["none", "key", "combo", "app", "text", "prompt"];
+const REMOTE_ACTION_TYPES = ["none", "key", "combo", "app", "text", "prompt", "system"];
+const SYSTEM_COMMANDS = ["shutdown", "restart", "sleep", "lock"];
 const DEFAULT_REMOTE_ACTIONS = Object.freeze({
   up: { click: { type: "key", key: "up" } },
   down: { click: { type: "key", key: "down" } },
@@ -472,7 +507,7 @@ const DEFAULT_REMOTE_ACTIONS = Object.freeze({
   volume_up: { click: { type: "key", key: "volume_up" } },
   volume_down: { click: { type: "key", key: "volume_down" } },
   menu: { click: { type: "key", key: "menu" } },
-  power: { click: { type: "none" } }
+  power: { click: { type: "none" }, hold: { type: "system", command: "shutdown" } }
 });
 const REMOTE_KEY_OPTIONS = [
   "up", "down", "left", "right", "enter", "escape", "tab", "space", "backspace",
@@ -643,6 +678,10 @@ function normalizeRemoteAction(action) {
       const name = String(action.name || "").trim();
       return name ? { type: "prompt", name } : null;
     }
+    case "system": {
+      const command = String(action.command || "").trim().toLowerCase();
+      return SYSTEM_COMMANDS.includes(command) ? { type: "system", command } : null;
+    }
     default:
       return null;
   }
@@ -666,6 +705,8 @@ function serializeRemoteAction(action) {
       return `text:${encodeURIComponent(normalized.text)}`;
     case "prompt":
       return `prompt:${encodeURIComponent(normalized.name)}`;
+    case "system":
+      return `system:${encodeURIComponent(normalized.command)}`;
     default:
       return "";
   }
@@ -685,7 +726,7 @@ function parseActionSpec(spec) {
   }
   const type = raw.slice(0, sepIndex).trim().toLowerCase();
   const payload = decodeURIComponent(raw.slice(sepIndex + 1));
-  const field = { key: "key", combo: "combo", app: "command", text: "text", prompt: "name" }[type];
+  const field = { key: "key", combo: "combo", app: "command", text: "text", prompt: "name", system: "command" }[type];
   return field ? normalizeRemoteAction({ type, [field]: payload }) : null;
 }
 
@@ -774,6 +815,10 @@ function remoteActionSummary(action) {
       return normalized.text.length > 12 ? `${normalized.text.slice(0, 12)}…` : normalized.text;
     case "prompt":
       return t("actionPromptSummary", { name: normalized.name });
+    case "system": {
+      const cap = `${normalized.command[0].toUpperCase()}${normalized.command.slice(1)}`;
+      return t(`sysCmd${cap}`);
+    }
     default:
       return t("actionUnset");
   }
@@ -1330,6 +1375,125 @@ function finishLocalMicSessionFromBridge(message) {
   }
 }
 
+// ── Onboarding wizard ──────────────────────────────────────────
+const WIZARD_STEPS = ["welcome", "stt", "test", "remote", "done"];
+const WIZARD_TITLE_KEYS = {
+  welcome: "wizTitleWelcome",
+  stt: "wizTitleStt",
+  test: "wizTitleTest",
+  remote: "wizTitleRemote",
+  done: "wizTitleDone"
+};
+const wizardState = { open: false, step: 0, testPassed: false };
+let hasOnboarded = false;
+
+function markOnboarded() {
+  hasOnboarded = true;
+  void window.vibeApp.updateDesktopSettings({ hasOnboarded: true }).catch(() => {});
+}
+
+function renderWizardTestStatus() {
+  const service = appState.service || appState.bootstrap?.service;
+  const running = service?.status === "running";
+  elements.wizStartService.hidden = running;
+  elements.wizTestStatus.classList.toggle("ok", wizardState.testPassed);
+  elements.wizTestStatus.textContent = wizardState.testPassed
+    ? t("wizTestOk")
+    : running
+      ? t("wizTestWaiting")
+      : t("connNoService");
+}
+
+function renderWizard() {
+  const stepName = WIZARD_STEPS[wizardState.step];
+  elements.wizardTitle.textContent = t(WIZARD_TITLE_KEYS[stepName]);
+  elements.wizardDots.innerHTML = "";
+  WIZARD_STEPS.forEach((_, index) => {
+    const dot = document.createElement("i");
+    dot.classList.toggle("active", index <= wizardState.step);
+    elements.wizardDots.appendChild(dot);
+  });
+  document.querySelectorAll(".wizard-step").forEach((step) => {
+    step.hidden = step.dataset.wstep !== stepName;
+  });
+  elements.wizardBack.hidden = wizardState.step === 0;
+  elements.wizardNext.textContent =
+    wizardState.step === WIZARD_STEPS.length - 1 ? t("wizFinish") : t("wizNext");
+  if (stepName === "test") {
+    renderWizardTestStatus();
+  }
+}
+
+function openWizard() {
+  wizardState.open = true;
+  wizardState.step = 0;
+  wizardState.testPassed = hasUsedVoice;
+  elements.wizSttProvider.value = elements.sttProvider.value || "volcengine";
+  elements.wizVolcAppKey.value = elements.volcengineAppKey.value || "";
+  elements.wizVolcAccessKey.value = elements.volcengineAccessKey.value || "";
+  elements.wizOpenaiKey.value = elements.openaiApiKey.value || "";
+  elements.wizRemoteEnabled.checked = elements.xiaomiRemoteEnabled.checked;
+  elements.wizAutoLaunch.checked = elements.autoLaunch.checked;
+  elements.wizSttError.hidden = true;
+  renderWizardProvider();
+  elements.wizard.hidden = false;
+  renderWizard();
+}
+
+function closeWizard() {
+  elements.wizard.hidden = true;
+  wizardState.open = false;
+}
+
+function renderWizardProvider() {
+  const provider = elements.wizSttProvider.value;
+  document.querySelectorAll("[data-wiz-provider]").forEach((section) => {
+    section.hidden = section.dataset.wizProvider !== provider;
+  });
+}
+
+async function wizardNextStep() {
+  const stepName = WIZARD_STEPS[wizardState.step];
+
+  if (stepName === "stt") {
+    const provider = elements.wizSttProvider.value;
+    const appKey = elements.wizVolcAppKey.value.trim();
+    const accessKey = elements.wizVolcAccessKey.value.trim();
+    const openaiKey = elements.wizOpenaiKey.value.trim();
+    const valid = provider === "volcengine" ? Boolean(appKey && accessKey) : Boolean(openaiKey);
+    if (!valid) {
+      elements.wizSttError.textContent = t("wizSttNeedKey");
+      elements.wizSttError.hidden = false;
+      return;
+    }
+    elements.wizSttError.hidden = true;
+    // Copy into the real form and save so the service restarts with the keys.
+    elements.sttProvider.value = provider;
+    elements.volcengineAppKey.value = appKey;
+    elements.volcengineAccessKey.value = accessKey;
+    elements.openaiApiKey.value = openaiKey;
+    updateFormAffordances();
+    renderChecklist();
+    await saveConfigFlow(elements.wizardNext);
+  }
+
+  if (stepName === "remote") {
+    elements.xiaomiRemoteEnabled.checked = elements.wizRemoteEnabled.checked;
+    renderChecklist();
+  }
+
+  if (stepName === "done") {
+    elements.autoLaunch.checked = elements.wizAutoLaunch.checked;
+    markOnboarded();
+    await saveConfigFlow(elements.wizardNext);
+    closeWizard();
+    return;
+  }
+
+  wizardState.step = Math.min(wizardState.step + 1, WIZARD_STEPS.length - 1);
+  renderWizard();
+}
+
 function gotoPage(pageName, settingsTab = null) {
   document.querySelectorAll(".nav-item").forEach((button) => {
     button.classList.toggle("active", button.dataset.page === pageName);
@@ -1481,6 +1645,7 @@ function collectFormPayload() {
       launchToTray: elements.launchToTray.checked,
       closeToTray: elements.closeToTray.checked,
       recordTranscripts: elements.recordTranscripts.checked,
+      hasOnboarded,
       localMicHoldKey: localMic.holdKey,
       localMicSendKey: localMic.sendKey,
       localMicUndoKey: localMic.undoKey,
@@ -1514,6 +1679,7 @@ function fillForm(form, desktopSettingsPath) {
   elements.closeToTray.checked = Boolean(form.desktopSettings?.closeToTray);
   elements.recordTranscripts.checked = form.desktopSettings?.recordTranscripts !== false;
   recordTranscriptsEnabled = elements.recordTranscripts.checked;
+  hasOnboarded = form.desktopSettings?.hasOnboarded === true;
   setLocalMicHotkeys(form.desktopSettings);
   elements.codexSkipGitRepoCheck.checked = Boolean(form.codexSkipGitRepoCheck);
   elements.claudeDangerouslySkipPermissions.checked = Boolean(form.claudeDangerouslySkipPermissions);
@@ -1883,6 +2049,7 @@ function renderRemoteEditor() {
   elements.afApp.hidden = action.type !== "app";
   elements.afText.hidden = action.type !== "text";
   elements.afPrompt.hidden = action.type !== "prompt";
+  elements.afSystem.hidden = action.type !== "system";
 
   if (action.type === "key") {
     elements.actionKey.value = action.key || "enter";
@@ -1899,6 +2066,8 @@ function renderRemoteEditor() {
     elements.actionText.value = action.text || "";
   } else if (action.type === "prompt") {
     renderPromptOptions(action.name || "");
+  } else if (action.type === "system") {
+    elements.actionSystem.value = action.command || "shutdown";
   }
 }
 
@@ -2157,7 +2326,8 @@ function handleRemoteVoiceEvent(message) {
 // window may be hidden in the tray while dictation happens.
 const OVERLAY_FORWARD_STATUSES = new Set([
   "recording", "transcribing", "translating", "awaiting_action",
-  "typed", "cancelled", "empty_segment", "transcript_empty"
+  "typed", "cancelled", "empty_segment", "transcript_empty",
+  "power_confirm", "power_executing"
 ]);
 function forwardOverlayEvent(message) {
   if (typeof window.vibeApp.overlayEvent !== "function") {
@@ -2178,6 +2348,8 @@ function forwardOverlayEvent(message) {
       type: "status",
       status: message.status,
       text: message.text || "",
+      command: message.command || "",
+      seconds: message.seconds || 0,
       confirmHint: previewHintText(),
       lang
     });
@@ -2241,6 +2413,10 @@ function handleBridgeMessage(message) {
     if (message.text) {
       pushTranscript("you", message.text);
       markVoiceUsed();
+      if (wizardState.open && WIZARD_STEPS[wizardState.step] === "test") {
+        wizardState.testPassed = true;
+        renderWizardTestStatus();
+      }
     }
     return;
   }
@@ -2330,6 +2506,9 @@ async function refreshBootstrap() {
   applyLang();
   renderRemoteStatus();
   connectLiveSocket();
+  if (!hasOnboarded) {
+    openWizard();
+  }
 }
 
 async function chooseDirectory(targetInput) {
@@ -2530,7 +2709,8 @@ elements.actionType.addEventListener("change", () => {
     combo: { type: "combo", combo: "ctrl+shift+p" },
     app: { type: "app", command: "" },
     text: { type: "text", text: "" },
-    prompt: { type: "prompt", name: promptTemplates[0]?.name || "" }
+    prompt: { type: "prompt", name: promptTemplates[0]?.name || "" },
+    system: { type: "system", command: "shutdown" }
   };
   setGestureAction(defaults[type] || { type: "none" });
   renderRemoteEditor();
@@ -2561,6 +2741,10 @@ elements.actionPrompt.addEventListener("change", () => {
   setGestureAction({ type: "prompt", name: elements.actionPrompt.value });
 });
 
+elements.actionSystem.addEventListener("change", () => {
+  setGestureAction({ type: "system", command: elements.actionSystem.value });
+});
+
 for (const action of PREVIEW_ACTIONS) {
   const cap = `${action[0].toUpperCase()}${action.slice(1)}`;
   elements[`pvk${cap}Button`].addEventListener("change", () => {
@@ -2570,6 +2754,36 @@ for (const action of PREVIEW_ACTIONS) {
     previewKeys[action].gesture = elements[`pvk${cap}Gesture`].value;
   });
 }
+
+// "获取 Key" links and wizard key-link buttons open the official consoles.
+document.addEventListener("click", (event) => {
+  const link = event.target.closest("[data-open-url]");
+  if (link) {
+    void window.vibeApp.openExternal(link.dataset.openUrl);
+  }
+});
+
+elements.wizSttProvider.addEventListener("change", renderWizardProvider);
+elements.wizardBack.addEventListener("click", () => {
+  wizardState.step = Math.max(0, wizardState.step - 1);
+  renderWizard();
+});
+elements.wizardNext.addEventListener("click", () => {
+  void wizardNextStep();
+});
+elements.wizardSkip.addEventListener("click", () => {
+  markOnboarded();
+  closeWizard();
+});
+elements.wizStartService.addEventListener("click", async () => {
+  const bootstrap = await window.vibeApp.startService();
+  appState.bootstrap = bootstrap;
+  appState.service = bootstrap.service;
+  renderService();
+  connectLiveSocket();
+  renderWizardTestStatus();
+});
+elements.reopenWizardButton.addEventListener("click", () => openWizard());
 
 elements.promptNewButton.addEventListener("click", () => {
   promptTemplates.push({ name: "", body: "" });

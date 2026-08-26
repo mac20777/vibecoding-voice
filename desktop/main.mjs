@@ -1393,6 +1393,26 @@ ipcMain.handle("desktop:pick-directory", async (_event, currentPath = "") => {
   return result.filePaths[0];
 });
 
+// Only allow opening the known consoles for API keys — nothing else.
+const ALLOWED_EXTERNAL_HOSTS = new Set([
+  "console.volcengine.com",
+  "platform.openai.com",
+  "platform.deepseek.com"
+]);
+
+ipcMain.handle("desktop:open-external", async (_event, url) => {
+  try {
+    const parsed = new URL(String(url || ""));
+    if (parsed.protocol !== "https:" || !ALLOWED_EXTERNAL_HOSTS.has(parsed.hostname)) {
+      return false;
+    }
+    await shell.openExternal(parsed.toString());
+    return true;
+  } catch {
+    return false;
+  }
+});
+
 ipcMain.handle("desktop:open-config-folder", async () => {
   const configPath = loadEffectiveConfig().userConfigPath;
   await shell.openPath(path.dirname(configPath));
@@ -1515,7 +1535,7 @@ function ensureOverlayWindow() {
   return overlayWindow;
 }
 
-const OVERLAY_SHOW_STATUSES = new Set(["recording", "transcribing", "translating", "awaiting_action"]);
+const OVERLAY_SHOW_STATUSES = new Set(["recording", "transcribing", "translating", "awaiting_action", "power_confirm", "power_executing"]);
 const OVERLAY_HIDE_STATUSES = new Set(["typed", "cancelled", "empty_segment", "transcript_empty"]);
 
 ipcMain.on("overlay:event", (_event, payload = {}) => {

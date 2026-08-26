@@ -25,6 +25,23 @@ test("parseRemoteActionMap fills defaults for every button", () => {
   assert.equal(map.ok.double, undefined);
 });
 
+test("power button defaults to hold-to-shutdown with click disabled", () => {
+  const map = parseRemoteActionMap("");
+  assert.deepEqual(map.power.click, { type: "none" });
+  assert.deepEqual(map.power.hold, { type: "system", command: "shutdown" });
+});
+
+test("system action validates against SYSTEM_COMMANDS", () => {
+  assert.equal(normalizeAction({ type: "system", command: "wipe" }), null);
+  assert.equal(serializeAction({ type: "system", command: "wipe" }), "");
+  // An invalid spec in the override string keeps the default in place.
+  const map = parseRemoteActionMap("power.hold=system:wipe");
+  assert.deepEqual(map.power.hold, DEFAULT_REMOTE_ACTIONS.power.hold);
+  // Valid override wins.
+  const locked = parseRemoteActionMap("power.click=system:lock");
+  assert.deepEqual(locked.power.click, { type: "system", command: "lock" });
+});
+
 test("new gesture format overrides a single gesture only", () => {
   const map = parseRemoteActionMap("ok.double=app:chrome, back.hold=none");
   assert.deepEqual(map.ok.double, { type: "app", command: "chrome" });
@@ -56,7 +73,8 @@ test("serializeAction / parse round-trip for every action type", () => {
     { type: "combo", combo: "ctrl+shift+p" },
     { type: "app", command: "C:\\Tools\\app.exe --flag" },
     { type: "text", text: "你好, world: 1" },
-    { type: "prompt", name: "优化" }
+    { type: "prompt", name: "优化" },
+    { type: "system", command: "restart" }
   ];
   for (const action of actions) {
     const spec = serializeAction(action);
