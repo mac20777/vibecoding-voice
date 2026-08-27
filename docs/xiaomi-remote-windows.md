@@ -30,7 +30,10 @@ the H2 sequence (`08`, `38`, `c8`, `f8`) and reports packet gaps.
 
 ## Requirements
 
-- Windows with the remote already paired.
+- Windows with the remote already paired. First-time pairing can follow the built-in guide: the
+  desktop app's Remote page has a pairing checklist (plug in the adapter, hold Home + Menu on the
+  remote until the LED blinks, then "Add device" in Windows Bluetooth settings) that detects the
+  adapter and the paired remote automatically and opens the Bluetooth settings page for you.
 - USBPcap with its filter driver active on the USB Bluetooth adapter. The Windows installer
   offers to run the bundled official USBPcap installer at the end of setup.
 
@@ -164,8 +167,10 @@ Replacing the Bluetooth adapter also needs no listener restart when
 identity changed, enumerates every current USBPcap interface, and follows the replacement adapter
 even when it is attached to another USB root controller. The Remote page shows the recovery state.
 If Windows keeps showing the old pairing but the remote produces no traffic through the new radio,
-remove and pair the remote again; the listener resumes automatically after pairing. An explicitly
-configured USBPcap interface remains pinned and is never switched implicitly.
+remove and pair the remote again — the Remote page pairing guide reopens for exactly this case and
+its "Open Bluetooth settings" button jumps straight to the right Settings page; the listener resumes
+automatically after pairing. An explicitly configured USBPcap interface remains pinned and is never
+switched implicitly.
 
 ### Pairing succeeds but Settings shows "driver error"
 
@@ -173,14 +178,16 @@ On the tested stack the remote's BLE GATT HID child device sometimes fails to st
 code 10) after a re-pair. This does not break the app's voice capture or button mapping — those
 ride the USBPcap path, not the HID child — so try the remote first before rebooting anything.
 
-To clear the error itself, no action is needed while the bridge is running: the broker-owned USBPcap
-capture helper watches the remote's HID child for the whole capture lifetime and restarts it with
-`pnputil /restart-device` when Windows reports a problem — no runtime UAC prompt, and the
-pairing order does not matter (pair before or after installing, both heal). The check is
-self-throttled (every 5 s for the first two minutes after capture start, then once a minute)
-because one WMI lookup costs a few hundred milliseconds. Independently, the Remote page shows a
-warning with a repair button whenever the child reports a problem. From a checkout, the manual
-equivalent is:
+Leaving the child broken is actually the recommended state. Repairing it turns on Windows' native
+HID delivery for the remote: every button press then arrives twice (once from Windows, once from
+the app's own mapping), and a repair that lands while a remote key is still held (for example
+mid-pairing, where Home + Menu are held for seconds) can swallow the key-up report and leave the
+key logically stuck until the adapter is power-cycled.
+
+For that reason the capture helper's HID watchdog is off by default; set
+`XIAOMI_REMOTE_HID_AUTOREPAIR=1` to re-enable it. The Remote page keeps a manual repair button
+(Repair driver) for users who prefer a clean Settings page and have `XIAOMI_REMOTE_BUTTONS=0`.
+From a checkout, the manual equivalent is:
 
 ```powershell
 npm run remote:xiaomi:fix-hid

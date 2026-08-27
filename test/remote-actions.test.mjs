@@ -31,6 +31,12 @@ test("power button is a regular mapping that defaults to click-to-shutdown", () 
   assert.equal(map.power.hold, undefined);
 });
 
+test("menu defaults to disabled so Windows native HID is not injected twice", () => {
+  const map = parseRemoteActionMap("");
+  assert.deepEqual(map.menu.click, { type: "none" });
+  assert.equal(map.menu.double, undefined);
+});
+
 test("system action validates against SYSTEM_COMMANDS", () => {
   assert.equal(normalizeAction({ type: "system", command: "wipe" }), null);
   assert.equal(serializeAction({ type: "system", command: "wipe" }), "");

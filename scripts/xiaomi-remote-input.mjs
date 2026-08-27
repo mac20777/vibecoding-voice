@@ -7,6 +7,7 @@ import {
   checkXiaomiRemoteHidHealth,
   restartXiaomiRemoteHidChild
 } from "../src/xiaomi-remote-hid-health.mjs";
+import { XiaomiRemoteMenuGuard } from "../src/xiaomi-remote-menu-guard.mjs";
 import { XiaomiRemoteSessionController } from "../src/xiaomi-remote-session.mjs";
 import {
   decodeMsbcFrames,
@@ -38,6 +39,21 @@ function sendDesktopCaptureStatus(state, metadata = {}) {
     });
   } catch {
     // The desktop may already be shutting down; capture cleanup still runs.
+  }
+}
+
+function sendDesktopMenuGuardStatus(state, metadata = {}) {
+  if (process.env.VIBE_DESKTOP !== "1" || typeof process.send !== "function") {
+    return;
+  }
+  try {
+    process.send({
+      type: "xiaomi_remote_menu_guard_status",
+      state,
+      ...metadata
+    });
+  } catch {
+    // The desktop may already be shutting down; repair cleanup still runs.
   }
 }
 
@@ -198,12 +214,52 @@ async function main() {
   let capture = null;
   let shuttingDown = false;
   let adapterRecoveryAwaitingInput = false;
+  let menuRepairInFlight = false;
+
+  async function repairRepeatingMenuKey(details) {
+    if (menuRepairInFlight || shuttingDown) {
+      return;
+    }
+    menuRepairInFlight = true;
+    log("menu key repeated abnormally; restarting the remote HID child", details);
+    sendDesktopMenuGuardStatus("repairing", { details });
+    try {
+      const entries = await checkXiaomiRemoteHidHealth(config.xiaomiRemoteHidDeviceMatch);
+      const target = entries.find((entry) => entry.status.toLowerCase() === "ok") || entries[0];
+      if (!target) {
+        throw new Error("Remote HID child was not found. Re-pair the remote in Windows Bluetooth settings.");
+      }
+      const result = await restartXiaomiRemoteHidChild(
+        target.instanceId,
+        config.xiaomiRemoteHidDeviceMatch
+      );
+      if (!result.healthy) {
+        throw new Error("Windows did not report a healthy remote HID child after restart.");
+      }
+      log("menu key anomaly cleared", { exitCode: result.exitCode });
+      sendDesktopMenuGuardStatus("recovered", { details });
+      setTimeout(() => sendDesktopMenuGuardStatus("ready"), 5_000).unref?.();
+    } catch (error) {
+      const message = error?.message || String(error);
+      log("menu key anomaly repair failed", message);
+      sendDesktopMenuGuardStatus("failed", { error: message, details });
+    } finally {
+      menuRepairInFlight = false;
+    }
+  }
+
+  const menuGuard = new XiaomiRemoteMenuGuard({
+    onTrip: (details) => {
+      void repairRepeatingMenuKey(details);
+    }
+  });
   const controller = new XiaomiRemoteSessionController({
     inactivityMs: config.xiaomiRemoteInactivityMs,
     log,
     sendJson: (message) => ws.send(JSON.stringify(message)),
     sendAudio: (pcm) => ws.send(pcm, { binary: true }),
-    decodeFrames: (frames) => decodeMsbcFrames(frames)
+    decodeFrames: (frames) => decodeMsbcFrames(frames),
+    onButtonEvent: (event) => menuGuard.handle(event)
   });
 
   ws.on("message", (data) => {
@@ -253,6 +309,7 @@ async function main() {
     },
     onCaptureEnd(metadata) {
       controller.reset(metadata?.reason || "capture_restart");
+      menuGuard.reset();
       log("capture generation ended", metadata);
       if (metadata?.reason === "adapter-missing" || metadata?.reason === "adapter-changed") {
         sendDesktopCaptureStatus("recovering", { metadata });

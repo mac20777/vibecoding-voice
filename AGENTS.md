@@ -36,9 +36,12 @@ server.mjs (entry point — HTTP + WebSocket server)
 ├── xiaomi-remote-runtime.mjs — Xiaomi remote capture (USBPcap named pipe; ATT parsing and mSBC
 │   │                             decoding are in-process, no tshark/ffmpeg). The elevated pipe
 │   │                             helper (scripts/windows/xiaomi-usbpcap-pipe.ps1) self-heals:
-│   │                             owner-PID watchdog on app exit, HID-child "driver error" repair,
-│   │                             and framed capture generations when the BT adapter is unplugged/
-│   │                             replugged (each generation resets the in-process pcap parser)
+│   │                             owner-PID watchdog on app exit, framed capture generations when
+│   │                             the BT adapter is unplugged/replugged (each generation resets the
+│   │                             in-process pcap parser). HID-child "driver error" auto-repair is
+│   │                             OFF by default (XIAOMI_REMOTE_HID_AUTOREPAIR=1 opts in): a repaired
+│   │                             child makes Windows deliver remote keys natively, and a repair
+│   │                             mid-pairing-hold can latch a key. The broken child is harmless.
 │   ├── usbpcap-att-parser.mjs — streaming pcap → ATT notification lines (replaces tshark)
 │   ├── msbc-decoder.mjs     — pure-JS mSBC → PCM16 decoder (replaces ffmpeg)
 │   ├── xiaomi-remote-session.mjs — PTT session state machine (inactivity watchdog)

@@ -15,6 +15,10 @@ const BUTTON_CODES = Object.freeze({
   0x4a: "home",
   0x80: "volume_up",
   0x81: "volume_down",
+  // USB HID Keyboard/Keypad usage 0x65 is the Application/Menu key. Windows
+  // also handles it through the native HID keyboard path, so the desktop app
+  // suppresses that physical VK_APPS event and keeps this copy configurable.
+  0x65: "menu",
   // Observed from the Xiaomi remote's standard HID report in the desktop log.
   // Keep this as a normal mappable button; its default action lives in
   // remote-buttons.mjs rather than being hard-coded in the protocol parser.

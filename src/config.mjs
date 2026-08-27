@@ -433,6 +433,7 @@ export function loadConfig(options = {}) {
     xiaomiRemoteInactivityMs: Number(process.env.XIAOMI_REMOTE_INACTIVITY_MS || "900"),
     xiaomiRemoteSendTarget: process.env.XIAOMI_REMOTE_SEND_TARGET || "",
     xiaomiRemoteHidDeviceMatch: process.env.XIAOMI_REMOTE_HID_DEVICE_MATCH || "VID&012717_PID&32B8",
+    xiaomiRemoteHidAutoRepair: process.env.XIAOMI_REMOTE_HID_AUTOREPAIR === "1",
     xiaomiRemoteButtons: process.env.XIAOMI_REMOTE_BUTTONS !== "0",
     xiaomiRemoteButtonMap: process.env.XIAOMI_REMOTE_BUTTON_MAP || "",
     xiaomiRemotePromptTemplates: process.env.XIAOMI_REMOTE_PROMPT_TEMPLATES || "",

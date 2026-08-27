@@ -172,6 +172,18 @@ test("physical power key HID code is emitted as a normal mappable button", () =>
   );
 });
 
+test("physical application/menu HID code is emitted as the configurable menu button", () => {
+  const parser = new XiaomiRemoteProtocolParser();
+  assert.deepEqual(
+    parser.pushLine("0x0017|0000650000000000"),
+    [{ type: "button", code: 0x65, button: "menu", pressed: true }]
+  );
+  assert.deepEqual(
+    parser.pushLine("0x0017|0000000000000000"),
+    [{ type: "button", code: 0x65, button: "menu", pressed: false }]
+  );
+});
+
 test("Xiaomi remote parser emits one complete zero-loss voice session", () => {
   const parser = new XiaomiRemoteProtocolParser();
   assert.deepEqual(parser.pushLine(CONTROL_START), [{ type: "start", reason: "control" }]);

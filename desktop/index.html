@@ -221,13 +221,49 @@
               </div>
               <div class="remote-hid-warning" id="remote-hid-warning" hidden>
                 <span class="remote-hid-warning-text">
-                  <span data-i18n="remoteHidWarning">Windows 报告遥控器「驱动程序错误」。通常不影响本软件的语音和按键；可通过已安装的后台服务修复，不会再弹管理员授权。</span>
+                  <span data-i18n="remoteHidWarning">Windows 报告遥控器「驱动程序错误」。这不影响本软件的语音和按键（走 USBPcap 通道），保持现状即可；修复后按键会由 Windows 原生投递而重复触发。</span>
                   <span id="remote-hid-fix-result"></span>
                 </span>
                 <button id="remote-hid-fix" class="btn btn-ghost" type="button" data-i18n="remoteHidFix">修复驱动</button>
               </div>
               <div class="remote-hid-warning" id="remote-adapter-warning" hidden>
                 <span class="remote-hid-warning-text" id="remote-adapter-warning-text"></span>
+              </div>
+              <div class="remote-hid-warning" id="remote-menu-guard-warning" hidden>
+                <span class="remote-hid-warning-text" id="remote-menu-guard-warning-text"></span>
+              </div>
+              <div class="pair-guide" id="pair-guide">
+                <button type="button" class="pair-guide-toggle" id="pair-guide-toggle">
+                  <span id="pair-guide-toggle-text" data-i18n="pairGuideShow">配对引导</span>
+                  <span class="pair-guide-caret" id="pair-guide-caret">▸</span>
+                </button>
+                <div class="pair-guide-body" id="pair-guide-body" hidden>
+                  <ol class="pair-steps">
+                    <li class="pair-step" id="pair-step-adapter">
+                      <span class="pair-step-icon"></span>
+                      <span class="pair-step-text" data-i18n="pairStepAdapter">插上 USB 蓝牙适配器</span>
+                    </li>
+                    <li class="pair-step" id="pair-step-mode">
+                      <span class="pair-step-icon"></span>
+                      <span class="pair-step-text">
+                        <span data-i18n="pairStepMode">遥控器进入配对模式：同时长按「主页 + 菜单」约 3 秒，直到指示灯闪烁</span>
+                        <span class="pair-step-hint" data-i18n="pairStepModeHint">部分型号是「主页 + 返回」，以遥控器说明书为准</span>
+                      </span>
+                    </li>
+                    <li class="pair-step" id="pair-step-settings">
+                      <span class="pair-step-icon"></span>
+                      <span class="pair-step-text">
+                        <span data-i18n="pairStepSettings">在 Windows 蓝牙设置里点「添加设备」选择遥控器</span>
+                        <button type="button" class="btn btn-ghost btn-small" id="pair-open-settings" data-i18n="pairOpenSettings">打开蓝牙设置</button>
+                      </span>
+                    </li>
+                    <li class="pair-step" id="pair-step-done">
+                      <span class="pair-step-icon"></span>
+                      <span class="pair-step-text" data-i18n="pairStepDone">检测到遥控器已配对</span>
+                    </li>
+                  </ol>
+                  <div class="pair-guide-status" id="pair-guide-status" hidden></div>
+                </div>
               </div>
               <div class="remote-layout">
                 <div class="remote-device">
@@ -705,7 +741,37 @@
             <input id="wiz-remote-enabled" type="checkbox" class="switch" />
             <span data-i18n="wizRemoteEnable">启用小米蓝牙遥控器</span>
           </div>
-          <div class="hint" data-i18n="wizRemoteNote">有遥控器就打开：先在 Windows 蓝牙设置里配对遥控器。没有就直接下一步，之后随时可在「遥控器」页配置。</div>
+          <div class="hint" data-i18n="wizRemoteNote">有遥控器就打开。没有就直接下一步，之后随时可在「遥控器」页配置；首次配对跟着「遥控器」页的配对引导走即可。</div>
+          <div class="pair-guide-body wiz-pair-flow" id="wiz-pair-flow" hidden>
+            <ol class="pair-steps">
+              <li class="pair-step" id="wiz-pair-step-adapter">
+                <span class="pair-step-icon"></span>
+                <span class="pair-step-text" data-i18n="pairStepAdapter">插上 USB 蓝牙适配器</span>
+              </li>
+              <li class="pair-step" id="wiz-pair-step-mode">
+                <span class="pair-step-icon"></span>
+                <span class="pair-step-text">
+                  <span data-i18n="pairStepMode">遥控器进入配对模式：同时长按「主页 + 菜单」约 3 秒，直到指示灯闪烁</span>
+                  <span class="pair-step-hint" data-i18n="pairStepModeHint">部分型号是「主页 + 返回」，以遥控器说明书为准</span>
+                </span>
+              </li>
+              <li class="pair-step" id="wiz-pair-step-settings">
+                <span class="pair-step-icon"></span>
+                <span class="pair-step-text">
+                  <span data-i18n="pairStepSettings">在 Windows 蓝牙设置里点「添加设备」，选择「小米蓝牙语音遥控器」</span>
+                  <button type="button" class="btn btn-ghost btn-small" id="wiz-pair-open-settings" data-i18n="pairOpenSettings">打开蓝牙设置</button>
+                </span>
+              </li>
+              <li class="pair-step" id="wiz-pair-step-voice">
+                <span class="pair-step-icon"></span>
+                <span class="pair-step-text">
+                  <span data-i18n="wizPairStepVoice">按住遥控器的语音键说一句话，验证识别可用</span>
+                  <span class="pair-step-hint" id="wiz-pair-voice-hint"></span>
+                </span>
+              </li>
+            </ol>
+            <div class="pair-guide-status" id="wiz-pair-status"></div>
+          </div>
         </div>
 
         <div class="wizard-step" data-wstep="done" hidden>

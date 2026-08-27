@@ -186,9 +186,14 @@ export async function resolveXiaomiRemoteRuntime(config) {
   return {
     usbPcapPath,
     pipeHelperPath: DEFAULT_USBPCAP_PIPE_HELPER,
-    // Lets the broker-owned helper watch/repair the remote's HID child device
-    // (see the -HidDeviceMatch param of the pipe helper).
-    hidDeviceMatch: config.xiaomiRemoteHidDeviceMatch,
+    // The helper's HID watchdog repairs the remote's broken HID child (the
+    // "driver error" after a re-pair). Off by default: a repaired child makes
+    // Windows deliver the remote's keys natively system-wide, and a repair
+    // landing mid-hold of the pairing combo latches a key (e.g. Menu keeps
+    // opening context menus until the adapter is unplugged). The broken child
+    // is harmless — voice and buttons ride the USBPcap path. Opt in with
+    // XIAOMI_REMOTE_HID_AUTOREPAIR=1; the Remote page repair button stays.
+    hidDeviceMatch: config.xiaomiRemoteHidAutoRepair ? config.xiaomiRemoteHidDeviceMatch : "",
     // Lets the helper re-find the adapter after an unplug/replug.
     usbAdapterMatch: config.xiaomiRemoteUsbAdapterMatch,
     // A configured interface is an intentional pin (usually for machines with

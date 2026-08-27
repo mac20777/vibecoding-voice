@@ -29,7 +29,7 @@ const I18N = {
     optSendZhEn: "只输出中文和英语", optSendAll: "输出中文、英语、韩语、日语",
     fTransModel: "模型", fTransTimeout: "超时 (ms)",
     fXiaomi: "启用小米蓝牙遥控器（需 USBPcap 驱动）",
-    remoteNote: "点击遥控器上的按键，再点右侧动作完成映射。语音键固定为「按住说话」，不可改。按键事件来自抓包通道，Windows 的 HID 驱动状态不影响它。",
+    remoteNote: "点击遥控器上的按键，再点右侧动作完成映射。语音键固定为「按住说话」，不可改。菜单键默认禁用，避免 Windows 原生菜单事件被重复执行；你仍可把它改成其他动作。",
     advCli: "CLI 行为", fCodexSkip: "Codex：跳过 Git 仓库检查", fClaudeSkip: "Claude：减少权限确认",
     advWorkspace: "工作目录", fCodexCwd: "Codex 工作目录", fClaudeCwd: "Claude 工作目录", browse: "浏览…",
     fUserConfig: "用户配置", fDesktopSettings: "桌面设置",
@@ -72,11 +72,14 @@ const I18N = {
     voiceFixed: "固定为「按住说话」", remoteCodeUnknown: "HID — 待识别",
     remoteOn: "已启用", remoteOff: "未启用",
     remoteBattery: "电量 {level}%", remoteDisconnected: "未连接", remoteReading: "读取中…",
-    remoteHidWarning: "Windows 报告遥控器「驱动程序错误」。通常不影响本软件的语音和按键；可通过已安装的后台服务修复，不会再弹管理员授权。",
+    remoteHidWarning: "Windows 报告遥控器「驱动程序错误」。这不影响本软件的语音和按键（走 USBPcap 通道），保持现状即可；修复后按键会由 Windows 原生投递而重复触发。",
     remoteHidFix: "修复驱动", remoteHidFixing: "修复中…", remoteHidFixed: "已修复",
     remoteHidFixFailed: "未修复，可能需要重启电脑",
     remoteAdapterRecovering: "检测到蓝牙适配器变化，正在自动重新识别捕获接口，无需重启软件。",
     remoteAdapterChanged: "已切换到新的蓝牙适配器。如果遥控器没有反应，请在 Windows 蓝牙设置中删除该遥控器并重新配对；配对完成后无需重启软件。",
+    remoteMenuRepairing: "检测到菜单键异常重复，正在自动重置遥控器输入…",
+    remoteMenuRecovered: "菜单键异常已自动解除。",
+    remoteMenuFailed: "菜单键仍在异常重复。请重新插拔蓝牙适配器，或在 Windows 蓝牙设置中重新配对遥控器。",
     btnVoice: "语音键", btnUp: "上", btnDown: "下", btnLeft: "左", btnRight: "右", btnOk: "确认",
     btnBack: "返回", btnHome: "主页", btnMenu: "菜单", btnVolUp: "音量 +", btnVolDown: "音量 −", btnPower: "电源键",
     actionUp: "方向 ↑", actionDown: "方向 ↓", actionLeft: "方向 ←", actionRight: "方向 →",
@@ -134,7 +137,24 @@ const I18N = {
     promptSample: "嗯……那个，明天下午三点提醒我开会，千万别忘了",
     promptBindingsLabel: "已绑定到：", promptNoBinding: "还没有按键绑定这个模板", promptGoBind: "去绑定 →",
     remoteTitle: "遥控器",
-    remoteSub: "把遥控器按键映射成电脑操作：点左侧按键，给单击 / 双击 / 长按分别配动作，改完点底部「保存」。"
+    remoteSub: "把遥控器按键映射成电脑操作：点左侧按键，给单击 / 双击 / 长按分别配动作，改完点底部「保存」。",
+    pairGuideShow: "配对引导",
+    pairGuideReopen: "遥控器已配对 ✓ · 重新配对",
+    pairStepAdapter: "插上 USB 蓝牙适配器",
+    pairStepMode: "遥控器进入配对模式：同时长按「主页 + 菜单」约 3 秒，直到指示灯闪烁",
+    pairStepModeHint: "部分型号是「主页 + 返回」，以遥控器说明书为准",
+    pairStepSettings: "在 Windows 蓝牙设置里点「添加设备」，选择「小米蓝牙语音遥控器」",
+    pairOpenSettings: "打开蓝牙设置",
+    pairStepDone: "检测到遥控器已配对",
+    pairGuideChecking: "正在检测状态…",
+    pairGuideNoAdapter: "未检测到 USB 蓝牙适配器，请先插上",
+    pairGuideWaiting: "等待配对… 按上面的步骤操作，配对成功后会自动打勾",
+    pairGuidePairedOk: "配对成功！如果 Windows 显示「驱动程序错误」，点上面的「修复驱动」即可。",
+    wizPairStepVoice: "按住遥控器的语音键说一句话，验证识别可用",
+    wizPairVoiceOk: "✓ 收到！遥控器语音工作正常",
+    wizPairAllDone: "全部完成 ✓ 遥控器可以用了",
+    wizPairTryVoice: "配对成功！最后按住语音键说一句话试试。",
+    wizRemoteNote: "有遥控器就打开。没有就直接下一步，之后随时可在「遥控器」页配置；首次配对跟着「遥控器」页的配对引导走即可。"
   },
   en: {
     openLogs: "Open Logs Folder",
@@ -166,7 +186,7 @@ const I18N = {
     optSendZhEn: "Chinese & English only", optSendAll: "Chinese, English, Korean & Japanese",
     fTransModel: "Model", fTransTimeout: "Timeout (ms)",
     fXiaomi: "Enable Xiaomi Bluetooth remote (needs USBPcap driver)",
-    remoteNote: "Click a button on the remote, then pick an action on the right. The voice key is fixed to push-to-talk. Button events come from the capture channel, so Windows HID driver state does not affect them.",
+    remoteNote: "Click a button on the remote, then pick an action on the right. The voice key is fixed to push-to-talk. Menu defaults to disabled to avoid duplicating Windows' native Menu event; you can still map it to another action.",
     advCli: "CLI behavior", fCodexSkip: "Codex: skip Git repo check", fClaudeSkip: "Claude: reduce permission prompts",
     advWorkspace: "Workspaces", fCodexCwd: "Codex workspace", fClaudeCwd: "Claude workspace", browse: "Browse…",
     fUserConfig: "User config", fDesktopSettings: "Desktop settings",
@@ -209,11 +229,14 @@ const I18N = {
     voiceFixed: "Fixed to push-to-talk", remoteCodeUnknown: "HID — to be identified",
     remoteOn: "Enabled", remoteOff: "Disabled",
     remoteBattery: "Battery {level}%", remoteDisconnected: "Disconnected", remoteReading: "Reading…",
-    remoteHidWarning: "Windows reports a \"driver error\" for the remote. Voice and buttons usually keep working; the installed background broker can repair it without another admin prompt.",
+    remoteHidWarning: "Windows reports a \"driver error\" for the remote. This does not affect voice or buttons in this app (they ride the USBPcap path) — leaving it as-is is recommended; repairing makes Windows deliver keys natively and they would register twice.",
     remoteHidFix: "Repair driver", remoteHidFixing: "Repairing…", remoteHidFixed: "Repaired",
     remoteHidFixFailed: "Still broken — a PC restart may be needed",
     remoteAdapterRecovering: "A Bluetooth adapter change was detected. Capture is switching automatically; no app restart is needed.",
     remoteAdapterChanged: "Capture switched to a new Bluetooth adapter. If the remote does not respond, remove it in Windows Bluetooth settings and pair it again; the app does not need to be restarted.",
+    remoteMenuRepairing: "The Menu key is repeating abnormally. Remote input is being reset automatically…",
+    remoteMenuRecovered: "The Menu-key anomaly was cleared automatically.",
+    remoteMenuFailed: "The Menu key is still repeating. Replug the Bluetooth adapter or re-pair the remote in Windows Bluetooth settings.",
     btnVoice: "Voice key", btnUp: "Up", btnDown: "Down", btnLeft: "Left", btnRight: "Right", btnOk: "OK",
     btnBack: "Back", btnHome: "Home", btnMenu: "Menu", btnVolUp: "Volume +", btnVolDown: "Volume −", btnPower: "Power",
     actionUp: "Arrow ↑", actionDown: "Arrow ↓", actionLeft: "Arrow ←", actionRight: "Arrow →",
@@ -271,7 +294,24 @@ const I18N = {
     promptSample: "um, remind me about the meeting tomorrow at 3pm",
     promptBindingsLabel: "Bound to:", promptNoBinding: "No button bound to this template yet", promptGoBind: "Bind →",
     remoteTitle: "Remote",
-    remoteSub: "Map remote buttons to computer actions: pick a button on the left, assign actions to click / double-click / long-press, then hit Save."
+    remoteSub: "Map remote buttons to computer actions: pick a button on the left, assign actions to click / double-click / long-press, then hit Save.",
+    pairGuideShow: "Pairing guide",
+    pairGuideReopen: "Remote paired ✓ · pair again",
+    pairStepAdapter: "Plug in the USB Bluetooth adapter",
+    pairStepMode: "Put the remote in pairing mode: hold Home + Menu for about 3 seconds until the LED blinks",
+    pairStepModeHint: "Some models use Home + Back — check the remote's manual",
+    pairStepSettings: "In Windows Bluetooth settings, click \"Add device\" and pick the Xiaomi voice remote",
+    pairOpenSettings: "Open Bluetooth settings",
+    pairStepDone: "Remote detected as paired",
+    pairGuideChecking: "Checking…",
+    pairGuideNoAdapter: "No USB Bluetooth adapter detected — plug it in first",
+    pairGuideWaiting: "Waiting for pairing… follow the steps above; steps check off automatically",
+    pairGuidePairedOk: "Paired! If Windows shows a \"driver error\", use \"Repair driver\" above.",
+    wizPairStepVoice: "Hold the remote voice key and say something to verify recognition",
+    wizPairVoiceOk: "✓ Got it — the remote voice works",
+    wizPairAllDone: "All done ✓ the remote is ready",
+    wizPairTryVoice: "Paired! Finally, hold the voice key and say something.",
+    wizRemoteNote: "Turn it on if you have the remote; otherwise skip — you can set it up later on the Remote page. First-time pairing: follow the pairing guide on the Remote page."
   }
 };
 
@@ -303,6 +343,16 @@ const elements = {
   remoteHidFixResult: document.querySelector("#remote-hid-fix-result"),
   remoteAdapterWarning: document.querySelector("#remote-adapter-warning"),
   remoteAdapterWarningText: document.querySelector("#remote-adapter-warning-text"),
+  remoteMenuGuardWarning: document.querySelector("#remote-menu-guard-warning"),
+  remoteMenuGuardWarningText: document.querySelector("#remote-menu-guard-warning-text"),
+  pairGuideToggle: document.querySelector("#pair-guide-toggle"),
+  pairGuideToggleText: document.querySelector("#pair-guide-toggle-text"),
+  pairGuideCaret: document.querySelector("#pair-guide-caret"),
+  pairGuideBody: document.querySelector("#pair-guide-body"),
+  pairStepAdapter: document.querySelector("#pair-step-adapter"),
+  pairStepDone: document.querySelector("#pair-step-done"),
+  pairOpenSettings: document.querySelector("#pair-open-settings"),
+  pairGuideStatus: document.querySelector("#pair-guide-status"),
   langToggle: document.querySelector("#lang-toggle"),
   bannerPulse: document.querySelector("#banner-pulse"),
   bannerState: document.querySelector("#banner-state"),
@@ -437,6 +487,14 @@ const elements = {
   wizTestStatus: document.querySelector("#wiz-test-status"),
   wizStartService: document.querySelector("#wiz-start-service"),
   wizRemoteEnabled: document.querySelector("#wiz-remote-enabled"),
+  wizPairFlow: document.querySelector("#wiz-pair-flow"),
+  wizPairStepAdapter: document.querySelector("#wiz-pair-step-adapter"),
+  wizPairStepMode: document.querySelector("#wiz-pair-step-mode"),
+  wizPairStepSettings: document.querySelector("#wiz-pair-step-settings"),
+  wizPairStepVoice: document.querySelector("#wiz-pair-step-voice"),
+  wizPairVoiceHint: document.querySelector("#wiz-pair-voice-hint"),
+  wizPairStatus: document.querySelector("#wiz-pair-status"),
+  wizPairOpenSettings: document.querySelector("#wiz-pair-open-settings"),
   wizAutoLaunch: document.querySelector("#wiz-auto-launch"),
   reopenWizardButton: document.querySelector("#reopen-wizard-button"),
   pvkConfirmButton: document.querySelector("#pvk-confirm-button"),
@@ -494,6 +552,7 @@ const appState = {
   service: null,
   remote: null,
   remoteCaptureStatus: null,
+  remoteMenuGuardStatus: null,
   socket: null,
   socketReady: false,
   reconnectTimer: null,
@@ -540,7 +599,7 @@ const DEFAULT_REMOTE_ACTIONS = Object.freeze({
   home: { click: { type: "key", key: "home" } },
   volume_up: { click: { type: "key", key: "volume_up" } },
   volume_down: { click: { type: "key", key: "volume_down" } },
-  menu: { click: { type: "key", key: "menu" } },
+  menu: { click: { type: "none" } },
   power: { click: { type: "system", command: "shutdown" } }
 });
 const REMOTE_KEY_OPTIONS = [
@@ -1488,6 +1547,19 @@ const WIZARD_TITLE_KEYS = {
   done: "wizTitleDone"
 };
 const wizardState = { open: false, step: 0, testPassed: false };
+// Pairing sub-flow inside the "remote" wizard step: polls adapter/pairing
+// state, restarts the bridge (remote listener on) once pairing completes,
+// and waits for one real remote voice transcript as the final proof.
+// Deliberately does NOT repair the remote's HID child: a repair mid-hold of
+// the Home+Menu pairing combo eats the key-up report and Windows latches the
+// Menu key as held (context menus popping until the adapter is unplugged).
+// The broken child (code 10) is harmless — voice rides the USBPcap path.
+const wizPair = {
+  timer: null,
+  status: null,
+  saveTriggered: false,
+  voiceTested: false
+};
 let hasOnboarded = false;
 
 function markOnboarded() {
@@ -1525,12 +1597,101 @@ function renderWizard() {
   if (stepName === "test") {
     renderWizardTestStatus();
   }
+  if (stepName === "remote") {
+    renderWizPairing();
+    startWizPairPolling();
+  } else {
+    stopWizPairPolling();
+  }
 }
+
+// ── Wizard remote pairing flow ─────────────────────────────────────
+// Live checklist while the wizard's remote step is on screen: adapter ->
+// pairing mode -> pair in Settings -> voice proof. Everything with a
+// detectable state ticks itself off.
+function renderWizPairing() {
+  const enabled = elements.wizRemoteEnabled.checked;
+  elements.wizPairFlow.hidden = !enabled;
+  if (!enabled) {
+    return;
+  }
+  const status = wizPair.status;
+  const paired = status?.paired === true;
+
+  pairStepMark(elements.wizPairStepAdapter, status ? status.adapterPresent : null);
+  // Pairing-mode and Settings steps are manual — never red, ticked once paired.
+  pairStepMark(elements.wizPairStepMode, paired ? true : null);
+  pairStepMark(elements.wizPairStepSettings, paired ? true : null);
+  pairStepMark(elements.wizPairStepVoice, wizPair.voiceTested ? true : null);
+
+  elements.wizPairVoiceHint.textContent = wizPair.voiceTested ? t("wizPairVoiceOk") : "";
+
+  elements.wizPairStatus.textContent = !status
+    ? t("pairGuideChecking")
+    : !status.adapterPresent
+      ? t("pairGuideNoAdapter")
+      : !paired
+        ? t("pairGuideWaiting")
+        : wizPair.voiceTested
+          ? t("wizPairAllDone")
+          : t("wizPairTryVoice");
+}
+
+function stopWizPairPolling() {
+  if (wizPair.timer) {
+    clearInterval(wizPair.timer);
+    wizPair.timer = null;
+  }
+}
+
+async function pollWizPairing() {
+  if (!elements.wizRemoteEnabled.checked) {
+    return;
+  }
+  const status = await window.vibeApp.getRemotePairingStatus?.().catch(() => null);
+  if (status) {
+    wizPair.status = status;
+  }
+  // Pairing just completed: now restart the bridge with the remote listener
+  // on so the voice-proof step can pass. This must NOT happen before pairing
+  // completes — a capture-helper restart of the remote's HID child while the
+  // user still holds the Home+Menu pairing combo can latch the Menu key.
+  if (status?.paired && !wizPair.saveTriggered) {
+    wizPair.saveTriggered = true;
+    // Sync the real form first — collectFormPayload reads the page checkbox.
+    elements.xiaomiRemoteEnabled.checked = true;
+    updateFormAffordances();
+    renderChecklist();
+    try {
+      const bootstrap = await window.vibeApp.saveConfig(collectFormPayload());
+      appState.bootstrap = bootstrap;
+      appState.service = bootstrap.service;
+      fillForm(bootstrap.form, bootstrap.desktopSettingsPath);
+      renderNotices(bootstrap.form);
+      renderService();
+      renderChecklist();
+      connectLiveSocket();
+    } catch {
+      // The voice step simply stays unticked; the checklist shows the issue.
+    }
+  }
+  renderWizPairing();
+}
+
+function startWizPairPolling() {
+  stopWizPairPolling();
+  void pollWizPairing();
+  wizPair.timer = setInterval(pollWizPairing, 2500);
+}
+
 
 function openWizard() {
   wizardState.open = true;
   wizardState.step = 0;
   wizardState.testPassed = hasUsedVoice;
+  wizPair.status = null;
+  wizPair.saveTriggered = false;
+  wizPair.voiceTested = false;
   elements.wizSttProvider.value = elements.sttProvider.value || "volcengine";
   elements.wizVolcAppKey.value = elements.volcengineAppKey.value || "";
   elements.wizVolcAccessKey.value = elements.volcengineAccessKey.value || "";
@@ -1544,6 +1705,7 @@ function openWizard() {
 }
 
 function closeWizard() {
+  stopWizPairPolling();
   elements.wizard.hidden = true;
   wizardState.open = false;
 }
@@ -1611,6 +1773,10 @@ function gotoPage(pageName, settingsTab = null) {
     // Re-check the remote's HID child health so a "driver error" that appeared
     // after pairing surfaces the repair warning as soon as the page opens.
     void window.vibeApp.refreshRemoteHid?.();
+    // The poll itself auto-opens the guide when the remote turns out unpaired.
+    startPairGuidePolling();
+  } else {
+    stopPairGuidePolling();
   }
 }
 
@@ -1922,11 +2088,118 @@ function renderRemoteAdapterWarning() {
   }
 }
 
+function renderRemoteMenuGuardWarning() {
+  const enabled = elements.xiaomiRemoteEnabled.checked
+    || appState.bootstrap?.form?.xiaomiRemoteEnabled === true;
+  const state = appState.remoteMenuGuardStatus?.state;
+  const show = enabled && ["repairing", "recovered", "failed"].includes(state);
+  elements.remoteMenuGuardWarning.hidden = !show;
+  if (!show) {
+    return;
+  }
+  const messageKey = state === "repairing"
+    ? "remoteMenuRepairing"
+    : state === "recovered"
+      ? "remoteMenuRecovered"
+      : "remoteMenuFailed";
+  elements.remoteMenuGuardWarningText.textContent = t(messageKey);
+}
+
+// ── Remote pairing guide ─────────────────────────────────────────────
+// Step-by-step pairing checklist on the Remote page. Polled on demand while
+// the Remote page is open (one WMI/PnP lookup per tick); adapter presence and
+// paired state tick themselves off. Collapses to a "paired ✓" entry once the
+// remote is paired, and reopens for re-pairing after an adapter swap.
+const pairGuide = { open: false, status: null, timer: null, wasPaired: false, userToggled: false };
+
+function pairStepMark(element, ok) {
+  const icon = element.querySelector(".pair-step-icon");
+  element.classList.toggle("ok", ok === true);
+  element.classList.toggle("fail", ok === false);
+  icon.textContent = ok === true ? "✓" : ok === false ? "✗" : "•";
+}
+
+function renderPairGuide() {
+  const status = pairGuide.status;
+  pairStepMark(elements.pairStepAdapter, status ? status.adapterPresent : null);
+  pairStepMark(elements.pairStepDone, status ? status.paired : null);
+
+  let statusText = "";
+  if (!status) {
+    statusText = t("pairGuideChecking");
+  } else if (!status.adapterPresent) {
+    statusText = t("pairGuideNoAdapter");
+  } else if (!status.paired) {
+    statusText = t("pairGuideWaiting");
+  } else {
+    statusText = t("pairGuidePairedOk");
+  }
+  elements.pairGuideStatus.hidden = !pairGuide.open;
+  elements.pairGuideStatus.textContent = statusText;
+
+  const paired = status?.paired === true;
+  elements.pairGuideToggleText.textContent = paired && !pairGuide.open
+    ? t("pairGuideReopen")
+    : t("pairGuideShow");
+  elements.pairGuideCaret.textContent = pairGuide.open ? "▾" : "▸";
+  elements.pairGuideBody.hidden = !pairGuide.open;
+}
+
+function stopPairGuidePolling() {
+  if (pairGuide.timer) {
+    clearInterval(pairGuide.timer);
+    pairGuide.timer = null;
+  }
+}
+
+async function pollPairGuide() {
+  const status = await window.vibeApp.getRemotePairingStatus?.().catch(() => null);
+  if (status) {
+    pairGuide.status = status;
+  }
+  // Unpaired remote and the user never touched the toggle: open the guide so
+  // the steps tick themselves off while the user pairs in Windows Settings.
+  if (status && !status.paired && !pairGuide.open && !pairGuide.userToggled) {
+    pairGuide.open = true;
+  }
+  renderPairGuide();
+  // Freshly paired: surface the HID "driver error" warning (and its repair
+  // button) as soon as the child node enumerates.
+  if (status?.paired && !pairGuide.wasPaired) {
+    void window.vibeApp.refreshRemoteHid?.();
+  }
+  pairGuide.wasPaired = status?.paired === true;
+  // Paired and collapsed: nothing left to watch. Keep polling while the guide
+  // is open or the remote is unpaired, so the steps tick themselves off.
+  if (pairGuide.wasPaired && !pairGuide.open) {
+    stopPairGuidePolling();
+  }
+}
+
+function startPairGuidePolling() {
+  stopPairGuidePolling();
+  void pollPairGuide();
+  pairGuide.timer = setInterval(pollPairGuide, 2500);
+}
+
+function setPairGuideOpen(open) {
+  pairGuide.open = open;
+  renderPairGuide();
+  if (open) {
+    startPairGuidePolling();
+  } else if (pairGuide.status?.paired) {
+    // Paired + collapsed: nothing left to watch. Keep polling while open or
+    // while unpaired, so the steps tick themselves off during pairing.
+    stopPairGuidePolling();
+  }
+}
+
 // Title-bar chip + About cell for the Xiaomi remote: model and battery are
 // read once at startup via BLE GATT (queried in the main process).
 function renderRemoteStatus() {
   renderRemoteHidWarning();
   renderRemoteAdapterWarning();
+  renderRemoteMenuGuardWarning();
   const enabled = elements.xiaomiRemoteEnabled.checked
     || appState.bootstrap?.form?.xiaomiRemoteEnabled === true;
   const remote = appState.remote;
@@ -2425,6 +2698,7 @@ function applyLang() {
   renderRemoteEditor();
   renderPromptsPage();
   renderPreviewKeyPickers();
+  renderPairGuide();
 }
 
 function resetLiveConnection() {
@@ -2461,6 +2735,17 @@ function handleRemoteVoiceEvent(message) {
   const source = String(message.source || "");
   if (!source || source === "desktop_mic") {
     return;
+  }
+  // The wizard's remote step ends with a voice proof: one real transcript
+  // (or even just a recording start) from the remote ticks the last step.
+  if (wizardState.open && WIZARD_STEPS[wizardState.step] === "remote" && !wizPair.voiceTested) {
+    if (
+      (message.type === "transcript_final" && message.text) ||
+      (message.type === "status" && message.status === "recording")
+    ) {
+      wizPair.voiceTested = true;
+      renderWizPairing();
+    }
   }
   if (message.type === "transcript_final") {
     remoteVoiceStatus = "idle";
@@ -2660,6 +2945,7 @@ async function refreshBootstrap() {
   appState.remote = bootstrap.remote ?? appState.remote;
   appState.remoteHidProblem = bootstrap.remoteHidProblem ?? appState.remoteHidProblem;
   appState.remoteCaptureStatus = bootstrap.remoteCaptureStatus ?? null;
+  appState.remoteMenuGuardStatus = bootstrap.remoteMenuGuardStatus ?? null;
   const savedLang = bootstrap.form?.desktopSettings?.uiLanguage;
   if ((savedLang === "en" || savedLang === "zh") && savedLang !== lang) {
     lang = savedLang;
@@ -2833,6 +3119,37 @@ elements.remoteHidFix?.addEventListener("click", async () => {
     elements.remoteHidFixResult.textContent = t("remoteHidFixFailed");
   } finally {
     elements.remoteHidFix.disabled = false;
+  }
+});
+
+elements.pairGuideToggle?.addEventListener("click", () => {
+  pairGuide.userToggled = true;
+  setPairGuideOpen(!pairGuide.open);
+});
+
+elements.pairOpenSettings?.addEventListener("click", async () => {
+  elements.pairOpenSettings.disabled = true;
+  try {
+    await window.vibeApp.openBluetoothSettings?.();
+  } finally {
+    elements.pairOpenSettings.disabled = false;
+  }
+});
+
+elements.wizPairOpenSettings?.addEventListener("click", () => {
+  void window.vibeApp.openBluetoothSettings?.();
+});
+
+elements.wizRemoteEnabled?.addEventListener("change", () => {
+  // No save/service restart here on purpose: pairing must happen without the
+  // capture helper running (its HID watchdog could restart the remote's child
+  // device mid-hold of the pairing combo and latch a key). The bridge
+  // restarts in pollWizPairing once pairing is detected complete.
+  renderWizPairing();
+  if (elements.wizRemoteEnabled.checked) {
+    startWizPairPolling();
+  } else {
+    stopWizPairPolling();
   }
 });
 
@@ -3202,6 +3519,9 @@ window.vibeApp.onState((payload) => {
   }
   if (payload.remoteCaptureStatus !== undefined) {
     appState.remoteCaptureStatus = payload.remoteCaptureStatus;
+  }
+  if (payload.remoteMenuGuardStatus !== undefined) {
+    appState.remoteMenuGuardStatus = payload.remoteMenuGuardStatus;
   }
   renderService();
   renderRemoteStatus();

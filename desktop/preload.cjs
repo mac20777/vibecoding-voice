@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld("vibeApp", {
   updateDesktopSettings: (patch) => ipcRenderer.invoke("desktop:update-desktop-settings", patch),
   fixRemoteHid: () => ipcRenderer.invoke("desktop:fix-remote-hid"),
   refreshRemoteHid: () => ipcRenderer.invoke("desktop:refresh-remote-hid"),
+  getRemotePairingStatus: () => ipcRenderer.invoke("desktop:remote-pairing-status"),
+  openBluetoothSettings: () => ipcRenderer.invoke("desktop:open-bluetooth-settings"),
   setTrayLanguageMode: (mode) => ipcRenderer.send("desktop:set-tray-language-mode", mode),
   pickDirectory: (currentPath) => ipcRenderer.invoke("desktop:pick-directory", currentPath),
   openConfigFolder: () => ipcRenderer.invoke("desktop:open-config-folder"),

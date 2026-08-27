@@ -12,6 +12,7 @@ import { getConfigIssues, loadConfig, writeUserConfigValues } from "../src/confi
 import { getDesktopSettingsPath, loadDesktopSettings, writeDesktopSettings } from "../src/desktop-settings.mjs";
 import { getUserConfigDir } from "../src/paths.mjs";
 import { queryXiaomiRemoteInfo } from "../src/xiaomi-remote-info.mjs";
+import { checkRemotePairingStatus } from "../src/xiaomi-remote-pairing.mjs";
 import {
   checkXiaomiRemoteHidHealth,
   restartXiaomiRemoteHidChild
@@ -52,6 +53,7 @@ let globalHotkeysReady = false;
 let bridgeStopRequested = false;
 let isQuitting = false;
 let initialLaunchHidden = false;
+let closeToTrayNoticeShown = false;
 let bundledIconCache = null;
 const trayIconCache = new Map();
 let trayLanguageMode = "chinese";
@@ -87,6 +89,7 @@ function wait(ms) {
 
 let latestRemoteInfo = null;
 let latestRemoteCaptureStatus = null;
+let latestRemoteMenuGuardStatus = null;
 
 // Queries the remote's model/battery once via BLE GATT (see
 // src/xiaomi-remote-info.mjs). Deliberately not polled: runs at app start and
@@ -369,6 +372,11 @@ function emitGlobalHotkeyStatus() {
 }
 
 function getGlobalHotkeyPowerShellScript() {
+  // Windows exposes the remote's USB HID usage 0x65 as the global VK_APPS
+  // key before our configurable mapping runs. Suppress only non-injected
+  // events while remote support is enabled; explicit key:menu mappings use
+  // SendInput and are therefore still allowed through.
+  const suppressPhysicalMenuKey = loadEffectiveConfig().xiaomiRemoteEnabled === true;
   return String.raw`
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @"
@@ -383,6 +391,9 @@ public static class GlobalKeyboardHook {
   private const int WM_KEYUP = 0x0101;
   private const int WM_SYSKEYDOWN = 0x0104;
   private const int WM_SYSKEYUP = 0x0105;
+  private const int VK_APPS = 0x5D;
+  private const int LLKHF_INJECTED = 0x10;
+  private const bool SuppressPhysicalMenuKey = ${suppressPhysicalMenuKey ? "true" : "false"};
   private static LowLevelKeyboardProc _proc = HookCallback;
   private static IntPtr _hookID = IntPtr.Zero;
 
@@ -419,8 +430,11 @@ public static class GlobalKeyboardHook {
       if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN || message == WM_KEYUP || message == WM_SYSKEYUP) {
         KBDLLHOOKSTRUCT data = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
         string eventType = (message == WM_KEYUP || message == WM_SYSKEYUP) ? "keyup" : "keydown";
-        Console.WriteLine("{\"type\":\"" + eventType + "\",\"vkCode\":" + data.vkCode + "}");
+        Console.WriteLine("{\"type\":\"" + eventType + "\",\"vkCode\":" + data.vkCode + ",\"flags\":" + data.flags + "}");
         Console.Out.Flush();
+        if (SuppressPhysicalMenuKey && data.vkCode == VK_APPS && (data.flags & LLKHF_INJECTED) == 0) {
+          return (IntPtr)1;
+        }
       }
     }
     return CallNextHookEx(_hookID, nCode, wParam, lParam);
@@ -609,6 +623,11 @@ function stopGlobalHotkeyMonitor() {
   activeGlobalRecordKey = null;
 }
 
+function restartGlobalHotkeyMonitor() {
+  stopGlobalHotkeyMonitor();
+  startGlobalHotkeyMonitor();
+}
+
 function loadEffectiveConfig() {
   return loadConfig({ quietMissing: true, desktopMode: true });
 }
@@ -625,7 +644,8 @@ function emitState() {
     service: snapshotServiceState(),
     remote: latestRemoteInfo,
     remoteHidProblem: latestRemoteHidProblem,
-    remoteCaptureStatus: latestRemoteCaptureStatus
+    remoteCaptureStatus: latestRemoteCaptureStatus,
+    remoteMenuGuardStatus: latestRemoteMenuGuardStatus
   };
 
   for (const window of BrowserWindow.getAllWindows()) {
@@ -874,6 +894,15 @@ function maybeHideToTray(event) {
   event.preventDefault();
   writeDesktopLog("mainWindow hidden to tray on close");
   mainWindow?.hide();
+  if (!closeToTrayNoticeShown && process.platform === "win32" && tray) {
+    closeToTrayNoticeShown = true;
+    tray.displayBalloon({
+      title: "VibeCoding Voice 仍在后台运行",
+      content: "关闭窗口只会收进托盘；要彻底退出，请右键托盘图标并选择 Quit。",
+      iconType: "info",
+      noSound: true
+    });
+  }
 }
 
 function bridgeEntryPath() {
@@ -972,6 +1001,7 @@ async function stopBridgeProcess() {
     child.kill();
   }
   latestRemoteCaptureStatus = null;
+  latestRemoteMenuGuardStatus = null;
 
   if (!bridgeChild) {
     const config = loadEffectiveConfig();
@@ -1019,6 +1049,7 @@ function startXiaomiRemoteProcess(config) {
 
   xiaomiRemoteStopRequested = false;
   latestRemoteCaptureStatus = null;
+  latestRemoteMenuGuardStatus = null;
   const child = fork(xiaomiRemoteEntryPath(), [], {
     cwd: DEFAULT_INVOKE_CWD,
     env: {
@@ -1058,7 +1089,26 @@ function startXiaomiRemoteProcess(config) {
     createLineReader(child.stderr, "xiaomi-remote");
   }
   child.on("message", (message) => {
-    if (xiaomiRemoteChild !== child || message?.type !== "xiaomi_remote_capture_status") {
+    if (xiaomiRemoteChild !== child) {
+      return;
+    }
+    if (message?.type === "xiaomi_remote_menu_guard_status") {
+      latestRemoteMenuGuardStatus = message.state === "ready"
+        ? null
+        : {
+            state: String(message.state || ""),
+            error: message.error || null,
+            details: message.details || null,
+            updatedAt: Date.now()
+          };
+      writeDesktopLog(
+        "xiaomi remote menu guard status",
+        latestRemoteMenuGuardStatus || { state: "ready" }
+      );
+      emitState();
+      return;
+    }
+    if (message?.type !== "xiaomi_remote_capture_status") {
       return;
     }
     latestRemoteCaptureStatus = message.state === "ready"
@@ -1081,6 +1131,7 @@ function startXiaomiRemoteProcess(config) {
     if (wasCurrentChild) {
       xiaomiRemoteChild = null;
       latestRemoteCaptureStatus = null;
+      latestRemoteMenuGuardStatus = null;
       emitState();
     }
     if (!isQuitting && code !== 0) {
@@ -1433,7 +1484,8 @@ async function buildBootstrap() {
     service: snapshotServiceState(),
     remote: latestRemoteInfo,
     remoteHidProblem: latestRemoteHidProblem,
-    remoteCaptureStatus: latestRemoteCaptureStatus
+    remoteCaptureStatus: latestRemoteCaptureStatus,
+    remoteMenuGuardStatus: latestRemoteMenuGuardStatus
   };
 }
 
@@ -1596,7 +1648,9 @@ ipcMain.handle("desktop:save-config", async (_event, payload = {}) => {
   writeUserConfigValues(buildUserConfigUpdates(payload.form || {}));
   const { settings } = writeDesktopSettings(payload.desktopSettings || {});
   await syncAutoLaunch(settings);
-  emitGlobalHotkeyStatus();
+  // Enabling/disabling remote support changes whether the native physical
+  // Menu key is intercepted, so rebuild the hook immediately.
+  restartGlobalHotkeyMonitor();
 
   if (bridgeChild) {
     await restartBridgeProcess();
@@ -1633,6 +1687,26 @@ ipcMain.handle("desktop:update-desktop-settings", async (_event, patch = {}) => 
 ipcMain.handle("desktop:refresh-remote-hid", async () => {
   await refreshRemoteHidHealth("ui");
   return latestRemoteHidProblem;
+});
+
+// Polled by the Remote page pairing guide (adapter present / remote paired /
+// HID problem). On-demand only — the query costs one WMI/PnP lookup.
+ipcMain.handle("desktop:remote-pairing-status", async () => {
+  return checkRemotePairingStatus();
+});
+
+// The pairing guide sends the user to the system Bluetooth page. Separate
+// handler on purpose: desktop:open-external stays limited to https consoles.
+ipcMain.handle("desktop:open-bluetooth-settings", async () => {
+  if (process.platform !== "win32") {
+    return false;
+  }
+  try {
+    await shell.openExternal("ms-settings:bluetooth");
+    return true;
+  } catch {
+    return false;
+  }
 });
 
 // One-click repair for the remote's broken HID child device (the "driver

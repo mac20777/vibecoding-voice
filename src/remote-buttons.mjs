@@ -41,7 +41,10 @@ export const DEFAULT_REMOTE_ACTIONS = Object.freeze({
   home: Object.freeze({ click: keyAction("home") }),
   volume_up: Object.freeze({ click: keyAction("volume_up") }),
   volume_down: Object.freeze({ click: keyAction("volume_down") }),
-  menu: Object.freeze({ click: keyAction("menu") }),
+  // Windows receives usage 0x65 through its native HID keyboard path as well
+  // as our USBPcap path. Default to no second injection; users can still map
+  // Menu to any action (including key:menu) in the Remote page.
+  menu: Object.freeze({ click: Object.freeze({ type: "none" }) }),
   // Power is a regular configurable button. Its default click action requests
   // shutdown, which still goes through the shared on-screen confirmation flow.
   power: Object.freeze({ click: Object.freeze({ type: "system", command: "shutdown" }) })

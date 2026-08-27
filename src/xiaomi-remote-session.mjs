@@ -11,7 +11,7 @@ const MIN_INACTIVITY_MS = 250;
  * resume) is cancelled instead of latching the parser forever.
  */
 export class XiaomiRemoteSessionController {
-  constructor({ sendJson, sendAudio, decodeFrames, log, source, inactivityMs }) {
+  constructor({ sendJson, sendAudio, decodeFrames, log, source, inactivityMs, onButtonEvent }) {
     if (
       typeof sendJson !== "function" ||
       typeof sendAudio !== "function" ||
@@ -24,6 +24,7 @@ export class XiaomiRemoteSessionController {
     this.sendAudio = sendAudio;
     this.decodeFrames = decodeFrames;
     this.log = typeof log === "function" ? log : () => {};
+    this.onButtonEvent = typeof onButtonEvent === "function" ? onButtonEvent : () => {};
     this.source = source || "xiaomi_remote";
     this.inactivityMs = Math.max(MIN_INACTIVITY_MS, Number(inactivityMs) || DEFAULT_INACTIVITY_MS);
     this.session = null;
@@ -82,13 +83,15 @@ export class XiaomiRemoteSessionController {
     }
 
     if (event.type === "button") {
+      const ts = Date.now();
+      this.onButtonEvent(event);
       this.sendJson({
         type: "remote_button",
         button: event.button,
         code: event.code,
         pressed: event.pressed,
         source: this.source,
-        ts: Date.now()
+        ts
       });
       // Unknown codes surface here so a new key (for example the menu key) can
       // be identified from the log and added to the code table.

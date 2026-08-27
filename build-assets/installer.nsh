@@ -14,6 +14,11 @@
 !macroend
 
 !macro customInstall
+  ; Upgrades must not reinstall the already-present capture driver. Besides
+  ; being unnecessary, restarting the driver can momentarily disturb the
+  ; Bluetooth adapter and remote input state.
+  IfFileExists "$PROGRAMFILES64\USBPcap\USBPcapCMD.exe" vibecodingSkipUsbpcap 0
+  IfFileExists "$PROGRAMFILES\USBPcap\USBPcapCMD.exe" vibecodingSkipUsbpcap 0
   File "/oname=$TEMP\USBPcapSetup-1.5.4.0.exe" "${PROJECT_DIR}\build-assets\installers\USBPcapSetup-1.5.4.0.exe"
   MessageBox MB_YESNO|MB_ICONQUESTION \
     "Install the USBPcap driver? It is required for Xiaomi Bluetooth remote voice input. Administrator approval is needed only during install or broker upgrades, not at daily startup.$\r$\n$\r$\n是否安装 USBPcap 驱动？小米蓝牙遥控器的语音输入需要它。只在安装或底层服务升级时需要管理员授权，日常开机不再弹出；安装后可能需要重启电脑。" \
