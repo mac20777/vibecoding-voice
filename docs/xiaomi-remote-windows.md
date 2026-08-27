@@ -12,7 +12,8 @@ see [Xiaomi remote field notes and adaptation guide](xiaomi-remote-adaptation-no
 ```text
 Xiaomi remote voice key
   -> BARROT USB Bluetooth adapter
-  -> elevated USBPcap capture
+  -> installed VibeCoding Voice Remote Broker (LocalSystem)
+  -> broker-owned USBPcap capture helper
   -> Windows named pipe
   -> built-in pcap/ATT parser (src/usbpcap-att-parser.mjs)
   -> 60-byte HID voice packets
@@ -38,9 +39,15 @@ Nothing else is required: ATT notification parsing and mSBC decoding are impleme
 dependencies, and the matching `XIAOMI_REMOTE_TSHARK_PATH` / `XIAOMI_REMOTE_FFMPEG_PATH` /
 `XIAOMI_REMOTE_WSL_DISTRO` settings are ignored.
 
-USBPcap capture needs administrator permission. Windows may show a UAC confirmation when the remote
-input process starts. The module never writes to the remote or its DFU characteristics; it passively
-reads traffic from the local USB Bluetooth adapter.
+USBPcap capture needs administrator permission. The Windows installer obtains that permission once and
+registers the restricted `VibeCodingVoiceRemoteBroker` service. Normal login startup and later listener
+restarts do not show a UAC confirmation. The desktop app remains unelevated, and the broker accepts only
+capture start/stop for a verified Bluetooth target plus repair of the supported Xiaomi HID child. It does
+not expose a shell or arbitrary executable launch. The module never writes to the remote or its DFU
+characteristics; it passively reads traffic from the local USB Bluetooth adapter.
+
+When running directly from a source checkout, the installed broker cannot authenticate `node.exe`, so
+the developer command deliberately retains the old per-run UAC fallback.
 
 ## Diagnose
 
@@ -84,6 +91,8 @@ XIAOMI_REMOTE_SEND_TARGET=codex_exec
 
 The desktop app starts and stops the remote input process together with its local bridge. The target is
 optional; leave `XIAOMI_REMOTE_SEND_TARGET` empty to preserve the target selected in the desktop app.
+The separately installed remote broker starts with Windows and stays idle until this process requests a
+capture, so login startup needs no administrator interaction.
 
 ## Configuration
 
@@ -136,7 +145,7 @@ a press that produces no audio frames is cancelled within `XIAOMI_REMOTE_INACTIV
 (default 900 ms), logged as `voice session ignored: no audio frames`, and later presses keep working.
 
 If every press logs "no audio frames", the remote's voice stream did not resume after sleep or
-reconnect; re-pair the remote or restart the listener. Remote sleep/wake alone does not kill the
+reconnect; re-pair the remote. Remote sleep/wake alone does not kill the
 capture pipeline, because the USBPcap filter tracks the USB adapter address, not the remote.
 
 ### Re-pairing fails after the device was removed
@@ -144,9 +153,19 @@ capture pipeline, because the USBPcap filter tracks the USB adapter address, not
 After deleting the remote in Windows Settings, unplug the USB adapter and plug it back into the same
 port before pairing again; the radio stack otherwise keeps stale BLE state and the new pairing fails.
 
-Unplugging and replugging the adapter while the app runs needs no manual restart: the elevated
+Unplugging and replugging the adapter while the app runs needs no manual restart: the broker-owned
 capture helper notices the adapter leaving and returning (USB change events, with a slow poll as
-fallback) and restarts the capture at the adapter's — possibly new — USB address on its own.
+fallback) and restarts the capture at the adapter's — possibly new — USB address on its own. Each
+restart is sent as a new framed capture generation, which clears partial pcap, Bluetooth-fragment,
+button, and voice-session state instead of appending the new stream to the interrupted one.
+
+Replacing the Bluetooth adapter also needs no listener restart when
+`XIAOMI_REMOTE_USBPCAP_INTERFACE` is left empty. The helper notices that the healthy BTHUSB adapter
+identity changed, enumerates every current USBPcap interface, and follows the replacement adapter
+even when it is attached to another USB root controller. The Remote page shows the recovery state.
+If Windows keeps showing the old pairing but the remote produces no traffic through the new radio,
+remove and pair the remote again; the listener resumes automatically after pairing. An explicitly
+configured USBPcap interface remains pinned and is never switched implicitly.
 
 ### Pairing succeeds but Settings shows "driver error"
 
@@ -154,9 +173,9 @@ On the tested stack the remote's BLE GATT HID child device sometimes fails to st
 code 10) after a re-pair. This does not break the app's voice capture or button mapping — those
 ride the USBPcap path, not the HID child — so try the remote first before rebooting anything.
 
-To clear the error itself, no action is needed while the bridge service is running: the elevated
-USBPcap capture helper watches the remote's HID child for the whole capture lifetime and restarts
-it with `pnputil /restart-device` when Windows reports a problem — no extra UAC prompt, and the
+To clear the error itself, no action is needed while the bridge is running: the broker-owned USBPcap
+capture helper watches the remote's HID child for the whole capture lifetime and restarts it with
+`pnputil /restart-device` when Windows reports a problem — no runtime UAC prompt, and the
 pairing order does not matter (pair before or after installing, both heal). The check is
 self-throttled (every 5 s for the first two minutes after capture start, then once a minute)
 because one WMI lookup costs a few hundred milliseconds. Independently, the Remote page shows a
@@ -194,8 +213,10 @@ hardware and zero mSBC sequence errors. The persistent listener was then verifie
 Volcengine transcription all completed with zero sequence errors.
 
 The live transport deliberately does not use USBPcap's non-elevated stdout forwarding path. A small
-elevated PowerShell helper starts USBPcap directly and copies its binary output to a per-process Windows
-named pipe. The Node listener feeds that pipe to its built-in ATT parser. Windows still owns the paired
-HID device, and
-the user must approve the normal UAC prompt each time the listener starts. A timed `.pcap` remains the
+Windows service installed under LocalSystem authenticates the installed desktop executable, validates a
+fixed request schema and Bluetooth-only capture target, then starts the fixed PowerShell capture helper.
+The helper copies USBPcap's binary output to the requesting process's named pipe, and a kill-on-close job
+object prevents its process tree from surviving a broker stop or crash. The Node listener feeds the pipe
+to its built-in ATT parser. Windows still owns the paired HID device, but administrator consent is moved
+to installation or broker upgrade rather than every listener start. A timed `.pcap` remains the
 known-good diagnostic baseline if a future adapter, driver, or remote profile produces no live packets.

@@ -30,6 +30,7 @@ export class XiaomiRemoteSessionController {
     this.decoding = false;
     this.inactivityTimer = null;
     this.seenUnknownPackets = new Set();
+    this.generation = 0;
   }
 
   pushLine(line) {
@@ -40,6 +41,19 @@ export class XiaomiRemoteSessionController {
 
   dispose() {
     this.#clearInactivityTimer();
+  }
+
+  reset(reason = "capture_restart") {
+    const hadActiveSession = Boolean(this.session || this.decoding);
+    this.generation += 1;
+    this.#clearInactivityTimer();
+    this.parser = new XiaomiRemoteProtocolParser();
+    this.session = null;
+    this.decoding = false;
+    if (hadActiveSession) {
+      this.sendJson({ type: "ptt_cancel", source: this.source, ts: Date.now() });
+    }
+    this.log("remote capture state reset", { reason, generation: this.generation });
   }
 
   async handleEvent(event) {
@@ -136,6 +150,7 @@ export class XiaomiRemoteSessionController {
       return;
     }
 
+    const generation = this.generation;
     this.decoding = true;
     try {
       this.log("decoding voice", {
@@ -144,6 +159,9 @@ export class XiaomiRemoteSessionController {
         reason: event.reason
       });
       const pcm = await this.decodeFrames(completed.frames);
+      if (generation !== this.generation) {
+        return;
+      }
       this.sendAudio(pcm);
       this.sendJson({ type: "ptt_stop", source: this.source, ts: Date.now() });
       this.log("voice sent", {
@@ -151,10 +169,14 @@ export class XiaomiRemoteSessionController {
         durationSeconds: Number((pcm.length / 2 / 16_000).toFixed(3))
       });
     } catch (error) {
-      this.sendJson({ type: "ptt_cancel", source: this.source, ts: Date.now() });
-      this.log("decode failed", error?.message || String(error));
+      if (generation === this.generation) {
+        this.sendJson({ type: "ptt_cancel", source: this.source, ts: Date.now() });
+        this.log("decode failed", error?.message || String(error));
+      }
     } finally {
-      this.decoding = false;
+      if (generation === this.generation) {
+        this.decoding = false;
+      }
     }
   }
 }

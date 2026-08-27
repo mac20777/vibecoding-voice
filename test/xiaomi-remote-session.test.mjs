@@ -56,6 +56,50 @@ test("key press without audio is cancelled by inactivity and the next press reco
   assert.deepEqual(sentTypes(sent), ["ptt_start", "ptt_cancel", "ptt_start"]);
 });
 
+test("capture reset cancels a partial session and clears protocol state", async (t) => {
+  const { controller, sent } = createController();
+  t.after(() => controller.dispose());
+
+  controller.pushLine(CONTROL_START);
+  controller.pushLine(audioLine(0x08));
+  controller.reset("adapter-missing");
+  assert.deepEqual(sentTypes(sent), ["ptt_start", "ptt_cancel"]);
+
+  controller.pushLine(CONTROL_START);
+  controller.pushLine(audioLine(0x38));
+  controller.pushLine(CONTROL_STOP);
+  await sleep(50);
+  assert.deepEqual(sentTypes(sent), ["ptt_start", "ptt_cancel", "ptt_start", "ptt_stop"]);
+});
+
+test("capture reset drops decoding output from the previous generation", async (t) => {
+  let releaseDecode;
+  const decodeGate = new Promise((resolve) => {
+    releaseDecode = resolve;
+  });
+  const { controller, sent, audio } = createController({
+    decodeFrames: async () => {
+      await decodeGate;
+      return Buffer.from([1, 2, 3, 4]);
+    }
+  });
+  t.after(() => {
+    releaseDecode();
+    controller.dispose();
+  });
+
+  controller.pushLine(CONTROL_START);
+  controller.pushLine(audioLine(0x08));
+  controller.pushLine(CONTROL_STOP);
+  await sleep(25);
+  controller.reset("adapter-missing");
+  releaseDecode();
+  await sleep(25);
+
+  assert.deepEqual(sentTypes(sent), ["ptt_start", "ptt_cancel"]);
+  assert.equal(audio.length, 0);
+});
+
 test("complete session decodes frames and sends audio before ptt_stop", async (t) => {
   const { controller, sent, audio, decoded } = createController();
   t.after(() => controller.dispose());

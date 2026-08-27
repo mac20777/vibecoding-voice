@@ -72,9 +72,11 @@ const I18N = {
     voiceFixed: "固定为「按住说话」", remoteCodeUnknown: "HID — 待识别",
     remoteOn: "已启用", remoteOff: "未启用",
     remoteBattery: "电量 {level}%", remoteDisconnected: "未连接", remoteReading: "读取中…",
-    remoteHidWarning: "Windows 报告遥控器「驱动程序错误」。通常不影响本软件的语音和按键；如需消除可尝试修复（会弹出管理员授权）。",
+    remoteHidWarning: "Windows 报告遥控器「驱动程序错误」。通常不影响本软件的语音和按键；可通过已安装的后台服务修复，不会再弹管理员授权。",
     remoteHidFix: "修复驱动", remoteHidFixing: "修复中…", remoteHidFixed: "已修复",
     remoteHidFixFailed: "未修复，可能需要重启电脑",
+    remoteAdapterRecovering: "检测到蓝牙适配器变化，正在自动重新识别捕获接口，无需重启软件。",
+    remoteAdapterChanged: "已切换到新的蓝牙适配器。如果遥控器没有反应，请在 Windows 蓝牙设置中删除该遥控器并重新配对；配对完成后无需重启软件。",
     btnVoice: "语音键", btnUp: "上", btnDown: "下", btnLeft: "左", btnRight: "右", btnOk: "确认",
     btnBack: "返回", btnHome: "主页", btnMenu: "菜单", btnVolUp: "音量 +", btnVolDown: "音量 −", btnPower: "电源键",
     actionUp: "方向 ↑", actionDown: "方向 ↓", actionLeft: "方向 ←", actionRight: "方向 →",
@@ -207,9 +209,11 @@ const I18N = {
     voiceFixed: "Fixed to push-to-talk", remoteCodeUnknown: "HID — to be identified",
     remoteOn: "Enabled", remoteOff: "Disabled",
     remoteBattery: "Battery {level}%", remoteDisconnected: "Disconnected", remoteReading: "Reading…",
-    remoteHidWarning: "Windows reports a \"driver error\" for the remote. Voice and buttons in this app usually keep working; repair only if you want it gone (admin prompt).",
+    remoteHidWarning: "Windows reports a \"driver error\" for the remote. Voice and buttons usually keep working; the installed background broker can repair it without another admin prompt.",
     remoteHidFix: "Repair driver", remoteHidFixing: "Repairing…", remoteHidFixed: "Repaired",
     remoteHidFixFailed: "Still broken — a PC restart may be needed",
+    remoteAdapterRecovering: "A Bluetooth adapter change was detected. Capture is switching automatically; no app restart is needed.",
+    remoteAdapterChanged: "Capture switched to a new Bluetooth adapter. If the remote does not respond, remove it in Windows Bluetooth settings and pair it again; the app does not need to be restarted.",
     btnVoice: "Voice key", btnUp: "Up", btnDown: "Down", btnLeft: "Left", btnRight: "Right", btnOk: "OK",
     btnBack: "Back", btnHome: "Home", btnMenu: "Menu", btnVolUp: "Volume +", btnVolDown: "Volume −", btnPower: "Power",
     actionUp: "Arrow ↑", actionDown: "Arrow ↓", actionLeft: "Arrow ←", actionRight: "Arrow →",
@@ -297,6 +301,8 @@ const elements = {
   remoteHidWarning: document.querySelector("#remote-hid-warning"),
   remoteHidFix: document.querySelector("#remote-hid-fix"),
   remoteHidFixResult: document.querySelector("#remote-hid-fix-result"),
+  remoteAdapterWarning: document.querySelector("#remote-adapter-warning"),
+  remoteAdapterWarningText: document.querySelector("#remote-adapter-warning-text"),
   langToggle: document.querySelector("#lang-toggle"),
   bannerPulse: document.querySelector("#banner-pulse"),
   bannerState: document.querySelector("#banner-state"),
@@ -487,6 +493,7 @@ const appState = {
   bootstrap: null,
   service: null,
   remote: null,
+  remoteCaptureStatus: null,
   socket: null,
   socketReady: false,
   reconnectTimer: null,
@@ -1902,10 +1909,24 @@ function renderRemoteHidWarning() {
   }
 }
 
+function renderRemoteAdapterWarning() {
+  const enabled = elements.xiaomiRemoteEnabled.checked
+    || appState.bootstrap?.form?.xiaomiRemoteEnabled === true;
+  const state = appState.remoteCaptureStatus?.state;
+  const show = enabled && (state === "recovering" || state === "adapter_changed");
+  elements.remoteAdapterWarning.hidden = !show;
+  if (show) {
+    elements.remoteAdapterWarningText.textContent = t(
+      state === "adapter_changed" ? "remoteAdapterChanged" : "remoteAdapterRecovering"
+    );
+  }
+}
+
 // Title-bar chip + About cell for the Xiaomi remote: model and battery are
 // read once at startup via BLE GATT (queried in the main process).
 function renderRemoteStatus() {
   renderRemoteHidWarning();
+  renderRemoteAdapterWarning();
   const enabled = elements.xiaomiRemoteEnabled.checked
     || appState.bootstrap?.form?.xiaomiRemoteEnabled === true;
   const remote = appState.remote;
@@ -2638,6 +2659,7 @@ async function refreshBootstrap() {
   appState.service = bootstrap.service;
   appState.remote = bootstrap.remote ?? appState.remote;
   appState.remoteHidProblem = bootstrap.remoteHidProblem ?? appState.remoteHidProblem;
+  appState.remoteCaptureStatus = bootstrap.remoteCaptureStatus ?? null;
   const savedLang = bootstrap.form?.desktopSettings?.uiLanguage;
   if ((savedLang === "en" || savedLang === "zh") && savedLang !== lang) {
     lang = savedLang;
@@ -3177,6 +3199,9 @@ window.vibeApp.onState((payload) => {
   }
   if (payload.remoteHidProblem !== undefined) {
     appState.remoteHidProblem = payload.remoteHidProblem;
+  }
+  if (payload.remoteCaptureStatus !== undefined) {
+    appState.remoteCaptureStatus = payload.remoteCaptureStatus;
   }
   renderService();
   renderRemoteStatus();

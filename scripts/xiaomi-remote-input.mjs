@@ -26,6 +26,21 @@ function log(message, details = "") {
   process.stdout.write(`[xiaomi-remote] ${message}${suffix}\n`);
 }
 
+function sendDesktopCaptureStatus(state, metadata = {}) {
+  if (process.env.VIBE_DESKTOP !== "1" || typeof process.send !== "function") {
+    return;
+  }
+  try {
+    process.send({
+      type: "xiaomi_remote_capture_status",
+      state,
+      ...metadata
+    });
+  } catch {
+    // The desktop may already be shutting down; capture cleanup still runs.
+  }
+}
+
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -119,7 +134,7 @@ async function fixHidChild(match) {
     log("HID child is healthy", { status: entries[0].status, problem: entries[0].problem });
     return;
   }
-  log("restarting HID child device (UAC prompt follows)", {
+  log("restarting HID child device through the Windows remote broker", {
     problem: broken.problem,
     instanceId: broken.instanceId
   });
@@ -165,8 +180,8 @@ async function main() {
   }
 
   // A broken HID child (the "driver error" after a re-pair) is repaired by the
-  // elevated capture helper's own watchdog (-HidDeviceMatch), so the fix needs
-  // no extra UAC prompt regardless of when the remote was paired.
+  // broker-owned capture helper's watchdog (-HidDeviceMatch), so the fix needs
+  // no runtime UAC prompt regardless of when the remote was paired.
 
   const { ws, serverReady } = await waitForBridge();
   log("connected to VibeCoding Voice", `ws://127.0.0.1:${config.port}`);
@@ -182,6 +197,7 @@ async function main() {
 
   let capture = null;
   let shuttingDown = false;
+  let adapterRecoveryAwaitingInput = false;
   const controller = new XiaomiRemoteSessionController({
     inactivityMs: config.xiaomiRemoteInactivityMs,
     log,
@@ -221,7 +237,26 @@ async function main() {
 
   capture = await startXiaomiRemoteCapture(runtime, {
     onLine(line) {
+      if (adapterRecoveryAwaitingInput) {
+        adapterRecoveryAwaitingInput = false;
+        sendDesktopCaptureStatus("ready", { recovered: true });
+      }
       controller.pushLine(line);
+    },
+    onCaptureStart(metadata) {
+      log("capture generation started", metadata);
+      adapterRecoveryAwaitingInput = metadata?.adapterChanged === true;
+      sendDesktopCaptureStatus(
+        adapterRecoveryAwaitingInput ? "adapter_changed" : "ready",
+        { metadata }
+      );
+    },
+    onCaptureEnd(metadata) {
+      controller.reset(metadata?.reason || "capture_restart");
+      log("capture generation ended", metadata);
+      if (metadata?.reason === "adapter-missing" || metadata?.reason === "adapter-changed") {
+        sendDesktopCaptureStatus("recovering", { metadata });
+      }
     },
     onLog(source, message) {
       if (message) {

@@ -7,6 +7,10 @@ import {
   encodePowerShellCommand,
   quotePowerShellSingle
 } from "./xiaomi-remote-runtime.mjs";
+import {
+  isInstalledDesktopRuntime,
+  restartRemoteHidViaBroker
+} from "./windows-remote-broker-client.mjs";
 
 // Matches the tested Xiaomi remote's PnP id (VID 0x2717, PID 0x32B8). BLE PnP ids
 // carry the vendor prefix, e.g. `DEV_VID&012717_PID&32B8_REV&4981_...`.
@@ -103,17 +107,34 @@ export function buildHidRestartScript(instanceId, logPath) {
 }
 
 /**
- * Restarts the remote's HID-over-GATT child device through an elevated
- * `pnputil /restart-device` (one UAC prompt) and re-checks the problem code.
+ * Restarts the remote's HID-over-GATT child through the installed broker and
+ * re-checks the problem code. Source/CLI development keeps a RunAs fallback.
  */
 export async function restartXiaomiRemoteHidChild(instanceId, remoteMatch = DEFAULT_REMOTE_MATCH) {
-  const logPath = path.join(
-    fs.mkdtempSync(path.join(os.tmpdir(), "vibe-hid-restart-")),
-    "pnputil.log"
-  );
-  const stdout = await runPowerShell(buildHidRestartScript(instanceId, logPath));
-  const exitCode = Number(String(stdout).trim());
-  const output = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8").trim() : "";
+  let exitCode = null;
+  let output = "";
+  try {
+    const broker = await restartRemoteHidViaBroker(instanceId);
+    exitCode = Number.isInteger(broker.exitCode) ? broker.exitCode : null;
+    output = String(broker.output || "").trim();
+  } catch (brokerError) {
+    if (isInstalledDesktopRuntime()) {
+      throw new Error(
+        "VibeCoding Voice Remote Broker is unavailable. Repair or reinstall VibeCoding Voice. " +
+          `(${brokerError.message || brokerError})`
+      );
+    }
+
+    // Developer/CLI fallback only. Packaged builds never request elevation at
+    // runtime, which keeps login startup free of UAC prompts.
+    const logPath = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), "vibe-hid-restart-")),
+      "pnputil.log"
+    );
+    const stdout = await runPowerShell(buildHidRestartScript(instanceId, logPath));
+    exitCode = Number(String(stdout).trim());
+    output = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8").trim() : "";
+  }
   const after = await checkXiaomiRemoteHidHealth(remoteMatch);
   return {
     exitCode: Number.isInteger(exitCode) ? exitCode : null,

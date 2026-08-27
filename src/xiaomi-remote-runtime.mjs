@@ -4,8 +4,13 @@ import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { UsbPcapAttLineParser } from "./usbpcap-att-parser.mjs";
+import { UsbPcapCaptureStreamDecoder } from "./usbpcap-pipe-protocol.mjs";
 import { decodeMsbcFrames as decodeMsbcFramesToPcm } from "./msbc-decoder.mjs";
+import {
+  isInstalledDesktopRuntime,
+  startRemoteCaptureViaBroker,
+  stopRemoteCaptureViaBroker
+} from "./windows-remote-broker-client.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -59,16 +64,20 @@ export function findUsbDeviceAddress(output, adapterMatch = "Bluetooth") {
     return null;
   }
 
+  let fallbackAddress = null;
   for (const line of String(output || "").split(/\r?\n/)) {
     if (!line.toLowerCase().includes(needle)) {
       continue;
     }
     const match = line.match(/\{value=(\d+)(?:_\d+)?\}/);
     if (match) {
-      return match[1];
+      if (/\{enabled=true\}/i.test(line)) {
+        return match[1];
+      }
+      fallbackAddress ||= match[1];
     }
   }
-  return null;
+  return fallbackAddress;
 }
 
 export function quotePowerShellSingle(value) {
@@ -89,8 +98,8 @@ export function buildElevatedUsbPcapCommand(runtime, pipeName, ownerPid = 0) {
   if (Number.isInteger(ownerPid) && ownerPid > 0) {
     helperArgs.push(`-OwnerPid ${ownerPid}`);
   }
-  // The helper watches the remote's HID child device while elevated and
-  // repairs a "driver error" in place — no second UAC prompt, any pair order.
+  // The broker-owned helper watches the remote's HID child device and repairs
+  // a "driver error" in place without another UAC prompt, in any pair order.
   if (runtime.hidDeviceMatch) {
     helperArgs.push(`-HidDeviceMatch ${quotePowerShellSingle(runtime.hidDeviceMatch)}`);
   }
@@ -98,6 +107,11 @@ export function buildElevatedUsbPcapCommand(runtime, pipeName, ownerPid = 0) {
   // restarts the capture at the (possibly new) USB address by itself.
   if (runtime.usbAdapterMatch) {
     helperArgs.push(`-AdapterMatch ${quotePowerShellSingle(runtime.usbAdapterMatch)}`);
+  }
+  // Unless the user explicitly pinned XIAOMI_REMOTE_USBPCAP_INTERFACE, let the
+  // helper search every USBPcap root after a Bluetooth-radio replacement.
+  if (runtime.allowInterfaceSwitch) {
+    helperArgs.push("-AllowInterfaceSwitch");
   }
   const innerCommand = [
     "$ErrorActionPreference='Stop';",
@@ -172,22 +186,29 @@ export async function resolveXiaomiRemoteRuntime(config) {
   return {
     usbPcapPath,
     pipeHelperPath: DEFAULT_USBPCAP_PIPE_HELPER,
-    // Lets the elevated helper watch/repair the remote's HID child device
+    // Lets the broker-owned helper watch/repair the remote's HID child device
     // (see the -HidDeviceMatch param of the pipe helper).
     hidDeviceMatch: config.xiaomiRemoteHidDeviceMatch,
     // Lets the helper re-find the adapter after an unplug/replug.
     usbAdapterMatch: config.xiaomiRemoteUsbAdapterMatch,
+    // A configured interface is an intentional pin (usually for machines with
+    // multiple Bluetooth radios). The default may follow a replacement radio
+    // even when Windows enumerates it under a different USBPcap interface.
+    allowInterfaceSwitch: !String(config.xiaomiRemoteUsbPcapInterface || "").trim(),
     ...captureTarget
   };
 }
 
 export async function startXiaomiRemoteCapture(runtime, handlers = {}) {
-  // In-process USBPcap -> ATT notification parser; no external tshark needed.
-  const parser = new UsbPcapAttLineParser();
+  // The broker-owned helper frames each capture generation. The decoder creates a
+  // fresh USBPcap parser after an adapter unplug/replug so a truncated record
+  // from the old stream cannot corrupt the new stream.
+  const captureStream = new UsbPcapCaptureStreamDecoder();
 
   let stopped = false;
   let socket = null;
   let launcher = null;
+  let brokerOwned = false;
   let capturedBytes = 0;
   let exitNotified = false;
   const pipeName = `vibecoding-xiaomi-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -202,7 +223,7 @@ export async function startXiaomiRemoteCapture(runtime, handlers = {}) {
     if (capturedBytes === 0) {
       handlers.onLog?.(
         "usbpcap",
-        "capture produced no data; check %TEMP%\\xiaomi-usbpcap-helper.log for USBPcap " +
+        "capture produced no data; check ProgramData\\VibeCoding Voice\\logs for USBPcap " +
           "errors (stale capture process or vanished USB device address)"
       );
     }
@@ -218,6 +239,9 @@ export async function startXiaomiRemoteCapture(runtime, handlers = {}) {
     server.close();
     if (launcher && launcher.exitCode == null) {
       launcher.kill();
+    }
+    if (brokerOwned) {
+      void stopRemoteCaptureViaBroker(process.pid).catch(() => {});
     }
   };
 
@@ -240,7 +264,7 @@ export async function startXiaomiRemoteCapture(runtime, handlers = {}) {
     const connected = new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error(
-          "Timed out waiting for the administrator capture helper. Approve the Windows UAC prompt and try again."
+          "Timed out waiting for the Windows remote capture broker. Repair the application installation and try again."
         ));
       }, 30_000);
       rejectConnection = (error) => {
@@ -255,26 +279,30 @@ export async function startXiaomiRemoteCapture(runtime, handlers = {}) {
         socket = connection;
         connection.on("error", (error) => handlers.onError?.("usbpcap pipe", error));
         connection.on("data", (chunk) => {
-          capturedBytes += chunk.length;
-          let lines;
+          let events;
           try {
-            lines = parser.push(chunk);
+            events = captureStream.push(chunk);
+            capturedBytes = captureStream.dataBytes;
           } catch (error) {
             handlers.onError?.("usbpcap parser", error);
             connection.destroy();
             notifyExit();
             return;
           }
-          for (const line of lines) {
-            handlers.onLine?.(line);
+          for (const event of events) {
+            if (event.type === "line") {
+              handlers.onLine?.(event.line);
+            } else if (event.type === "capture_start") {
+              handlers.onCaptureStart?.(event.metadata);
+            } else if (event.type === "capture_end") {
+              handlers.onCaptureEnd?.(event.metadata);
+            }
           }
         });
         connection.on("close", () => {
           if (!stopped) {
             try {
-              for (const line of parser.end()) {
-                handlers.onLine?.(line);
-              }
+              captureStream.end();
             } catch (error) {
               handlers.onError?.("usbpcap parser", error);
             }
@@ -291,47 +319,65 @@ export async function startXiaomiRemoteCapture(runtime, handlers = {}) {
       });
     });
 
-    const elevatedCommand = buildElevatedUsbPcapCommand(runtime, pipeName, process.pid);
-    launcher = spawn("powershell.exe", [
-      "-NoProfile",
-      "-NonInteractive",
-      "-EncodedCommand",
-      encodePowerShellCommand(elevatedCommand)
-    ], {
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true
-    });
-    let elevatedPid = null;
-    let launcherError = "";
-    launcher.stdout.setEncoding("utf8");
-    launcher.stdout.on("data", (chunk) => {
-      const pid = Number(String(chunk).trim());
-      if (Number.isInteger(pid) && pid > 0) {
-        elevatedPid = pid;
-      }
-    });
-    launcher.stderr.setEncoding("utf8");
-    launcher.stderr.on("data", (chunk) => {
-      launcherError += String(chunk);
-    });
-    launcher.on("error", (error) => handlers.onError?.("usbpcap launcher", error));
-    launcher.on("exit", (code, signal) => {
-      if (code && !socket) {
-        const error = new Error(
-          launcherError.trim() || `launcher exited with code ${code}${signal ? ` (${signal})` : ""}`
+    let capturePid = null;
+    try {
+      const broker = await startRemoteCaptureViaBroker(runtime, pipeName, process.pid);
+      brokerOwned = true;
+      capturePid = Number.isInteger(broker.pid) ? broker.pid : null;
+      handlers.onLog?.("usbpcap", "capture started through the installed Windows remote broker");
+    } catch (brokerError) {
+      // Developer runs from node/electron do not have an installed, path-bound
+      // broker client. Preserve the old one-time RunAs path there only. The
+      // packaged desktop must fail closed so it never brings the boot-time UAC
+      // prompt back when a service installation is damaged.
+      if (isInstalledDesktopRuntime()) {
+        throw new Error(
+          "VibeCoding Voice Remote Broker is unavailable. Repair or reinstall VibeCoding Voice. " +
+            `(${brokerError.message || brokerError})`
         );
-        handlers.onError?.("usbpcap launcher", error);
-        rejectConnection?.(error);
       }
-    });
 
-    handlers.onLog?.("usbpcap", "waiting for Windows administrator approval");
+      const elevatedCommand = buildElevatedUsbPcapCommand(runtime, pipeName, process.pid);
+      launcher = spawn("powershell.exe", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        encodePowerShellCommand(elevatedCommand)
+      ], {
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true
+      });
+      let launcherError = "";
+      launcher.stdout.setEncoding("utf8");
+      launcher.stdout.on("data", (chunk) => {
+        const pid = Number(String(chunk).trim());
+        if (Number.isInteger(pid) && pid > 0) {
+          capturePid = pid;
+        }
+      });
+      launcher.stderr.setEncoding("utf8");
+      launcher.stderr.on("data", (chunk) => {
+        launcherError += String(chunk);
+      });
+      launcher.on("error", (error) => handlers.onError?.("usbpcap launcher", error));
+      launcher.on("exit", (code, signal) => {
+        if (code && !socket) {
+          const error = new Error(
+            launcherError.trim() || `launcher exited with code ${code}${signal ? ` (${signal})` : ""}`
+          );
+          handlers.onError?.("usbpcap launcher", error);
+          rejectConnection?.(error);
+        }
+      });
+      handlers.onLog?.("usbpcap", "development fallback: waiting for Windows administrator approval");
+    }
+
     await connected;
     handlers.onLog?.("usbpcap", "live capture connected through Windows named pipe");
 
     return {
-      capturePid: elevatedPid || launcher.pid,
-      transport: "elevated-named-pipe",
+      capturePid: capturePid || launcher?.pid || null,
+      transport: brokerOwned ? "windows-service-broker" : "elevated-named-pipe",
       stop
     };
   } catch (error) {

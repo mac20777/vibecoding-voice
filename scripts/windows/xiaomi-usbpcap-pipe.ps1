@@ -27,10 +27,24 @@ param(
   # (matched against the PnP friendly name; same needle as
   # findUsbDeviceAddress in src/xiaomi-remote-runtime.mjs). Empty disables
   # the adapter watchdog.
-  [string]$AdapterMatch = "Bluetooth"
+  [string]$AdapterMatch = "Bluetooth",
+
+  # When the interface was not explicitly pinned by the user, a replacement
+  # Bluetooth radio may be enumerated below another USB root controller. Let
+  # the supervisor re-enumerate every USBPcap interface in that case.
+  [switch]$AllowInterfaceSwitch,
+
+  # Installed broker passes a shared ProgramData log directory because a
+  # LocalSystem service has a different TEMP directory from the desktop user.
+  [string]$LogDirectory = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $LogDirectory) {
+  $LogDirectory = $env:TEMP
+}
+[System.IO.Directory]::CreateDirectory($LogDirectory) | Out-Null
 
 function Test-OwnerGone {
   if ($OwnerPid -le 0) {
@@ -42,7 +56,7 @@ function Test-OwnerGone {
 function Append-HelperLog([string]$message) {
   try {
     "$(Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') $message" |
-      Out-File -FilePath (Join-Path $env:TEMP "xiaomi-usbpcap-helper.log") -Encoding utf8 -Append
+      Out-File -FilePath (Join-Path $LogDirectory "xiaomi-usbpcap-helper.log") -Encoding utf8 -Append
   } catch {
     # Logging must never kill the capture.
   }
@@ -90,7 +104,7 @@ function Watch-HidChild {
     $script:hidRepairCount += 1
     Append-HelperLog "HID child broken (code $($broken.ConfigManagerErrorCode)); restarting it"
     pnputil /restart-device $broken.DeviceID |
-      Out-File -FilePath (Join-Path $env:TEMP "xiaomi-hid-repair.log") -Encoding utf8 -Append
+      Out-File -FilePath (Join-Path $LogDirectory "xiaomi-hid-repair.log") -Encoding utf8 -Append
   } catch {
     # Never let the watchdog kill the capture.
   }
@@ -99,51 +113,125 @@ function Watch-HidChild {
 # --- Capture supervisor state ---
 $script:capture = $null
 $script:captureStderrTask = $null
+$script:currentInterfaceName = $InterfaceName
 $script:currentDeviceAddress = $DeviceAddress
-$script:stripHeaderBytes = 0
 $script:bytesWritten = 0
 $script:captureStartBytes = 0
 $script:captureBackoffSec = 5
 $script:lastAdapterCheck = [DateTime]::MinValue
 $script:adapterMissingSeen = $false
 $script:usbEventsReady = $false
+$script:lastKnownAdapterFingerprint = ""
+$script:lastCaptureEndReason = "startup"
+$script:pipe = $null
+$script:captureGeneration = 0
+$script:captureGenerationOpen = $false
 
-function Test-AdapterPresent {
+# Named-pipe framing keeps capture generations separate. Without this boundary,
+# a pcap record truncated by an adapter removal can be joined to the next
+# capture and permanently desynchronize the Node parser.
+$script:frameCaptureStart = [byte]1
+$script:frameData = [byte]2
+$script:frameCaptureEnd = [byte]3
+
+function Write-PipeFrame(
+  [byte]$type,
+  [byte[]]$payload = [byte[]]::new(0),
+  [int]$offset = 0,
+  [int]$count = -1
+) {
+  if ($null -eq $script:pipe -or -not $script:pipe.IsConnected) {
+    throw "USBPcap named pipe is disconnected"
+  }
+  if ($count -lt 0) {
+    $count = $payload.Length - $offset
+  }
+  if ($offset -lt 0 -or $count -lt 0 -or $offset + $count -gt $payload.Length) {
+    throw "Invalid USBPcap pipe frame slice"
+  }
+  $header = [byte[]]::new(5)
+  $header[0] = $type
+  [BitConverter]::GetBytes([uint32]$count).CopyTo($header, 1)
+  $script:pipe.Write($header, 0, $header.Length)
+  if ($count -gt 0) {
+    $script:pipe.Write($payload, $offset, $count)
+  }
+}
+
+function Start-CaptureGeneration(
+  [string]$interfaceName,
+  [string]$address,
+  [string]$recoveredFrom = "startup",
+  [bool]$adapterChanged = $false
+) {
+  $script:captureGeneration += 1
+  $metadata = [Text.Encoding]::UTF8.GetBytes((@{
+    generation = $script:captureGeneration
+    interfaceName = $interfaceName
+    address = $address
+    recoveredFrom = $recoveredFrom
+    adapterChanged = $adapterChanged
+  } | ConvertTo-Json -Compress))
+  Write-PipeFrame -Type $script:frameCaptureStart -Payload $metadata
+  $script:captureGenerationOpen = $true
+  Append-HelperLog "capture generation $($script:captureGeneration) started on $interfaceName at USB address $address (recovered from $recoveredFrom)"
+}
+
+function Stop-CaptureGeneration([string]$reason) {
+  if (-not $script:captureGenerationOpen) {
+    return
+  }
+  $metadata = [Text.Encoding]::UTF8.GetBytes((@{
+    generation = $script:captureGeneration
+    reason = $reason
+  } | ConvertTo-Json -Compress))
+  try {
+    Write-PipeFrame -Type $script:frameCaptureEnd -Payload $metadata
+  } catch {
+    # The owner may already have closed the pipe. Cleanup must still continue.
+  }
+  $script:captureGenerationOpen = $false
+  Append-HelperLog "capture generation $($script:captureGeneration) ended: $reason"
+}
+
+function Get-MatchingAdapterFingerprint {
   # Pure PnP check — never touches the USBPcap driver, so it cannot hang.
   # Service=BTHUSB pins the needle to real USB Bluetooth adapters: enumerator
   # and protocol devices (RFCOMM TDI, BTHENUM, ...) either stay behind or
   # match the needle for the wrong reasons.
   if (-not $AdapterMatch) {
-    return $true
+    return "capture-target-without-watchdog"
   }
   try {
     $escaped = [regex]::Escape($AdapterMatch)
-    $dev = Get-CimInstance Win32_PnPEntity -Filter "PNPClass='Bluetooth'" -ErrorAction SilentlyContinue |
-      Where-Object { $_.Service -eq "BTHUSB" -and $_.Name -match $escaped } |
-      Select-Object -First 1
-    return $null -ne $dev
+    $ids = @(Get-CimInstance Win32_PnPEntity -Filter "PNPClass='Bluetooth'" -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.Service -eq "BTHUSB" -and
+        $_.Name -match $escaped -and
+        $_.ConfigManagerErrorCode -eq 0
+      } |
+      ForEach-Object { $_.DeviceID } |
+      Sort-Object -Unique)
+    return $ids -join "|"
   } catch {
-    # A flaky WMI day must not kill a healthy capture.
-    return $true
+    # Null means the check itself failed; an empty string means no healthy
+    # matching adapter is currently present.
+    return $null
   }
 }
 
-function Find-AdapterAddress {
-  # Resolves the adapter's USBPcap device address. Call this ONLY while no
-  # capture is running: the USBPcapCMD config query can hang for good on a
-  # contended/wedged driver (observed in the field), which would block the
-  # supervisor loop and the OwnerPid watchdog with it. Hence the hard timeout.
-  if (-not $AdapterMatch) {
-    return $script:currentDeviceAddress
-  }
-  if (-not (Test-AdapterPresent)) {
-    return $null
-  }
+function Test-AdapterPresent {
+  $fingerprint = Get-MatchingAdapterFingerprint
+  # A flaky WMI day must not kill a healthy capture.
+  return $null -eq $fingerprint -or [bool]$fingerprint
+}
+
+function Invoke-UsbPcapQuery([string]$arguments, [string]$description) {
   $proc = $null
   try {
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $UsbPcapPath
-    $startInfo.Arguments = '--extcap-interface "' + $InterfaceName + '" --extcap-config'
+    $startInfo.Arguments = $arguments
     $startInfo.UseShellExecute = $false
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
@@ -152,33 +240,107 @@ function Find-AdapterAddress {
     $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
     if (-not $proc.WaitForExit(5000)) {
       try { $proc.Kill() } catch {}
-      Append-HelperLog "USBPcap config query timed out; driver may be wedged"
+      Append-HelperLog "$description timed out; USBPcap driver may be wedged"
       return $null
     }
-    foreach ($line in ($stdoutTask.Result -split "`r?`n")) {
-      if ($line -notmatch [regex]::Escape($AdapterMatch)) {
-        continue
-      }
-      $m = [regex]::Match($line, '\{value=(\d+)(?:_\d+)?\}')
-      if ($m.Success) {
-        return $m.Groups[1].Value
-      }
-    }
-    Append-HelperLog "USBPcap config query found no adapter matching '$AdapterMatch'"
+    return $stdoutTask.Result
   } catch {
-    Append-HelperLog "USBPcap config query failed: $($_.Exception.Message)"
+    Append-HelperLog "$description failed: $($_.Exception.Message)"
+    return $null
   } finally {
     if ($proc) {
       try { $proc.Dispose() } catch {}
     }
   }
+}
+
+function Get-UsbPcapInterfaces {
+  $interfaces = [System.Collections.Generic.List[string]]::new()
+  if (-not $AllowInterfaceSwitch) {
+    [void]$interfaces.Add($script:currentInterfaceName)
+    return $interfaces.ToArray()
+  }
+
+  $output = Invoke-UsbPcapQuery -Arguments "--extcap-interfaces" -Description "USBPcap interface query"
+  if ($null -eq $output) {
+    [void]$interfaces.Add($script:currentInterfaceName)
+    return $interfaces.ToArray()
+  }
+  $discovered = [System.Collections.Generic.List[string]]::new()
+  foreach ($line in ($output -split "`r?`n")) {
+    $match = [regex]::Match($line, '^interface \{value=([^}]+)\}')
+    if ($match.Success -and -not $discovered.Contains($match.Groups[1].Value)) {
+      [void]$discovered.Add($match.Groups[1].Value)
+    }
+  }
+  # Prefer the current interface when it still exists, while deliberately not
+  # querying it when USBPcap no longer enumerates that root controller.
+  if ($discovered.Contains($script:currentInterfaceName)) {
+    [void]$interfaces.Add($script:currentInterfaceName)
+  }
+  foreach ($interfaceName in $discovered) {
+    if (-not $interfaces.Contains($interfaceName)) {
+      [void]$interfaces.Add($interfaceName)
+    }
+  }
+  return $interfaces.ToArray()
+}
+
+function Find-CaptureTarget {
+  # Resolves both the USBPcap interface and device address. Call this ONLY while no
+  # capture is running: the USBPcapCMD config query can hang for good on a
+  # contended/wedged driver (observed in the field), which would block the
+  # supervisor loop and the OwnerPid watchdog with it. Hence the hard timeout.
+  if (-not $AdapterMatch) {
+    return [pscustomobject]@{
+      InterfaceName = $script:currentInterfaceName
+      DeviceAddress = $script:currentDeviceAddress
+      AdapterFingerprint = "capture-target-without-watchdog"
+    }
+  }
+  if (-not (Test-AdapterPresent)) {
+    return $null
+  }
+
+  $fallbackTarget = $null
+  foreach ($interfaceName in (Get-UsbPcapInterfaces)) {
+    $arguments = '--extcap-interface "' + $interfaceName + '" --extcap-config'
+    $output = Invoke-UsbPcapQuery -Arguments $arguments -Description "USBPcap config query for $interfaceName"
+    if ($null -eq $output) {
+      continue
+    }
+    foreach ($line in ($output -split "`r?`n")) {
+      if ($line -notmatch [regex]::Escape($AdapterMatch)) {
+        continue
+      }
+      $m = [regex]::Match($line, '\{value=(\d+)(?:_\d+)?\}')
+      if ($m.Success) {
+        $target = [pscustomobject]@{
+          InterfaceName = $interfaceName
+          DeviceAddress = $m.Groups[1].Value
+          AdapterFingerprint = (Get-MatchingAdapterFingerprint)
+        }
+        if ($line -match '\{enabled=true\}') {
+          return $target
+        }
+        if ($null -eq $fallbackTarget) {
+          $fallbackTarget = $target
+        }
+      }
+    }
+  }
+  if ($null -ne $fallbackTarget) {
+    Append-HelperLog "USBPcap exposed only a disabled match for '$AdapterMatch'; using it as a compatibility fallback"
+    return $fallbackTarget
+  }
+  Append-HelperLog "USBPcap queries found no adapter matching '$AdapterMatch'"
   return $null
 }
 
-function New-CaptureProcess([string]$address) {
+function New-CaptureProcess([string]$interfaceName, [string]$address) {
   $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
   $startInfo.FileName = $UsbPcapPath
-  $startInfo.Arguments = '-d "' + $InterfaceName + '" --devices "' + $address + '" --inject-descriptors -o -'
+  $startInfo.Arguments = '-d "' + $interfaceName + '" --devices "' + $address + '" --inject-descriptors -o -'
   $startInfo.UseShellExecute = $false
   $startInfo.RedirectStandardOutput = $true
   $startInfo.RedirectStandardError = $true
@@ -192,7 +354,7 @@ function New-CaptureProcess([string]$address) {
   return $proc
 }
 
-function Stop-CaptureProcess {
+function Stop-CaptureProcess([string]$reason = "stopped") {
   if ($null -ne $script:capture -and -not $script:capture.HasExited) {
     try {
       $script:capture.Kill()
@@ -201,6 +363,8 @@ function Stop-CaptureProcess {
       # Best effort; the process is dead or dying anyway.
     }
   }
+  $script:lastCaptureEndReason = $reason
+  Stop-CaptureGeneration -Reason $reason
 }
 
 # Interruptible sleep: wakes early when the owner dies or a USB device change
@@ -223,16 +387,50 @@ function Wait-OrWakeup([int]$seconds) {
   return $false
 }
 
-$pipe = $null
+function Get-CaptureAdapterChangeReason {
+  $shouldCheck = $false
+  if ($script:usbEventsReady) {
+    $pending = @(Get-Event -SourceIdentifier "vibe-usb-change" -ErrorAction SilentlyContinue)
+    if ($pending.Count -gt 0) {
+      $pending | Remove-Event -ErrorAction SilentlyContinue
+      $shouldCheck = $true
+    }
+  }
+  $now = Get-Date
+  if (($now - $script:lastAdapterCheck).TotalSeconds -ge 15) {
+    $script:lastAdapterCheck = $now
+    $shouldCheck = $true
+  }
+  if (-not $shouldCheck) {
+    return $null
+  }
+  $fingerprint = Get-MatchingAdapterFingerprint
+  if ($null -eq $fingerprint) {
+    return $null
+  }
+  if ($fingerprint) {
+    if ($script:lastKnownAdapterFingerprint -and
+        $fingerprint -ne $script:lastKnownAdapterFingerprint) {
+      Append-HelperLog "Bluetooth adapter identity changed; re-enumerating every USBPcap interface"
+      return "adapter-changed"
+    }
+    return $null
+  }
+  if (-not $script:adapterMissingSeen) {
+    Append-HelperLog "Bluetooth adapter vanished; pausing capture until it returns"
+  }
+  $script:adapterMissingSeen = $true
+  return "adapter-missing"
+}
 
 try {
-  $pipe = [System.IO.Pipes.NamedPipeClientStream]::new(
+  $script:pipe = [System.IO.Pipes.NamedPipeClientStream]::new(
     ".",
     $PipeName,
     [System.IO.Pipes.PipeDirection]::Out,
     [System.IO.Pipes.PipeOptions]::Asynchronous
   )
-  $pipe.Connect(15000)
+  $script:pipe.Connect(15000)
 
   # A leftover capture still holds the USBPcap driver and makes any new
   # USBPcapCMD exit immediately (seen as tshark exiting with code 0 right
@@ -249,18 +447,24 @@ try {
     Append-HelperLog "USB change event subscription failed; falling back to polling only"
   }
 
+  $initialFingerprint = Get-MatchingAdapterFingerprint
+  if ($initialFingerprint) {
+    $script:lastKnownAdapterFingerprint = $initialFingerprint
+  }
+
   # Supervisor loop: keep a capture running whenever the Bluetooth adapter is
   # present. USBPcapCMD does not exit when its target device is unplugged — it
   # just goes silent — so a vanished or re-enumerated adapter is detected here
-  # and the capture is restarted at the (possibly new) USB address. The pcap
-  # parser upstream already consumed one global header, so every capture after
-  # the first gets its fresh 24-byte header swallowed.
+  # and the capture is restarted at the (possibly new) USB address. Every new
+  # process becomes a framed capture generation with a fresh pcap parser.
   $stream = $null
   $buffer = [byte[]]::new(65536)
-  while ($pipe.IsConnected -and -not (Test-OwnerGone)) {
+  while ($script:pipe.IsConnected -and -not (Test-OwnerGone)) {
     if ($null -eq $script:capture -or $script:capture.HasExited) {
       $stream = $null
       if ($null -ne $script:capture) {
+        Stop-CaptureGeneration -Reason "process-exit"
+        $script:lastCaptureEndReason = "process-exit"
         if ($script:bytesWritten -eq $script:captureStartBytes) {
           # Died without producing data (stale driver, wedged driver, ...).
           # Keep the stderr diagnosable and back off so we never spam the
@@ -275,8 +479,8 @@ try {
         try { $script:capture.Dispose() } catch {}
         $script:capture = $null
       }
-      $address = Find-AdapterAddress
-      if ($null -eq $address) {
+      $target = Find-CaptureTarget
+      if ($null -eq $target) {
         if (-not $script:adapterMissingSeen) {
           $script:adapterMissingSeen = $true
           Append-HelperLog "Bluetooth adapter not found; waiting for it to return"
@@ -287,63 +491,72 @@ try {
         $script:captureBackoffSec = [Math]::Min(30, $script:captureBackoffSec * 2)
         continue
       }
+      $previousInterface = $script:currentInterfaceName
+      $previousFingerprint = $script:lastKnownAdapterFingerprint
+      $nextFingerprint = [string]$target.AdapterFingerprint
+      $adapterChanged = [bool](
+        ($previousFingerprint -and $nextFingerprint -and $previousFingerprint -ne $nextFingerprint) -or
+        ($previousInterface -ne [string]$target.InterfaceName)
+      )
+      $recoveredFrom = $script:lastCaptureEndReason
+      if ($adapterChanged) {
+        $recoveredFrom = "adapter-changed"
+        Append-HelperLog "Bluetooth capture target changed from $previousInterface to $($target.InterfaceName)"
+      }
       if ($script:adapterMissingSeen) {
-        Append-HelperLog "Bluetooth adapter back at USB address $address; restarting capture"
+        Append-HelperLog "Bluetooth adapter back on $($target.InterfaceName) at USB address $($target.DeviceAddress); restarting capture"
         $script:adapterMissingSeen = $false
       }
-      $script:currentDeviceAddress = $address
-      $script:capture = New-CaptureProcess -Address $address
+      $script:currentInterfaceName = [string]$target.InterfaceName
+      $script:currentDeviceAddress = [string]$target.DeviceAddress
+      if ($nextFingerprint) {
+        $script:lastKnownAdapterFingerprint = $nextFingerprint
+      }
+      $script:capture = New-CaptureProcess -InterfaceName $script:currentInterfaceName -Address $script:currentDeviceAddress
       $script:captureStderrTask = $script:capture.StandardError.ReadToEndAsync()
       $script:captureStartBytes = $script:bytesWritten
-      if ($script:bytesWritten -gt 0) {
-        $script:stripHeaderBytes = 24
-      }
+      Start-CaptureGeneration `
+        -InterfaceName $script:currentInterfaceName `
+        -Address $script:currentDeviceAddress `
+        -RecoveredFrom $recoveredFrom `
+        -AdapterChanged $adapterChanged
+      $script:lastCaptureEndReason = "steady"
       $stream = $script:capture.StandardOutput.BaseStream
     }
 
     # Adapter watchdog: USB change events (fast path) plus a 15 s poll. The
-    # check itself is pure PnP and can never hang on the USBPcap driver.
-    $deviceChanged = $false
-    if ($script:usbEventsReady) {
-      $usbEvents = @(Get-Event -SourceIdentifier "vibe-usb-change" -ErrorAction SilentlyContinue)
-      if ($usbEvents.Count -gt 0) {
-        $usbEvents | Remove-Event -ErrorAction SilentlyContinue
-        $deviceChanged = $true
-      }
-    }
-    $now = Get-Date
-    if (($now - $script:lastAdapterCheck).TotalSeconds -ge 15) {
-      $script:lastAdapterCheck = $now
-      $deviceChanged = $true
-    }
-    if ($deviceChanged) {
-      if (-not (Test-AdapterPresent)) {
-        Append-HelperLog "Bluetooth adapter vanished; pausing capture until it returns"
-        $script:adapterMissingSeen = $true
-        Stop-CaptureProcess
-        continue
-      }
-      if ($script:adapterMissingSeen) {
-        Append-HelperLog "Bluetooth adapter returned; restarting capture"
-        Stop-CaptureProcess
-        continue
-      }
+    # same check also runs while ReadAsync is pending, so a silent USBPcapCMD
+    # cannot trap the supervisor forever after the adapter disappears.
+    $adapterChangeReason = Get-CaptureAdapterChangeReason
+    if ($adapterChangeReason) {
+      Stop-CaptureProcess -Reason $adapterChangeReason
+      continue
     }
 
     Watch-HidChild
 
     # Pump one read cycle. The waits time out so the watchdogs above keep
-    # running even when the capture is idle; $pipe.IsConnected only flips
+    # running even when the capture is idle; the pipe's IsConnected only flips
     # after a failed write, so the OwnerPid watchdog covers idle pipes.
     $readTask = $stream.ReadAsync($buffer, 0, $buffer.Length)
+    $adapterLost = $false
     while (-not $readTask.Wait(500)) {
-      if (-not $pipe.IsConnected -or (Test-OwnerGone)) {
+      if (-not $script:pipe.IsConnected -or (Test-OwnerGone)) {
+        break
+      }
+      $adapterChangeReason = Get-CaptureAdapterChangeReason
+      if ($adapterChangeReason) {
+        Stop-CaptureProcess -Reason $adapterChangeReason
+        $adapterLost = $true
         break
       }
       Watch-HidChild
     }
-    if (-not $pipe.IsConnected -or (Test-OwnerGone)) {
+    if (-not $script:pipe.IsConnected -or (Test-OwnerGone)) {
       break
+    }
+    if ($adapterLost) {
+      continue
     }
     if (-not $readTask.IsCompleted -or $readTask.IsFaulted -or $readTask.IsCanceled -or $script:capture.HasExited) {
       continue
@@ -357,16 +570,9 @@ try {
     if ($count -le 0) {
       continue
     }
-    $offset = 0
-    if ($script:stripHeaderBytes -gt 0) {
-      $offset = [Math]::Min($script:stripHeaderBytes, $count)
-      $script:stripHeaderBytes -= $offset
-    }
-    if ($offset -lt $count) {
-      $pipe.Write($buffer, $offset, $count - $offset)
-      $script:bytesWritten += $count - $offset
-      $script:captureBackoffSec = 5
-    }
+    Write-PipeFrame -Type $script:frameData -Payload $buffer -Count $count
+    $script:bytesWritten += $count
+    $script:captureBackoffSec = 5
   }
 
   if ($script:bytesWritten -eq 0 -and $script:capture -and $script:capture.HasExited) {
@@ -378,20 +584,20 @@ try {
       try { $stderr = $script:captureStderrTask.Result } catch {}
     }
     [System.IO.File]::WriteAllText(
-      (Join-Path $env:TEMP "xiaomi-usbpcap-helper.log"),
+      (Join-Path $LogDirectory "xiaomi-usbpcap-helper.log"),
       "USBPcapCMD exited with code $($script:capture.ExitCode) before producing any data.`n$stderr"
     )
   }
 }
 finally {
-  Stop-CaptureProcess
+  Stop-CaptureProcess -Reason "helper-exit"
   if ($script:capture) {
     try { $script:capture.Dispose() } catch {}
   }
   if ($script:usbEventsReady) {
     Unregister-Event -SourceIdentifier "vibe-usb-change" -ErrorAction SilentlyContinue
   }
-  if ($pipe) {
-    $pipe.Dispose()
+  if ($script:pipe) {
+    $script:pipe.Dispose()
   }
 }

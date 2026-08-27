@@ -37,7 +37,8 @@ server.mjs (entry point — HTTP + WebSocket server)
 │   │                             decoding are in-process, no tshark/ffmpeg). The elevated pipe
 │   │                             helper (scripts/windows/xiaomi-usbpcap-pipe.ps1) self-heals:
 │   │                             owner-PID watchdog on app exit, HID-child "driver error" repair,
-│   │                             and capture restart when the BT adapter is unplugged/replugged
+│   │                             and framed capture generations when the BT adapter is unplugged/
+│   │                             replugged (each generation resets the in-process pcap parser)
 │   ├── usbpcap-att-parser.mjs — streaming pcap → ATT notification lines (replaces tshark)
 │   ├── msbc-decoder.mjs     — pure-JS mSBC → PCM16 decoder (replaces ffmpeg)
 │   ├── xiaomi-remote-session.mjs — PTT session state machine (inactivity watchdog)

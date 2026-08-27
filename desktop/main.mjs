@@ -86,6 +86,7 @@ function wait(ms) {
 }
 
 let latestRemoteInfo = null;
+let latestRemoteCaptureStatus = null;
 
 // Queries the remote's model/battery once via BLE GATT (see
 // src/xiaomi-remote-info.mjs). Deliberately not polled: runs at app start and
@@ -148,9 +149,9 @@ async function refreshRemoteHidHealth(reason = "startup") {
 let remoteHidRepairInFlight = false;
 
 // Repairs the remote's broken HID child (the "driver error" Windows Settings
-// shows after a re-pair) with an elevated pnputil /restart-device. Used by the
-// Remote page's manual repair button; the automatic path lives inside the
-// elevated capture helper so it shares that single UAC prompt.
+// shows after a re-pair) through the installed, restricted Windows broker.
+// Used by the Remote page's manual repair button; the automatic path lives
+// inside the broker-owned capture helper and needs no runtime UAC prompt.
 async function maybeRepairRemoteHid(reason = "service-start") {
   if (remoteHidRepairInFlight || process.platform !== "win32") {
     return;
@@ -171,14 +172,14 @@ async function maybeRepairRemoteHid(reason = "service-start") {
       }
       return;
     }
-    writeDesktopLog("remote hid broken; manual repair follows (UAC)", {
+    writeDesktopLog("remote hid broken; broker repair follows", {
       reason,
       instanceId: broken.instanceId,
       problem: broken.problem
     });
     appendProcessLog(
       "xiaomi-remote",
-      "Remote driver error detected; repairing (approve the Windows admin prompt)."
+      "Remote driver error detected; repairing through the Windows remote broker."
     );
     const result = await restartXiaomiRemoteHidChild(
       broken.instanceId,
@@ -623,7 +624,8 @@ function emitState() {
   const payload = {
     service: snapshotServiceState(),
     remote: latestRemoteInfo,
-    remoteHidProblem: latestRemoteHidProblem
+    remoteHidProblem: latestRemoteHidProblem,
+    remoteCaptureStatus: latestRemoteCaptureStatus
   };
 
   for (const window of BrowserWindow.getAllWindows()) {
@@ -969,6 +971,7 @@ async function stopBridgeProcess() {
     writeDesktopLog("stopXiaomiRemoteProcess", { pid: child.pid ?? null });
     child.kill();
   }
+  latestRemoteCaptureStatus = null;
 
   if (!bridgeChild) {
     const config = loadEffectiveConfig();
@@ -1015,6 +1018,7 @@ function startXiaomiRemoteProcess(config) {
   }
 
   xiaomiRemoteStopRequested = false;
+  latestRemoteCaptureStatus = null;
   const child = fork(xiaomiRemoteEntryPath(), [], {
     cwd: DEFAULT_INVOKE_CWD,
     env: {
@@ -1034,8 +1038,8 @@ function startXiaomiRemoteProcess(config) {
     }
   }, 60_000);
   void refreshRemoteInfoOnce("remote-start");
-  // A broken HID child is repaired inside the capture helper's single UAC
-  // prompt (see scripts/xiaomi-remote-input.mjs); here we only track the
+  // A broken HID child is repaired inside the broker-owned capture helper
+  // (see scripts/xiaomi-remote-input.mjs); here we only track the
   // state for the UI warning, re-checking once the helper had time to repair.
   void refreshRemoteHidHealth("remote-start");
   setTimeout(() => {
@@ -1053,10 +1057,31 @@ function startXiaomiRemoteProcess(config) {
   if (child.stderr) {
     createLineReader(child.stderr, "xiaomi-remote");
   }
+  child.on("message", (message) => {
+    if (xiaomiRemoteChild !== child || message?.type !== "xiaomi_remote_capture_status") {
+      return;
+    }
+    latestRemoteCaptureStatus = message.state === "ready"
+      ? null
+      : {
+          state: String(message.state || ""),
+          metadata: message.metadata || null,
+          updatedAt: Date.now()
+        };
+    writeDesktopLog("xiaomi remote capture status", latestRemoteCaptureStatus || { state: "ready" });
+    if (message.state === "adapter_changed") {
+      void refreshRemoteInfoOnce("adapter-changed");
+      void refreshRemoteHidHealth("adapter-changed");
+    }
+    emitState();
+  });
   child.on("exit", (code, signal) => {
     writeDesktopLog("xiaomi remote child exit", { code, signal });
-    if (xiaomiRemoteChild === child) {
+    const wasCurrentChild = xiaomiRemoteChild === child;
+    if (wasCurrentChild) {
       xiaomiRemoteChild = null;
+      latestRemoteCaptureStatus = null;
+      emitState();
     }
     if (!isQuitting && code !== 0) {
       appendProcessLog(
@@ -1072,7 +1097,7 @@ function startXiaomiRemoteProcess(config) {
 
 // Restarts the remote input child after an unexpected exit (crashed capture,
 // lost bridge connection, ...). An adapter unplug/replug normally needs no
-// restart — the elevated capture helper re-resolves the adapter itself — so
+// restart — the broker-owned capture helper re-resolves the adapter itself — so
 // this is the safety net for everything else. Exponential backoff, reset once
 // a child stays alive for a minute.
 function scheduleXiaomiRemoteRestart() {
@@ -1407,7 +1432,8 @@ async function buildBootstrap() {
     },
     service: snapshotServiceState(),
     remote: latestRemoteInfo,
-    remoteHidProblem: latestRemoteHidProblem
+    remoteHidProblem: latestRemoteHidProblem,
+    remoteCaptureStatus: latestRemoteCaptureStatus
   };
 }
 
@@ -1610,14 +1636,13 @@ ipcMain.handle("desktop:refresh-remote-hid", async () => {
 });
 
 // One-click repair for the remote's broken HID child device (the "driver
-// error" Windows Settings shows after a re-pair). Same path as the automatic
-// repair on service (re)start: elevated `pnputil /restart-device`, one UAC
-// prompt, then a re-check.
+// error" Windows Settings shows after a re-pair). Same broker path as the
+// automatic repair on service (re)start, followed by a health re-check.
 ipcMain.handle("desktop:fix-remote-hid", async () => {
   if (process.platform !== "win32") {
     return { healthy: false, unsupported: true };
   }
-  // Join an in-flight auto repair instead of stacking a second UAC prompt.
+  // Join an in-flight auto repair instead of sending a duplicate broker request.
   for (let i = 0; i < 100 && remoteHidRepairInFlight; i += 1) {
     await wait(300);
   }

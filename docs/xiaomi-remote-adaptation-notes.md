@@ -112,8 +112,10 @@ attempt keeps failing until the USB adapter is unplugged and reconnected. The Bl
 keeps stale BLE state across the delete; power-cycling the adapter resets it. The remote itself does
 not need its bond cleared first in this case.
 
-Replugging changes the adapter's USB address, so restart the listener after the replug and let it
-re-detect the address (or update `XIAOMI_REMOTE_USB_DEVICE` if it is pinned).
+Replugging changes the adapter's USB address. The production helper now re-detects that address and
+restarts capture without restarting the listener. It can also follow a replacement adapter onto a
+different USBPcap root interface unless `XIAOMI_REMOTE_USBPCAP_INTERFACE` is explicitly pinned.
+Update `XIAOMI_REMOTE_USB_DEVICE` manually if the USB address itself is pinned.
 
 ### "Driver error" was HID problem code 10
 
@@ -327,5 +329,5 @@ new remote's first test directly to Codex or another agent target.
 2. Move handle/report layout into named remote profiles instead of treating the tested values as universal.
 3. Add connection diagnostics that report bond, HID problem code, current USB address, and observed packet
    count separately.
-4. Add opt-in desktop auto-start and a clear UAC/listening status for the selected remote profile.
+4. Keep desktop auto-start unelevated and report the installed remote broker/listening status clearly.
 5. Test clean shutdown, repeated starts, adapter replugging, and remote sleep/reconnect over longer runs.

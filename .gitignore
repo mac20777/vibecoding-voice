@@ -11,3 +11,4 @@ npm-debug.log*
 .npm-cache/
 dist-desktop/
 build-assets/installers/*.exe
+build-assets/remote-broker/*.exe

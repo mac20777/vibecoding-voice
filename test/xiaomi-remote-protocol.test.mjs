@@ -49,6 +49,10 @@ test("USBPcap parsers find interfaces and the Bluetooth adapter address", () => 
     "7"
   );
   assert.equal(findUsbDeviceAddress(tree, "Xiaomi voice remote"), "3");
+  assert.equal(findUsbDeviceAddress([
+    "value {arg=99}{value=4}{display=[4] Old Bluetooth Adapter}{enabled=false}",
+    "value {arg=99}{value=8}{display=[8] New Bluetooth Adapter}{enabled=true}"
+  ].join("\n")), "8");
 });
 
 test("elevated USBPcap launcher safely quotes paths and uses the named-pipe helper", () => {
@@ -102,7 +106,8 @@ test("elevated USBPcap launcher safely quotes paths and uses the named-pipe help
     usbPcapPath: "USBPcapCMD.exe",
     interfaceName: String.raw`\\.\USBPcap1`,
     deviceAddress: "3",
-    usbAdapterMatch: "Bluetooth"
+    usbAdapterMatch: "Bluetooth",
+    allowInterfaceSwitch: true
   }, "pipe", 4242);
   const adapterInner = Buffer.from(
     withAdapterMatch.match(/'([A-Za-z0-9+/=]+)'\) -Verb RunAs/)?.[1],
@@ -111,6 +116,7 @@ test("elevated USBPcap launcher safely quotes paths and uses the named-pipe help
   // The adapter needle lets the helper re-resolve the USB address after an
   // unplug/replug and restart the capture on its own.
   assert.match(adapterInner, /-AdapterMatch 'Bluetooth'/);
+  assert.match(adapterInner, /-AllowInterfaceSwitch/);
 
   const noOwner = buildElevatedUsbPcapCommand({
     pipeHelperPath: "helper.ps1",

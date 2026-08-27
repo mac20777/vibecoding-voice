@@ -221,10 +221,13 @@
               </div>
               <div class="remote-hid-warning" id="remote-hid-warning" hidden>
                 <span class="remote-hid-warning-text">
-                  <span data-i18n="remoteHidWarning">Windows 报告遥控器「驱动程序错误」。通常不影响本软件的语音和按键；如需消除可尝试修复（会弹出管理员授权）。</span>
+                  <span data-i18n="remoteHidWarning">Windows 报告遥控器「驱动程序错误」。通常不影响本软件的语音和按键；可通过已安装的后台服务修复，不会再弹管理员授权。</span>
                   <span id="remote-hid-fix-result"></span>
                 </span>
                 <button id="remote-hid-fix" class="btn btn-ghost" type="button" data-i18n="remoteHidFix">修复驱动</button>
+              </div>
+              <div class="remote-hid-warning" id="remote-adapter-warning" hidden>
+                <span class="remote-hid-warning-text" id="remote-adapter-warning-text"></span>
               </div>
               <div class="remote-layout">
                 <div class="remote-device">
