@@ -1,3 +1,5 @@
+import { selectPreferredLocalMicrophone } from "../src/local-microphone-device.mjs";
+
 const I18N = {
   zh: {
     openLogs: "打开日志目录",
@@ -18,9 +20,10 @@ const I18N = {
     fRecordTranscripts: "记录转写历史", fRecordTranscriptsHint: "关闭后，语音转写和回复不再写入「转写记录」。",
     fStt: "语音识别服务", fSttHint: "Volcengine 推荐给中文环境", fLanHint: "局域网设备握手签名，可留空",
     micDeviceGroup: "电脑麦克风",
-    micDeviceLabel: "麦克风设备", micDeviceDefault: "系统默认",
-    micDeviceHint: "选择 F8 录音用的麦克风；蓝牙遥控器走独立通道，无需选择",
+    micDeviceLabel: "麦克风设备", micDeviceDefault: "自动选择 USB / 实体麦克风",
+    micDeviceHint: "F8 会避开 VB-CABLE，优先使用电脑上的 USB 麦克风；也可以在这里固定选择",
     micDeviceUnknown: "麦克风 {index}",
+    micPhysicalMissing: "未检测到可用的实体麦克风，请连接 USB 麦克风或在设置中手动选择",
     hotkeyGroup: "全局快捷键",
     fHoldKey: "按住说话", fSendKey: "发送", fUndoKey: "撤销", fTransToggleKey: "英文输出", capture: "录入",
     fTransEnable: "启用中文翻译（识别后翻译成目标语言再发送）",
@@ -32,7 +35,7 @@ const I18N = {
     remoteVoiceModeLabel: "语音键模式",
     remoteVoiceModeBuiltin: "内置语音识别（火山 / OpenAI）",
     remoteVoiceModeWechat: "微信语音输入（推荐，无需 API Key）",
-    remoteVoiceModeHint: "微信模式会按住微信默认的 Ctrl+Win 语音快捷键，并把遥控器声音实时送入 VibeCoding Remote Microphone。",
+    remoteVoiceModeHint: "按住语音键时，软件会临时把 Windows 默认麦克风切换到 VB-CABLE；松开并结束微信录音后自动恢复原设备。",
     remoteNote: "点击遥控器上的按键，再点右侧动作完成映射。语音键固定为「按住说话」，不可改。菜单键默认禁用，避免 Windows 原生菜单事件被重复执行；你仍可把它改成其他动作。",
     advCli: "CLI 行为", fCodexSkip: "Codex：跳过 Git 仓库检查", fClaudeSkip: "Claude：减少权限确认",
     advWorkspace: "工作目录", fCodexCwd: "Codex 工作目录", fClaudeCwd: "Claude 工作目录", browse: "浏览…",
@@ -66,8 +69,8 @@ const I18N = {
     checkStt: "语音识别服务", checkSttOk: "{provider} · 已配置密钥", checkSttMiss: "{provider} 还没填密钥",
     checkSttFix: "去填写 →",
     checkWechat: "微信语音输入",
-    checkWechatReady: "VibeCoding Remote Microphone 已就绪；请在微信中把麦克风选为该设备，不需要 API Key",
-    checkWechatMissing: "虚拟麦克风驱动尚未安装，微信模式暂不可用",
+    checkWechatReady: "VB-CABLE 已就绪；按住语音键时会自动临时切换麦克风，不需要 API Key",
+    checkWechatMissing: "尚未检测到 VB-CABLE，请先安装官方虚拟声卡后再使用微信模式",
     checkTarget: "发送目标",
     targetDescInject: "文字直接打进当前窗口", targetDescCodex: "发送到 Codex CLI 会话", targetDescClaude: "发送到 Claude Code 会话",
     checkMicOk: "语音输入已验证", checkMicMiss: "还没试过说一句话",
@@ -129,7 +132,7 @@ const I18N = {
     wizBack: "上一步", wizNext: "下一步", wizSkip: "跳过", wizFinish: "完成并保存",
     wizStartService: "启动服务", wizTestOk: "✓ 收到！语音识别工作正常",
     wizSttNeedKey: "请先把 Key 填上（点右侧「获取 Key」去控制台复制）",
-    wizWechatModeNote: "按住遥控器语音键时，软件会调用微信的 Ctrl+Win 语音输入，并使用 VibeCoding Remote Microphone。",
+    wizWechatModeNote: "按住语音键时，软件会自动临时切换 Windows 默认麦克风并调用微信语音输入；松开后恢复原设备。",
     wizOptVolc: "Volcengine（推荐中文）",
     overlayPreviewHint: "{confirm} 发送 · {undo} 撤销一段 · {discard} 整段取消",
     overlayPreviewHintLocal: "{send} 发送 · {undo} 撤销",
@@ -184,9 +187,10 @@ const I18N = {
     fRecordTranscripts: "Record transcript history", fRecordTranscriptsHint: "When off, transcripts and replies are not added to the Transcripts page.",
     fStt: "Speech recognition", fSttHint: "Volcengine recommended for Chinese", fLanHint: "HMAC handshake secret for LAN devices, optional",
     micDeviceGroup: "Desktop microphone",
-    micDeviceLabel: "Microphone", micDeviceDefault: "System default",
-    micDeviceHint: "Pick the mic used by F8 dictation; the Bluetooth remote uses its own channel and needs no selection",
+    micDeviceLabel: "Microphone", micDeviceDefault: "Automatic USB / physical microphone",
+    micDeviceHint: "F8 avoids VB-CABLE and prefers the computer's USB microphone. You can also pin a device here",
     micDeviceUnknown: "Microphone {index}",
+    micPhysicalMissing: "No physical microphone was detected. Connect a USB microphone or select one in Settings",
     hotkeyGroup: "Global hotkeys",
     fHoldKey: "Hold to dictate", fSendKey: "Send", fUndoKey: "Undo", fTransToggleKey: "English output", capture: "Record",
     fTransEnable: "Translate Chinese dictation before sending",
@@ -198,7 +202,7 @@ const I18N = {
     remoteVoiceModeLabel: "Voice button mode",
     remoteVoiceModeBuiltin: "Built-in speech recognition (Volcengine / OpenAI)",
     remoteVoiceModeWechat: "WeChat voice input (recommended, no API key)",
-    remoteVoiceModeHint: "WeChat mode holds WeChat's default Ctrl+Win voice shortcut and streams the remote live into VibeCoding Remote Microphone.",
+    remoteVoiceModeHint: "While the voice button is held, the app temporarily switches the Windows default microphone to VB-CABLE. It restores the previous device after WeChat recording ends.",
     remoteNote: "Click a button on the remote, then pick an action on the right. The voice key is fixed to push-to-talk. Menu defaults to disabled to avoid duplicating Windows' native Menu event; you can still map it to another action.",
     advCli: "CLI behavior", fCodexSkip: "Codex: skip Git repo check", fClaudeSkip: "Claude: reduce permission prompts",
     advWorkspace: "Workspaces", fCodexCwd: "Codex workspace", fClaudeCwd: "Claude workspace", browse: "Browse…",
@@ -232,8 +236,8 @@ const I18N = {
     checkStt: "Speech recognition", checkSttOk: "{provider} · key configured", checkSttMiss: "{provider} has no API key yet",
     checkSttFix: "Fill it in →",
     checkWechat: "WeChat voice input",
-    checkWechatReady: "VibeCoding Remote Microphone is ready. Select it as WeChat's microphone; no API key is needed",
-    checkWechatMissing: "The virtual microphone driver is not installed, so WeChat mode is unavailable",
+    checkWechatReady: "VB-CABLE is ready. The microphone switches automatically while the voice button is held; no API key is needed",
+    checkWechatMissing: "VB-CABLE was not detected. Install the official virtual audio device before using WeChat mode",
     checkTarget: "Send target",
     targetDescInject: "Types into the focused window", targetDescCodex: "Sends to a Codex CLI session", targetDescClaude: "Sends to a Claude Code session",
     checkMicOk: "Voice input verified", checkMicMiss: "No voice test yet",
@@ -295,7 +299,7 @@ const I18N = {
     wizBack: "Back", wizNext: "Next", wizSkip: "Skip", wizFinish: "Finish & save",
     wizStartService: "Start service", wizTestOk: "✓ Got it — recognition works",
     wizSttNeedKey: "Paste your API key first (use the Get Key link to open the console)",
-    wizWechatModeNote: "Holding the remote voice button invokes WeChat's Ctrl+Win voice input through VibeCoding Remote Microphone.",
+    wizWechatModeNote: "Holding the voice button temporarily switches the Windows default microphone and invokes WeChat voice input. The previous device is restored afterward.",
     wizOptVolc: "Volcengine (best for Chinese)",
     overlayPreviewHint: "{confirm} send · {undo} undo last · {discard} discard all",
     overlayPreviewHintLocal: "{send} send · {undo} undo",
@@ -1125,6 +1129,53 @@ function setLocalMicHotkeys(settings = {}) {
   renderLocalMic();
 }
 
+async function enumerateLocalMicInputs() {
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    return [];
+  }
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  return devices.filter((device) => device.kind === "audioinput");
+}
+
+function persistLocalMicDevice(deviceId) {
+  localMic.deviceId = String(deviceId || "");
+  void window.vibeApp.updateDesktopSettings({ localMicDeviceId: localMic.deviceId }).catch(() => {});
+}
+
+async function autoSelectPhysicalLocalMic({ requestLabels = false } = {}) {
+  let inputs = [];
+  try {
+    inputs = await enumerateLocalMicInputs();
+  } catch {
+    return "";
+  }
+  let preferred = selectPreferredLocalMicrophone(inputs);
+  if (!preferred && requestLabels && navigator.mediaDevices?.getUserMedia) {
+    let permissionStream = null;
+    try {
+      // Device labels are hidden until microphone permission is granted. Open
+      // and immediately close the default endpoint only for permission, then
+      // choose a real device before any audio is sent to the bridge.
+      permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    } catch {
+      return "";
+    } finally {
+      permissionStream?.getTracks().forEach((track) => track.stop());
+    }
+    try {
+      inputs = await enumerateLocalMicInputs();
+      preferred = selectPreferredLocalMicrophone(inputs);
+    } catch {
+      return "";
+    }
+  }
+  if (!preferred?.deviceId) {
+    return "";
+  }
+  persistLocalMicDevice(preferred.deviceId);
+  return preferred.deviceId;
+}
+
 // Populate the mic picker from enumerateDevices. Labels are hidden until mic
 // permission has been granted in this session — they fill in after the first
 // recording, so this is re-run whenever a recording starts.
@@ -1134,8 +1185,7 @@ async function refreshLocalMicDevices() {
   }
   let inputs = [];
   try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    inputs = devices.filter((device) => device.kind === "audioinput");
+    inputs = await enumerateLocalMicInputs();
   } catch {
     return;
   }
@@ -1154,9 +1204,9 @@ async function refreshLocalMicDevices() {
     option.textContent = device.label || t("micDeviceUnknown", { index: index + 1 });
     select.appendChild(option);
   });
-  // A saved mic that has been unplugged drops back to the system default.
+  // A saved mic that has been unplugged drops back to automatic physical-mic selection.
   if (![...select.options].some((option) => option.value === localMic.deviceId)) {
-    localMic.deviceId = "";
+    persistLocalMicDevice("");
   }
   select.value = localMic.deviceId;
 }
@@ -1373,24 +1423,36 @@ const LOCAL_MIC_AUDIO_CONSTRAINTS = {
   autoGainControl: true
 };
 
-// Record from the mic picked in Settings; if that device was unplugged,
-// getUserMedia with an exact deviceId fails — fall back to the system default
-// and clear the saved choice.
+// F8 is intentionally independent from the remote/WeChat path. It records from
+// the mic picked in Settings, or automatically picks a physical USB mic while
+// excluding VB-CABLE and the experimental VibeCoding virtual endpoint.
 async function getLocalMicStream() {
   if (!localMic.deviceId) {
-    return navigator.mediaDevices.getUserMedia({ audio: LOCAL_MIC_AUDIO_CONSTRAINTS, video: false });
+    await autoSelectPhysicalLocalMic({ requestLabels: true });
   }
-  try {
-    return await navigator.mediaDevices.getUserMedia({
-      audio: { ...LOCAL_MIC_AUDIO_CONSTRAINTS, deviceId: { exact: localMic.deviceId } },
-      video: false
-    });
-  } catch {
-    localMic.deviceId = "";
-    void window.vibeApp.updateDesktopSettings({ localMicDeviceId: "" }).catch(() => {});
-    void refreshLocalMicDevices();
-    return navigator.mediaDevices.getUserMedia({ audio: LOCAL_MIC_AUDIO_CONSTRAINTS, video: false });
+  if (localMic.deviceId) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: { ...LOCAL_MIC_AUDIO_CONSTRAINTS, deviceId: { exact: localMic.deviceId } },
+        video: false
+      });
+    } catch {
+      persistLocalMicDevice("");
+      await autoSelectPhysicalLocalMic();
+      if (localMic.deviceId) {
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            audio: { ...LOCAL_MIC_AUDIO_CONSTRAINTS, deviceId: { exact: localMic.deviceId } },
+            video: false
+          });
+        } catch {
+          persistLocalMicDevice("");
+        }
+      }
+    }
   }
+  void refreshLocalMicDevices();
+  throw new Error(t("micPhysicalMissing"));
 }
 
 async function startLocalMicRecording() {
@@ -1976,7 +2038,8 @@ function collectFormPayload() {
       localMicHoldKey: localMic.holdKey,
       localMicSendKey: localMic.sendKey,
       localMicUndoKey: localMic.undoKey,
-      localMicTranslationToggleKey: localMic.translationToggleKey
+      localMicTranslationToggleKey: localMic.translationToggleKey,
+      localMicDeviceId: localMic.deviceId
     }
   };
 }

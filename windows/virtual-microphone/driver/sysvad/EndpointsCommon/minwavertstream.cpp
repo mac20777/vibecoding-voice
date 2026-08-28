@@ -33,6 +33,15 @@ VibeCableFormatSupported
            Format->Format.nBlockAlign == 2;
 }
 
+VOID
+VibeCableInitialize()
+{
+    KeInitializeSpinLock(&g_VibeCableLock);
+    g_VibeCableRead = 0;
+    g_VibeCableWrite = 0;
+    g_VibeCableCount = 0;
+}
+
 static
 VOID
 VibeCableReset()

@@ -536,6 +536,8 @@ Return Value:
         ntStatus,
         DPF(D_ERROR, ("Registry path copy error 0x%x", ntStatus)),
         Done);
+
+    VibeCableInitialize();
     
     WDF_DRIVER_CONFIG_INIT(&config, WDF_NO_EVENT_CALLBACK);
     //

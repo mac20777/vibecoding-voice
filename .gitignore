@@ -10,6 +10,7 @@ tmp/
 npm-debug.log*
 .npm-cache/
 dist-desktop/
+out/
 build-assets/installers/*.exe
 build-assets/remote-broker/*.exe
 build-assets/virtual-microphone/*

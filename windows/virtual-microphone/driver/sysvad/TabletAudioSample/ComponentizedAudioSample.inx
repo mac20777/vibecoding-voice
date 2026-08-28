@@ -333,7 +333,7 @@ AddReg=SYSVAD_SA.AddReg
 
 [SYSVAD_SA.NT.Interfaces]
 ;
-; Interfaces for speaker (internal) render endpoint.
+; Hidden render input used by the VibeCoding publisher.
 ;
 AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_WaveSpeaker%, SYSVAD.I.WaveSpeaker
 AddInterface=%KSCATEGORY_RENDER%, %KSNAME_WaveSpeaker%, SYSVAD.I.WaveSpeaker
@@ -342,103 +342,13 @@ AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_TopologySpeaker%, SYSVAD.I.TopologySpea
 AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologySpeaker%, SYSVAD.I.TopologySpeaker
 
 ;
-; Interfaces for speaker (external: headphone) render endpoint.
-;
-AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_WaveSpeakerHeadphone%, SYSVAD.I.WaveSpeakerHeadphone
-AddInterface=%KSCATEGORY_RENDER%, %KSNAME_WaveSpeakerHeadphone%, SYSVAD.I.WaveSpeakerHeadphone
-AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveSpeakerHeadphone%, SYSVAD.I.WaveSpeakerHeadphone
-AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_TopologySpeakerHeadphone%, SYSVAD.I.TopologySpeakerHeadphone
-AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologySpeakerHeadphone%, SYSVAD.I.TopologySpeakerHeadphone
-
-;
-; Interfaces for HDMI (external) render endpoint.
-;
-AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_WaveHdmi%, SYSVAD.I.WaveHdmi
-AddInterface=%KSCATEGORY_RENDER%, %KSNAME_WaveHdmi%, SYSVAD.I.WaveHdmi
-AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveHdmi%, SYSVAD.I.WaveHdmi
-AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_TopologyHdmi%, SYSVAD.I.TopologyHdmi
-AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyHdmi%, SYSVAD.I.TopologyHdmi
-
-;
-; Interfaces for SPDIF (external) render endpoint.
-;
-AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_WaveSpdif%, SYSVAD.I.WaveSpdif
-AddInterface=%KSCATEGORY_RENDER%, %KSNAME_WaveSpdif%, SYSVAD.I.WaveSpdif
-AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveSpdif%, SYSVAD.I.WaveSpdif
-AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_TopologySpdif%, SYSVAD.I.TopologySpdif
-AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologySpdif%, SYSVAD.I.TopologySpdif
-
-;
-; Interfaces for microphone (external: headphone) capture endpoint 
+; Public capture endpoint selected by WeChat.
 ;
 AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_WaveMicIn%, SYSVAD.I.WaveMicIn
 AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveMicIn%, SYSVAD.I.WaveMicIn
 AddInterface=%KSCATEGORY_CAPTURE%,  %KSNAME_WaveMicIn%, SYSVAD.I.WaveMicIn
 AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_TopologyMicIn%, SYSVAD.I.TopologyMicIn
 AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyMicIn%, SYSVAD.I.TopologyMicIn
-
-;
-; Interfaces for microphone array 1 (internal: front) capture endpoint.
-;
-AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_WaveMicArray1%, SYSVAD.I.WaveMicArray1
-AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveMicArray1%, SYSVAD.I.WaveMicArray1
-AddInterface=%KSCATEGORY_CAPTURE%,  %KSNAME_WaveMicArray1%, SYSVAD.I.WaveMicArray1
-AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_TopologyMicArray1%, SYSVAD.I.TopologyMicArray1
-AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyMicArray1%, SYSVAD.I.TopologyMicArray1
-
-;
-; Interfaces for microphone array 2 (internal: back) capture endpoint.
-;
-AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_WaveMicArray2%, SYSVAD.I.WaveMicArray2
-AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveMicArray2%, SYSVAD.I.WaveMicArray2
-AddInterface=%KSCATEGORY_CAPTURE%,  %KSNAME_WaveMicArray2%, SYSVAD.I.WaveMicArray2
-AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_TopologyMicArray2%, SYSVAD.I.TopologyMicArray2
-AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyMicArray2%, SYSVAD.I.TopologyMicArray2
-
-;
-; Interfaces for microphone array 3 (internal: combined: front/back) capture endpoint.
-;
-AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_WaveMicArray3%, SYSVAD.I.WaveMicArray3
-AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveMicArray3%, SYSVAD.I.WaveMicArray3
-AddInterface=%KSCATEGORY_CAPTURE%,  %KSNAME_WaveMicArray3%, SYSVAD.I.WaveMicArray3
-AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_TopologyMicArray3%, SYSVAD.I.TopologyMicArray3
-AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyMicArray3%, SYSVAD.I.TopologyMicArray3
-
-;
-; Interfaces for Bluetooth HFP speaker (external) render endpoint.
-;
-AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_WaveBthHfpSpeaker%, SYSVAD.I.WaveBthHfpSpeaker
-AddInterface=%KSCATEGORY_RENDER%, %KSNAME_WaveBthHfpSpeaker%, SYSVAD.I.WaveBthHfpSpeaker
-AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveBthHfpSpeaker%, SYSVAD.I.WaveBthHfpSpeaker
-AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_TopologyBthHfpSpeaker%, SYSVAD.I.TopologyBthHfpSpeaker
-AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyBthHfpSpeaker%, SYSVAD.I.TopologyBthHfpSpeaker
-
-;
-; Interfaces for Bluetooth HFP mic (external) capture endpoint 
-;
-AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_WaveBthHfpMic%, SYSVAD.I.WaveBthHfpMic
-AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveBthHfpMic%, SYSVAD.I.WaveBthHfpMic
-AddInterface=%KSCATEGORY_CAPTURE%,  %KSNAME_WaveBthHfpMic%, SYSVAD.I.WaveBthHfpMic
-AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_TopologyBthHfpMic%, SYSVAD.I.TopologyBthHfpMic
-AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyBthHfpMic%, SYSVAD.I.TopologyBthHfpMic
-
-;
-; Interfaces for USB Headset speaker (external) render endpoint.
-;
-AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_WaveUsbHsSpeaker%, SYSVAD.I.WaveUsbHsSpeaker
-AddInterface=%KSCATEGORY_RENDER%, %KSNAME_WaveUsbHsSpeaker%, SYSVAD.I.WaveUsbHsSpeaker
-AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveUsbHsSpeaker%, SYSVAD.I.WaveUsbHsSpeaker
-AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_TopologyUsbHsSpeaker%, SYSVAD.I.TopologyUsbHsSpeaker
-AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyUsbHsSpeaker%, SYSVAD.I.TopologyUsbHsSpeaker
-
-;
-; Interfaces for USB Headset mic (external) capture endpoint 
-;
-AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_WaveUsbHsMic%, SYSVAD.I.WaveUsbHsMic
-AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveUsbHsMic%, SYSVAD.I.WaveUsbHsMic
-AddInterface=%KSCATEGORY_CAPTURE%,  %KSNAME_WaveUsbHsMic%, SYSVAD.I.WaveUsbHsMic
-AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_TopologyUsbHsMic%, SYSVAD.I.TopologyUsbHsMic
-AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyUsbHsMic%, SYSVAD.I.TopologyUsbHsMic
 
 [SYSVAD_SA.NT.Services]
 AddService=sysvad_componentizedaudiosample,0x00000002,sysvad_ComponentizedAudioSample_Service_Inst

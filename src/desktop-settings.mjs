@@ -76,10 +76,7 @@ export function loadDesktopSettings() {
 
 export function writeDesktopSettings(updates = {}) {
   const settingsPath = getDesktopSettingsPath();
-  const nextSettings = {
-    ...loadDesktopSettings(),
-    ...normalizeDesktopSettings(updates)
-  };
+  const nextSettings = mergeDesktopSettings(loadDesktopSettings(), updates);
 
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
   fs.writeFileSync(settingsPath, `${JSON.stringify(nextSettings, null, 2)}\n`, "utf8");
@@ -87,4 +84,11 @@ export function writeDesktopSettings(updates = {}) {
     path: settingsPath,
     settings: nextSettings
   };
+}
+
+export function mergeDesktopSettings(current = {}, updates = {}) {
+  return normalizeDesktopSettings({
+    ...normalizeDesktopSettings(current),
+    ...updates
+  });
 }

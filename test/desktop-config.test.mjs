@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildDesktopFormState, buildUserConfigUpdates } from "../src/desktop-config.mjs";
-import { normalizeDesktopSettings } from "../src/desktop-settings.mjs";
+import { mergeDesktopSettings, normalizeDesktopSettings } from "../src/desktop-settings.mjs";
 import {
   getConfigIssues,
   listConfigFileCandidatesForMode,
@@ -56,6 +56,26 @@ test("normalizeDesktopSettings applies safe defaults", () => {
       hasUsedVoice: false
     }
   );
+});
+
+test("partial desktop settings updates preserve the selected F8 microphone", () => {
+  const merged = mergeDesktopSettings(
+    {
+      autoLaunch: true,
+      localMicDeviceId: "usb-mic-1",
+      localMicHoldKey: "F8",
+      uiLanguage: "zh",
+      hasUsedVoice: true
+    },
+    {
+      closeToTray: true,
+      localMicSendKey: "F9"
+    }
+  );
+  assert.equal(merged.localMicDeviceId, "usb-mic-1");
+  assert.equal(merged.autoLaunch, true);
+  assert.equal(merged.closeToTray, true);
+  assert.equal(merged.hasUsedVoice, true);
 });
 
 test("buildDesktopFormState exposes effective config values for the desktop UI", () => {

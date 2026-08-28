@@ -225,7 +225,7 @@
                   <option value="builtin_stt" data-i18n="remoteVoiceModeBuiltin">内置语音识别（火山 / OpenAI）</option>
                   <option value="wechat" data-i18n="remoteVoiceModeWechat">微信语音输入（推荐，无需 API Key）</option>
                 </select>
-                <div class="hint" id="remote-voice-mode-hint" data-i18n="remoteVoiceModeHint">微信模式会按住微信默认的 Ctrl+Win 语音快捷键，并把遥控器声音实时送入 VibeCoding Remote Microphone。</div>
+                <div class="hint" id="remote-voice-mode-hint" data-i18n="remoteVoiceModeHint">按住语音键时，软件会临时把 Windows 默认麦克风切换到 VB-CABLE；松开并结束微信录音后自动恢复原设备。</div>
               </div>
               <div class="remote-hid-warning" id="remote-hid-warning" hidden>
                 <span class="remote-hid-warning-text">
@@ -493,9 +493,9 @@
                   <div class="field">
                     <label class="field-label" for="local-mic-device" data-i18n="micDeviceLabel">麦克风设备</label>
                     <select id="local-mic-device">
-                      <option value="" data-i18n="micDeviceDefault">系统默认</option>
+                      <option value="" data-i18n="micDeviceDefault">自动选择 USB / 实体麦克风</option>
                     </select>
-                    <div class="hint" data-i18n="micDeviceHint">选择 F8 录音用的麦克风；蓝牙遥控器走独立通道，无需选择</div>
+                    <div class="hint" data-i18n="micDeviceHint">F8 会避开 VB-CABLE，优先使用电脑上的 USB 麦克风；也可以在这里固定选择</div>
                   </div>
                 </div>
 
@@ -711,7 +711,7 @@
               <option value="builtin_stt" data-i18n="remoteVoiceModeBuiltin">内置语音识别（火山 / OpenAI）</option>
             </select>
           </div>
-          <div class="hint" data-wiz-voice-mode="wechat" data-i18n="wizWechatModeNote">按住遥控器语音键时，软件会调用微信的 Ctrl+Win 语音输入，并使用 VibeCoding Remote Microphone。</div>
+          <div class="hint" data-wiz-voice-mode="wechat" data-i18n="wizWechatModeNote">按住语音键时，软件会自动临时切换 Windows 默认麦克风并调用微信语音输入；松开后恢复原设备。</div>
           <div data-wiz-voice-mode="builtin_stt" hidden>
             <div class="field">
               <label class="field-label" for="wiz-stt-provider" data-i18n="fStt">语音识别服务</label>

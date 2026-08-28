@@ -9,7 +9,13 @@ import {
   encodeVirtualMicrophoneMessage,
   normalizeXiaomiRemoteVoiceMode
 } from "../src/virtual-microphone-protocol.mjs";
-import { resolveVirtualMicrophonePublisherPath } from "../src/windows-virtual-microphone.mjs";
+import {
+  buildVirtualMicrophonePublisherArgs,
+  classifyVirtualMicrophoneEndpoint,
+  resolveVirtualMicrophonePublisherPath,
+  resolveVirtualMicrophoneRouteStatePath,
+  selectVirtualMicrophonePair
+} from "../src/windows-virtual-microphone.mjs";
 
 test("virtual microphone protocol frames control and PCM messages", () => {
   const payload = Buffer.from([1, 2, 3, 4]);
@@ -38,3 +44,53 @@ test("packaged publisher path resolves from the Electron resources directory", (
   );
 });
 
+test("WeChat publisher arguments include both VB-CABLE endpoints and crash recovery state", () => {
+  assert.deepEqual(
+    buildVirtualMicrophonePublisherArgs({
+      renderEndpointName: "CABLE Input (VB-Audio Virtual Cable)",
+      captureEndpointName: "CABLE Output (VB-Audio Virtual Cable)",
+      routeStatePath: "D:\\State\\route.txt",
+      wechatShortcut: true
+    }),
+    [
+      "--endpoint",
+      "CABLE Input (VB-Audio Virtual Cable)",
+      "--wechat-shortcut",
+      "--capture-endpoint",
+      "CABLE Output (VB-Audio Virtual Cable)",
+      "--route-state",
+      "D:\\State\\route.txt"
+    ]
+  );
+});
+
+test("route recovery state defaults to the per-user application data directory", () => {
+  assert.equal(
+    resolveVirtualMicrophoneRouteStatePath({ LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local" }),
+    "C:\\Users\\tester\\AppData\\Local\\VibeCoding Voice\\virtual-microphone-route-state.txt"
+  );
+});
+
+test("VB-CABLE endpoints are recognized as the preferred signed audio bridge", () => {
+  assert.equal(
+    classifyVirtualMicrophoneEndpoint("render", "CABLE Input (VB-Audio Virtual Cable)"),
+    "vb_cable"
+  );
+  assert.equal(
+    classifyVirtualMicrophoneEndpoint("capture", "CABLE Output (VB-Audio Virtual Cable)"),
+    "vb_cable"
+  );
+  assert.equal(classifyVirtualMicrophoneEndpoint("capture", "Microphone Array"), null);
+});
+
+test("endpoint selection keeps each render/capture pair on the same provider", () => {
+  const pair = selectVirtualMicrophonePair([
+    { flow: "render", name: "VibeCoding Remote Microphone Input" },
+    { flow: "capture", name: "VibeCoding Remote Microphone" },
+    { flow: "capture", name: "CABLE Output (VB-Audio Virtual Cable)" },
+    { flow: "render", name: "CABLE Input (VB-Audio Virtual Cable)" }
+  ]);
+  assert.equal(pair.provider, "vb_cable");
+  assert.equal(pair.renderEndpoint.name, "CABLE Input (VB-Audio Virtual Cable)");
+  assert.equal(pair.captureEndpoint.name, "CABLE Output (VB-Audio Virtual Cable)");
+});

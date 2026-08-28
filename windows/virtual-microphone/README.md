@@ -1,17 +1,25 @@
 # VibeCoding Remote Microphone
 
-The Windows product path is a paired virtual audio cable:
+The current Windows product path uses the production-signed VB-CABLE endpoints:
 
 1. `vibecoding-virtual-mic-publisher.exe` receives framed PCM16LE, 16 kHz,
    mono audio from the Xiaomi remote process.
-2. The publisher renders that stream through shared-mode WASAPI to the hidden
-   `VibeCoding Remote Microphone Input` render endpoint.
-3. The WaveRT driver loops render frames through a bounded kernel ring into the
-   public `VibeCoding Remote Microphone` capture endpoint.
-4. WeChat selects the capture endpoint as its microphone.
+2. On push-to-talk start, the publisher snapshots the current Windows capture
+   defaults and temporarily routes the console, multimedia, and communications
+   roles to `CABLE Output (VB-Audio Virtual Cable)`.
+3. It renders the remote stream through shared-mode WASAPI to
+   `CABLE Input (VB-Audio Virtual Cable)`, then invokes WeChat's voice shortcut.
+4. After the shortcut is released and the audio queue drains, the prior capture
+   defaults are restored. A per-user route-state file provides recovery after an
+   unexpected helper or application exit, and restoration skips roles the user
+   changed manually while recording.
 
 Using WASAPI for the user-to-driver boundary avoids a private device-control
 protocol and lets the Windows audio engine perform the 16 kHz mono conversion.
+
+The custom SysVAD implementation below remains an experimental alternative. It
+is not included in normal development installers unless a production-signed
+driver package is explicitly staged.
 
 ## Product safety gates
 
@@ -31,6 +39,13 @@ allows a development build with no driver files, but rejects a partial package,
 a non-Microsoft-signed catalog, or a SYS file that is not covered by that
 catalog. This prevents a local/test driver from silently becoming a release
 artifact.
+
+When the three production-signed files are staged, the NSIS installer adds the
+package to the Windows driver store, creates the root-enumerated virtual audio
+device through SetupAPI on first install, and binds the driver. Uninstall first
+removes that root device and then removes its OEM driver package. The SetupAPI
+step is embedded in the install script, so no WDK-only `devcon.exe` utility is
+shipped to users.
 
 The driver source is pinned to Microsoft's SysVAD design and lives under
 `driver/sysvad`. Build it with `npm run virtual-mic:build-driver`; the command

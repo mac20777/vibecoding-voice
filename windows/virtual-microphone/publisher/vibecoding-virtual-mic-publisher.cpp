@@ -12,12 +12,39 @@
 #include <cstdint>
 #include <cstdio>
 #include <deque>
+#include <iterator>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
+
+struct DeviceShareMode {
+  DWORD mode;
+};
+
+struct __declspec(uuid("f8679f50-850a-41cf-9c72-430f290290c8")) IPolicyConfig
+    : public IUnknown {
+  virtual HRESULT STDMETHODCALLTYPE GetMixFormat(PCWSTR, WAVEFORMATEX**) = 0;
+  virtual HRESULT STDMETHODCALLTYPE GetDeviceFormat(PCWSTR, INT, WAVEFORMATEX**) = 0;
+  virtual HRESULT STDMETHODCALLTYPE ResetDeviceFormat(PCWSTR) = 0;
+  virtual HRESULT STDMETHODCALLTYPE SetDeviceFormat(PCWSTR, WAVEFORMATEX*, WAVEFORMATEX*) = 0;
+  virtual HRESULT STDMETHODCALLTYPE GetProcessingPeriod(PCWSTR, INT, PINT64, PINT64) = 0;
+  virtual HRESULT STDMETHODCALLTYPE SetProcessingPeriod(PCWSTR, PINT64) = 0;
+  virtual HRESULT STDMETHODCALLTYPE GetShareMode(PCWSTR, DeviceShareMode*) = 0;
+  virtual HRESULT STDMETHODCALLTYPE SetShareMode(PCWSTR, DeviceShareMode*) = 0;
+  virtual HRESULT STDMETHODCALLTYPE GetPropertyValue(PCWSTR, INT, const PROPERTYKEY&,
+                                                     PROPVARIANT*) = 0;
+  virtual HRESULT STDMETHODCALLTYPE SetPropertyValue(PCWSTR, INT, const PROPERTYKEY&,
+                                                     const PROPVARIANT*) = 0;
+  virtual HRESULT STDMETHODCALLTYPE SetDefaultEndpoint(PCWSTR, ERole) = 0;
+  virtual HRESULT STDMETHODCALLTYPE SetEndpointVisibility(PCWSTR, INT) = 0;
+};
+
+class __declspec(uuid("870af99c-171d-4f9e-af0d-e63df40c2bc9")) PolicyConfigClient;
 
 constexpr std::uint32_t kMagic = 0x524d4356;  // "VCMR" as little-endian bytes.
 constexpr std::uint16_t kStart = 1;
@@ -28,6 +55,11 @@ constexpr std::uint16_t kExit = 5;
 constexpr std::size_t kMaxPayload = 16 * 1024 * 1024;
 constexpr std::size_t kMaxQueuedSamples = 16'000 * 5;
 constexpr ULONGLONG kShortcutWatchdogMs = 2'000;
+constexpr DWORD kRouteSettleMs = 250;
+constexpr DWORD kRouteRestoreDelayMs = 500;
+
+constexpr ERole kCaptureRoles[] = {eConsole, eMultimedia, eCommunications};
+constexpr const char* kCaptureRoleNames[] = {"console", "multimedia", "communications"};
 
 #pragma pack(push, 1)
 struct MessageHeader {
@@ -148,7 +180,17 @@ std::wstring GetFriendlyName(IMMDevice* device) {
   return result;
 }
 
-HRESULT FindRenderEndpoint(const std::wstring& requestedName, IMMDevice** found) {
+std::wstring GetDeviceId(IMMDevice* device) {
+  LPWSTR value = nullptr;
+  std::wstring result;
+  if (device && SUCCEEDED(device->GetId(&value)) && value) {
+    result = value;
+  }
+  CoTaskMemFree(value);
+  return result;
+}
+
+HRESULT FindEndpoint(EDataFlow flow, const std::wstring& requestedName, IMMDevice** found) {
   *found = nullptr;
   IMMDeviceEnumerator* enumerator = nullptr;
   IMMDeviceCollection* collection = nullptr;
@@ -158,7 +200,7 @@ HRESULT FindRenderEndpoint(const std::wstring& requestedName, IMMDevice** found)
   if (FAILED(hr)) {
     return hr;
   }
-  hr = enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &collection);
+  hr = enumerator->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection);
   if (FAILED(hr)) {
     ReleaseCom(enumerator);
     return hr;
@@ -181,6 +223,286 @@ HRESULT FindRenderEndpoint(const std::wstring& requestedName, IMMDevice** found)
   ReleaseCom(enumerator);
   return *found ? S_OK : HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
 }
+
+HRESULT FindRenderEndpoint(const std::wstring& requestedName, IMMDevice** found) {
+  return FindEndpoint(eRender, requestedName, found);
+}
+
+HRESULT FindCaptureEndpoint(const std::wstring& requestedName, IMMDevice** found) {
+  return FindEndpoint(eCapture, requestedName, found);
+}
+
+HRESULT CreatePolicyConfig(IPolicyConfig** policy) {
+  *policy = nullptr;
+  return CoCreateInstance(__uuidof(PolicyConfigClient), nullptr, CLSCTX_ALL,
+                          __uuidof(IPolicyConfig), reinterpret_cast<void**>(policy));
+}
+
+std::wstring GetDefaultCaptureEndpointId(IMMDeviceEnumerator* enumerator, ERole role) {
+  IMMDevice* device = nullptr;
+  std::wstring id;
+  if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eCapture, role, &device))) {
+    id = GetDeviceId(device);
+  }
+  ReleaseCom(device);
+  return id;
+}
+
+struct RouteState {
+  DWORD ownerPid = 0;
+  std::wstring targetEndpointId;
+  std::map<int, std::wstring> defaultEndpointIds;
+};
+
+bool WriteTextFileAtomically(const std::wstring& path, const std::string& contents) {
+  const std::wstring temporaryPath = path + L".tmp-" + std::to_wstring(GetCurrentProcessId());
+  HANDLE file = CreateFileW(temporaryPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                            FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+  DWORD written = 0;
+  const bool writeOk = contents.size() <= MAXDWORD &&
+      WriteFile(file, contents.data(), static_cast<DWORD>(contents.size()), &written, nullptr) &&
+      written == contents.size() && FlushFileBuffers(file);
+  CloseHandle(file);
+  if (!writeOk) {
+    DeleteFileW(temporaryPath.c_str());
+    return false;
+  }
+  if (!MoveFileExW(temporaryPath.c_str(), path.c_str(),
+                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    DeleteFileW(temporaryPath.c_str());
+    return false;
+  }
+  return true;
+}
+
+bool ReadTextFile(const std::wstring& path, std::string* contents) {
+  contents->clear();
+  HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE |
+                            FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+  LARGE_INTEGER size{};
+  if (!GetFileSizeEx(file, &size) || size.QuadPart < 0 || size.QuadPart > 64 * 1024) {
+    CloseHandle(file);
+    return false;
+  }
+  contents->resize(static_cast<std::size_t>(size.QuadPart));
+  DWORD read = 0;
+  const bool readOk = contents->empty() ||
+      (ReadFile(file, contents->data(), static_cast<DWORD>(contents->size()), &read, nullptr) &&
+       read == contents->size());
+  CloseHandle(file);
+  if (!readOk) {
+    contents->clear();
+  }
+  return readOk;
+}
+
+std::string SerializeRouteState(const RouteState& state) {
+  std::string contents = "version=1\nowner_pid=" + std::to_string(state.ownerPid) +
+                         "\ntarget=" + WideToUtf8(state.targetEndpointId) + "\n";
+  for (std::size_t index = 0; index < std::size(kCaptureRoles); ++index) {
+    const auto found = state.defaultEndpointIds.find(static_cast<int>(kCaptureRoles[index]));
+    contents += std::string(kCaptureRoleNames[index]) + "=" +
+                (found == state.defaultEndpointIds.end() ? "" : WideToUtf8(found->second)) + "\n";
+  }
+  return contents;
+}
+
+bool ParseRouteState(const std::string& contents, RouteState* state) {
+  *state = RouteState{};
+  std::map<std::string, std::string> fields;
+  std::size_t offset = 0;
+  while (offset <= contents.size()) {
+    const std::size_t next = contents.find('\n', offset);
+    std::string line = contents.substr(offset, next == std::string::npos
+        ? std::string::npos : next - offset);
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    const std::size_t separator = line.find('=');
+    if (separator != std::string::npos) {
+      fields[line.substr(0, separator)] = line.substr(separator + 1);
+    }
+    if (next == std::string::npos) {
+      break;
+    }
+    offset = next + 1;
+  }
+  if (fields["version"] != "1" || fields["target"].empty()) {
+    return false;
+  }
+  try {
+    state->ownerPid = static_cast<DWORD>(std::stoul(fields["owner_pid"]));
+  } catch (...) {
+    return false;
+  }
+  state->targetEndpointId = Utf8ToWide(fields["target"]);
+  for (std::size_t index = 0; index < std::size(kCaptureRoles); ++index) {
+    state->defaultEndpointIds[static_cast<int>(kCaptureRoles[index])] =
+        Utf8ToWide(fields[kCaptureRoleNames[index]]);
+  }
+  return !state->targetEndpointId.empty();
+}
+
+bool IsProcessAlive(DWORD processId) {
+  if (processId == 0) {
+    return false;
+  }
+  HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+  if (!process) {
+    return false;
+  }
+  DWORD exitCode = 0;
+  const bool alive = GetExitCodeProcess(process, &exitCode) && exitCode == STILL_ACTIVE;
+  CloseHandle(process);
+  return alive;
+}
+
+bool RestoreRouteState(const std::wstring& path, bool force, bool report) {
+  if (path.empty()) {
+    return true;
+  }
+  std::string contents;
+  if (!ReadTextFile(path, &contents)) {
+    return true;
+  }
+  RouteState state;
+  if (!ParseRouteState(contents, &state)) {
+    DeleteFileW(path.c_str());
+    if (report) {
+      WriteJsonLine("{\"type\":\"route_restore_discarded\",\"reason\":\"invalid_state\"}");
+    }
+    return false;
+  }
+  if (!force && state.ownerPid != GetCurrentProcessId() && IsProcessAlive(state.ownerPid)) {
+    if (report) {
+      WriteJsonLine("{\"type\":\"route_restore_skipped\",\"reason\":\"owner_active\"}");
+    }
+    return false;
+  }
+
+  IMMDeviceEnumerator* enumerator = nullptr;
+  IPolicyConfig* policy = nullptr;
+  HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                __uuidof(IMMDeviceEnumerator),
+                                reinterpret_cast<void**>(&enumerator));
+  if (SUCCEEDED(hr)) {
+    hr = CreatePolicyConfig(&policy);
+  }
+  bool restoredAny = false;
+  bool success = SUCCEEDED(hr);
+  if (success) {
+    for (const ERole role : kCaptureRoles) {
+      const auto found = state.defaultEndpointIds.find(static_cast<int>(role));
+      if (found == state.defaultEndpointIds.end() || found->second.empty()) {
+        continue;
+      }
+      const std::wstring current = GetDefaultCaptureEndpointId(enumerator, role);
+      if (_wcsicmp(current.c_str(), state.targetEndpointId.c_str()) != 0) {
+        continue;
+      }
+      const HRESULT roleResult = policy->SetDefaultEndpoint(found->second.c_str(), role);
+      success = success && SUCCEEDED(roleResult);
+      restoredAny = restoredAny || SUCCEEDED(roleResult);
+    }
+  }
+  ReleaseCom(policy);
+  ReleaseCom(enumerator);
+  if (success) {
+    DeleteFileW(path.c_str());
+  }
+  if (report) {
+    WriteJsonLine("{\"type\":\"route_restore\",\"restored\":" +
+                  std::string(restoredAny ? "true" : "false") +
+                  ",\"success\":" + std::string(success ? "true" : "false") + "}");
+  }
+  return success;
+}
+
+class DefaultCaptureRouter {
+ public:
+  DefaultCaptureRouter(std::wstring captureEndpointName, std::wstring statePath, bool enabled)
+      : captureEndpointName_(std::move(captureEndpointName)),
+        statePath_(std::move(statePath)), enabled_(enabled) {}
+
+  bool Begin() {
+    if (!enabled_ || active_) {
+      return true;
+    }
+    if (!RestoreRouteState(statePath_, false, false)) {
+      WriteJsonLine("{\"type\":\"route_error\",\"error\":\"stale route recovery failed\"}");
+      return false;
+    }
+
+    IMMDevice* target = nullptr;
+    IMMDeviceEnumerator* enumerator = nullptr;
+    IPolicyConfig* policy = nullptr;
+    HRESULT hr = FindCaptureEndpoint(captureEndpointName_, &target);
+    RouteState state;
+    state.ownerPid = GetCurrentProcessId();
+    if (SUCCEEDED(hr)) {
+      state.targetEndpointId = GetDeviceId(target);
+      hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                            __uuidof(IMMDeviceEnumerator),
+                            reinterpret_cast<void**>(&enumerator));
+    }
+    if (SUCCEEDED(hr)) {
+      for (const ERole role : kCaptureRoles) {
+        state.defaultEndpointIds[static_cast<int>(role)] =
+            GetDefaultCaptureEndpointId(enumerator, role);
+      }
+      if (!WriteTextFileAtomically(statePath_, SerializeRouteState(state))) {
+        hr = HRESULT_FROM_WIN32(GetLastError() == ERROR_SUCCESS ? ERROR_WRITE_FAULT : GetLastError());
+      }
+    }
+    if (SUCCEEDED(hr)) {
+      hr = CreatePolicyConfig(&policy);
+    }
+    if (SUCCEEDED(hr)) {
+      for (const ERole role : kCaptureRoles) {
+        const HRESULT roleResult = policy->SetDefaultEndpoint(state.targetEndpointId.c_str(), role);
+        if (FAILED(roleResult)) {
+          hr = roleResult;
+          break;
+        }
+      }
+    }
+    ReleaseCom(policy);
+    ReleaseCom(enumerator);
+    ReleaseCom(target);
+    if (FAILED(hr)) {
+      RestoreRouteState(statePath_, true, false);
+      WriteJsonLine("{\"type\":\"route_error\",\"error\":\"" +
+                    JsonEscape(HresultText(hr)) + "\"}");
+      return false;
+    }
+    active_ = true;
+    WriteJsonLine("{\"type\":\"route_switched\",\"captureEndpoint\":\"" +
+                  JsonEscape(WideToUtf8(captureEndpointName_)) + "\"}");
+    return true;
+  }
+
+  void Restore() {
+    if (!enabled_ || (!active_ && GetFileAttributesW(statePath_.c_str()) == INVALID_FILE_ATTRIBUTES)) {
+      return;
+    }
+    const bool restored = RestoreRouteState(statePath_, true, false);
+    active_ = false;
+    WriteJsonLine("{\"type\":\"route_restored\",\"success\":" +
+                  std::string(restored ? "true" : "false") + "}");
+  }
+
+ private:
+  std::wstring captureEndpointName_;
+  std::wstring statePath_;
+  bool enabled_ = false;
+  bool active_ = false;
+};
 
 int ListEndpoints(EDataFlow flow, const char* flowName) {
   IMMDeviceEnumerator* enumerator = nullptr;
@@ -220,6 +542,30 @@ int ListAllEndpoints() {
     return renderResult;
   }
   return ListEndpoints(eCapture, "capture");
+}
+
+int ListDefaultCaptureEndpoints() {
+  IMMDeviceEnumerator* enumerator = nullptr;
+  HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                __uuidof(IMMDeviceEnumerator),
+                                reinterpret_cast<void**>(&enumerator));
+  if (FAILED(hr)) {
+    WriteError("Could not create the Windows audio endpoint enumerator: " + HresultText(hr));
+    return 2;
+  }
+  for (std::size_t index = 0; index < std::size(kCaptureRoles); ++index) {
+    IMMDevice* device = nullptr;
+    hr = enumerator->GetDefaultAudioEndpoint(eCapture, kCaptureRoles[index], &device);
+    if (SUCCEEDED(hr)) {
+      WriteJsonLine("{\"type\":\"default_capture\",\"role\":\"" +
+                    std::string(kCaptureRoleNames[index]) + "\",\"name\":\"" +
+                    JsonEscape(WideToUtf8(GetFriendlyName(device))) + "\",\"id\":\"" +
+                    JsonEscape(WideToUtf8(GetDeviceId(device))) + "\"}");
+    }
+    ReleaseCom(device);
+  }
+  ReleaseCom(enumerator);
+  return 0;
 }
 
 class SampleQueue {
@@ -297,21 +643,27 @@ class SampleQueue {
 
 class WechatShortcut {
  public:
-  explicit WechatShortcut(bool enabled) : enabled_(enabled) {}
+  WechatShortcut(bool enabled, std::wstring captureEndpointName, std::wstring routeStatePath)
+      : enabled_(enabled), router_(std::move(captureEndpointName),
+                                  std::move(routeStatePath), enabled) {}
 
   void Touch() {
     lastActivity_.store(GetTickCount64());
   }
 
-  void Press() {
+  bool Press() {
     if (!enabled_) {
-      return;
+      return true;
     }
     std::lock_guard<std::mutex> lock(mutex_);
     lastActivity_.store(GetTickCount64());
     if (held_) {
-      return;
+      return true;
     }
+    if (!router_.Begin()) {
+      return false;
+    }
+    Sleep(kRouteSettleMs);
     INPUT inputs[2]{};
     inputs[0].type = INPUT_KEYBOARD;
     inputs[0].ki.wVk = VK_LCONTROL;
@@ -319,7 +671,14 @@ class WechatShortcut {
     inputs[1].ki.wVk = VK_LWIN;
     if (SendInput(2, inputs, sizeof(INPUT)) == 2) {
       held_ = true;
+      return true;
     }
+    inputs[0].ki.dwFlags = KEYEVENTF_KEYUP;
+    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(2, inputs, sizeof(INPUT));
+    router_.Restore();
+    WriteJsonLine("{\"type\":\"shortcut_error\",\"error\":\"SendInput failed\"}");
+    return false;
   }
 
   void Release() {
@@ -327,18 +686,19 @@ class WechatShortcut {
       return;
     }
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!held_) {
-      return;
+    if (held_) {
+      INPUT inputs[2]{};
+      inputs[0].type = INPUT_KEYBOARD;
+      inputs[0].ki.wVk = VK_LWIN;
+      inputs[0].ki.dwFlags = KEYEVENTF_KEYUP;
+      inputs[1].type = INPUT_KEYBOARD;
+      inputs[1].ki.wVk = VK_LCONTROL;
+      inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+      SendInput(2, inputs, sizeof(INPUT));
+      held_ = false;
+      Sleep(kRouteRestoreDelayMs);
     }
-    INPUT inputs[2]{};
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wVk = VK_LWIN;
-    inputs[0].ki.dwFlags = KEYEVENTF_KEYUP;
-    inputs[1].type = INPUT_KEYBOARD;
-    inputs[1].ki.wVk = VK_LCONTROL;
-    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
-    SendInput(2, inputs, sizeof(INPUT));
-    held_ = false;
+    router_.Restore();
   }
 
   void ReleaseIfStale() {
@@ -352,6 +712,7 @@ class WechatShortcut {
   bool held_ = false;
   std::atomic<ULONGLONG> lastActivity_{0};
   std::mutex mutex_;
+  DefaultCaptureRouter router_;
 };
 
 void ProtocolReader(HANDLE input, SampleQueue& queue, WechatShortcut& shortcut,
@@ -376,7 +737,10 @@ void ProtocolReader(HANDLE input, SampleQueue& queue, WechatShortcut& shortcut,
     switch (header.type) {
       case kStart:
         queue.Start();
-        shortcut.Press();
+        if (!shortcut.Press()) {
+          queue.Cancel();
+          exiting.store(true);
+        }
         break;
       case kPcm16:
         if (payload.size() % sizeof(std::int16_t) != 0) {
@@ -406,7 +770,13 @@ void ProtocolReader(HANDLE input, SampleQueue& queue, WechatShortcut& shortcut,
   shortcut.Release();
 }
 
-int RunPublisher(const std::wstring& endpointName, bool wechatShortcutEnabled) {
+int RunPublisher(const std::wstring& endpointName,
+                 const std::wstring& captureEndpointName,
+                 const std::wstring& routeStatePath,
+                 bool wechatShortcutEnabled) {
+  if (wechatShortcutEnabled) {
+    RestoreRouteState(routeStatePath, false, true);
+  }
   IMMDevice* endpoint = nullptr;
   HRESULT hr = FindRenderEndpoint(endpointName, &endpoint);
   if (FAILED(hr)) {
@@ -480,7 +850,7 @@ int RunPublisher(const std::wstring& endpointName, bool wechatShortcutEnabled) {
   }
 
   SampleQueue queue;
-  WechatShortcut shortcut(wechatShortcutEnabled);
+  WechatShortcut shortcut(wechatShortcutEnabled, captureEndpointName, routeStatePath);
   std::atomic<bool> exiting{false};
   std::thread reader(ProtocolReader, GetStdHandle(STD_INPUT_HANDLE),
                      std::ref(queue), std::ref(shortcut), std::ref(exiting));
@@ -538,13 +908,43 @@ int wmain(int argc, wchar_t** argv) {
   int result = 0;
   if (argc == 2 && std::wstring(argv[1]) == L"--list") {
     result = ListAllEndpoints();
-  } else if ((argc == 3 || argc == 4) && std::wstring(argv[1]) == L"--endpoint" &&
-             (argc == 3 || std::wstring(argv[3]) == L"--wechat-shortcut")) {
-    const bool wechatShortcut = argc == 4;
-    result = RunPublisher(argv[2], wechatShortcut);
+  } else if (argc == 2 && std::wstring(argv[1]) == L"--list-default-capture") {
+    result = ListDefaultCaptureEndpoints();
+  } else if (argc == 3 && std::wstring(argv[1]) == L"--restore-route") {
+    result = RestoreRouteState(argv[2], false, true) ? 0 : 9;
+  } else if (argc >= 3 && std::wstring(argv[1]) == L"--endpoint") {
+    const std::wstring endpointName = argv[2];
+    std::wstring captureEndpointName;
+    std::wstring routeStatePath;
+    bool wechatShortcut = false;
+    bool valid = true;
+    for (int index = 3; index < argc; ++index) {
+      const std::wstring option = argv[index];
+      if (option == L"--wechat-shortcut") {
+        wechatShortcut = true;
+      } else if (option == L"--capture-endpoint" && index + 1 < argc) {
+        captureEndpointName = argv[++index];
+      } else if (option == L"--route-state" && index + 1 < argc) {
+        routeStatePath = argv[++index];
+      } else {
+        valid = false;
+        break;
+      }
+    }
+    if (wechatShortcut && (captureEndpointName.empty() || routeStatePath.empty())) {
+      valid = false;
+    }
+    result = valid
+        ? RunPublisher(endpointName, captureEndpointName, routeStatePath, wechatShortcut)
+        : 1;
   } else {
-    WriteError("Usage: vibecoding-virtual-mic-publisher.exe --list | --endpoint <friendly name> [--wechat-shortcut]");
     result = 1;
+  }
+  if (result == 1) {
+    WriteError("Usage: vibecoding-virtual-mic-publisher.exe --list | --list-default-capture | "
+               "--restore-route <state path> | --endpoint <render name> "
+               "[--wechat-shortcut --capture-endpoint <capture name> "
+               "--route-state <state path>]");
   }
   CoUninitialize();
   return result;

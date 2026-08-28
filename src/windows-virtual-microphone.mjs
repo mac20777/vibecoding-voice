@@ -9,15 +9,46 @@ import {
   encodeVirtualMicrophoneMessage
 } from "./virtual-microphone-protocol.mjs";
 
-export const VIRTUAL_MIC_RENDER_ENDPOINT = "VibeCoding Remote Microphone Input";
-export const VIRTUAL_MIC_CAPTURE_ENDPOINT = "VibeCoding Remote Microphone";
+export const VB_CABLE_DOWNLOAD_URL = "https://vb-audio.com/Cable/index.htm";
+export const VIRTUAL_MIC_RENDER_ENDPOINT = "CABLE Input (VB-Audio Virtual Cable)";
+export const VIRTUAL_MIC_CAPTURE_ENDPOINT = "CABLE Output (VB-Audio Virtual Cable)";
+export const LEGACY_VIRTUAL_MIC_RENDER_ENDPOINT = "VibeCoding Remote Microphone Input";
+export const LEGACY_VIRTUAL_MIC_CAPTURE_ENDPOINT = "VibeCoding Remote Microphone";
 
-function matchesVirtualMicrophoneEndpoint(flow, name) {
+export function classifyVirtualMicrophoneEndpoint(flow, name) {
   const normalized = String(name || "").trim().toLowerCase();
-  const exact = flow === "render"
-    ? VIRTUAL_MIC_RENDER_ENDPOINT.toLowerCase()
-    : VIRTUAL_MIC_CAPTURE_ENDPOINT.toLowerCase();
-  return normalized === exact || normalized.includes("vibecoding remote microphone");
+  if (!normalized) {
+    return null;
+  }
+  const cableDirection = flow === "render" ? "cable input" : "cable output";
+  if (normalized.includes(cableDirection) &&
+      (normalized.includes("vb-audio") || normalized.includes("vb audio"))) {
+    return "vb_cable";
+  }
+  const legacyExact = flow === "render"
+    ? LEGACY_VIRTUAL_MIC_RENDER_ENDPOINT.toLowerCase()
+    : LEGACY_VIRTUAL_MIC_CAPTURE_ENDPOINT.toLowerCase();
+  if (normalized === legacyExact || normalized.includes("vibecoding remote microphone")) {
+    return "vibecoding_legacy";
+  }
+  return null;
+}
+
+export function selectVirtualMicrophonePair(endpoints = []) {
+  for (const provider of ["vb_cable", "vibecoding_legacy"]) {
+    const renderEndpoint = endpoints.find(
+      (endpoint) => endpoint.flow === "render" &&
+        classifyVirtualMicrophoneEndpoint("render", endpoint.name) === provider
+    );
+    const captureEndpoint = endpoints.find(
+      (endpoint) => endpoint.flow === "capture" &&
+        classifyVirtualMicrophoneEndpoint("capture", endpoint.name) === provider
+    );
+    if (renderEndpoint && captureEndpoint) {
+      return { provider, renderEndpoint, captureEndpoint };
+    }
+  }
+  return null;
 }
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -40,15 +71,48 @@ export function resolveVirtualMicrophonePublisherPath(env = process.env) {
   );
 }
 
+export function resolveVirtualMicrophoneRouteStatePath(env = process.env) {
+  const explicit = String(env.VIBE_VIRTUAL_MIC_ROUTE_STATE_PATH || "").trim();
+  if (explicit) {
+    return path.resolve(explicit);
+  }
+  const localAppData = String(env.LOCALAPPDATA || env.TEMP || "").trim();
+  if (!localAppData) {
+    return path.join(PROJECT_ROOT, "tmp", "virtual-microphone-route-state.txt");
+  }
+  return path.join(localAppData, "VibeCoding Voice", "virtual-microphone-route-state.txt");
+}
+
+export function buildVirtualMicrophonePublisherArgs({
+  renderEndpointName,
+  captureEndpointName,
+  routeStatePath,
+  wechatShortcut = false
+} = {}) {
+  const args = ["--endpoint", String(renderEndpointName || VIRTUAL_MIC_RENDER_ENDPOINT)];
+  if (wechatShortcut) {
+    args.push(
+      "--wechat-shortcut",
+      "--capture-endpoint",
+      String(captureEndpointName || VIRTUAL_MIC_CAPTURE_ENDPOINT),
+      "--route-state",
+      String(routeStatePath || resolveVirtualMicrophoneRouteStatePath())
+    );
+  }
+  return args;
+}
+
 export function inspectWindowsVirtualMicrophone({ executablePath, env = process.env } = {}) {
   const resolvedPath = executablePath || resolveVirtualMicrophonePublisherPath(env);
+  const routeStatePath = resolveVirtualMicrophoneRouteStatePath(env);
   if (process.platform !== "win32") {
     return Promise.resolve({
       supported: false,
       publisherPresent: false,
       renderEndpointPresent: false,
       captureEndpointPresent: false,
-      ready: false
+      ready: false,
+      driverDownloadUrl: VB_CABLE_DOWNLOAD_URL
     });
   }
   if (!fs.existsSync(resolvedPath)) {
@@ -57,10 +121,11 @@ export function inspectWindowsVirtualMicrophone({ executablePath, env = process.
       publisherPresent: false,
       renderEndpointPresent: false,
       captureEndpointPresent: false,
-      ready: false
+      ready: false,
+      driverDownloadUrl: VB_CABLE_DOWNLOAD_URL
     });
   }
-  return new Promise((resolve) => {
+  const inspect = () => new Promise((resolve) => {
     execFile(resolvedPath, ["--list"], {
       encoding: "utf8",
       windowsHide: true,
@@ -77,14 +142,9 @@ export function inspectWindowsVirtualMicrophone({ executablePath, env = process.
             return [];
           }
         });
-      const renderEndpoint = endpoints.find(
-        (endpoint) => endpoint.flow === "render" &&
-          matchesVirtualMicrophoneEndpoint("render", endpoint.name)
-      );
-      const captureEndpoint = endpoints.find(
-        (endpoint) => endpoint.flow === "capture" &&
-          matchesVirtualMicrophoneEndpoint("capture", endpoint.name)
-      );
+      const pair = selectVirtualMicrophonePair(endpoints);
+      const renderEndpoint = pair?.renderEndpoint;
+      const captureEndpoint = pair?.captureEndpoint;
       const renderEndpointPresent = Boolean(renderEndpoint);
       const captureEndpointPresent = Boolean(captureEndpoint);
       resolve({
@@ -94,8 +154,33 @@ export function inspectWindowsVirtualMicrophone({ executablePath, env = process.
         captureEndpointPresent,
         renderEndpointName: renderEndpoint?.name || null,
         captureEndpointName: captureEndpoint?.name || null,
+        provider: pair?.provider || null,
+        driverDownloadUrl: VB_CABLE_DOWNLOAD_URL,
         ready: !error && renderEndpointPresent && captureEndpointPresent,
         error: error ? error.message : null
+      });
+    });
+  });
+  if (!fs.existsSync(routeStatePath)) {
+    return inspect();
+  }
+  return new Promise((resolve) => {
+    execFile(resolvedPath, ["--restore-route", routeStatePath], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 5_000,
+      maxBuffer: 1024 * 1024
+    }, (recoveryError) => {
+      inspect().then((inspection) => {
+        if (!recoveryError) {
+          resolve(inspection);
+          return;
+        }
+        resolve({
+          ...inspection,
+          ready: false,
+          error: `无法恢复上次使用前的默认麦克风：${recoveryError.message}`
+        });
       });
     });
   });
@@ -127,9 +212,18 @@ function waitForEvent(emitter, eventName, timeoutMs, errorMessage) {
 }
 
 export class WindowsVirtualMicrophonePublisher {
-  constructor({ executablePath, endpointName, wechatShortcut = false, log } = {}) {
+  constructor({
+    executablePath,
+    endpointName,
+    captureEndpointName,
+    routeStatePath,
+    wechatShortcut = false,
+    log
+  } = {}) {
     this.executablePath = executablePath || resolveVirtualMicrophonePublisherPath();
     this.endpointName = endpointName || VIRTUAL_MIC_RENDER_ENDPOINT;
+    this.captureEndpointName = captureEndpointName || VIRTUAL_MIC_CAPTURE_ENDPOINT;
+    this.routeStatePath = routeStatePath || resolveVirtualMicrophoneRouteStatePath();
     this.wechatShortcut = wechatShortcut === true;
     this.log = typeof log === "function" ? log : () => {};
     this.child = null;
@@ -153,11 +247,22 @@ export class WindowsVirtualMicrophonePublisher {
     const inspection = await inspectWindowsVirtualMicrophone({
       executablePath: this.executablePath
     });
-    const resolvedEndpointName = inspection.renderEndpointName || this.endpointName;
-    const args = ["--endpoint", resolvedEndpointName];
-    if (this.wechatShortcut) {
-      args.push("--wechat-shortcut");
+    if (!inspection.ready) {
+      throw new Error(
+        `未找到 VB-CABLE 虚拟声卡。请从 ${VB_CABLE_DOWNLOAD_URL} 下载并安装，重启 Windows 后再试。`
+      );
     }
+    const resolvedEndpointName = inspection.renderEndpointName || this.endpointName;
+    const resolvedCaptureEndpointName = inspection.captureEndpointName || this.captureEndpointName;
+    if (this.wechatShortcut) {
+      fs.mkdirSync(path.dirname(this.routeStatePath), { recursive: true });
+    }
+    const args = buildVirtualMicrophonePublisherArgs({
+      renderEndpointName: resolvedEndpointName,
+      captureEndpointName: resolvedCaptureEndpointName,
+      routeStatePath: this.routeStatePath,
+      wechatShortcut: this.wechatShortcut
+    });
     const child = spawn(this.executablePath, args, {
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"]
