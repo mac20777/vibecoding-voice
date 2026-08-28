@@ -1,0 +1,603 @@
+[Version]
+Signature   = "$Windows NT$"
+Class       = MEDIA
+Provider    = %ProviderName%
+ClassGUID   = {4d36e96c-e325-11ce-bfc1-08002be10318}
+DriverVer   = 08/28/2026, 0.5.0.0
+CatalogFile = VibeCodingRemoteMic.cat
+PnpLockDown = 1
+
+[SourceDisksNames]
+222="SYSVAD Driver Disk","",222
+
+[SourceDisksFiles]
+VibeCodingRemoteMic.sys=222
+
+[SignatureAttributes]
+VibeCodingRemoteMic.sys=SignatureAttributes.DRM
+
+[SignatureAttributes.DRM]
+DRMLevel=1300
+
+[Manufacturer]
+%MfgName%=SYSVAD,NT$ARCH$.10.0...22621
+
+[SYSVAD.NT$ARCH$.10.0...22621]
+%SYSVAD_SA.DeviceDesc%=SYSVAD_SA, Root\VibeCodingVirtualMicrophone
+
+[DestinationDirs]
+SYSVAD_SA.CopyList=13 ; 13=Package's DriverStore directory
+
+;======================================================
+; SYSVAD_SA
+;======================================================
+[SYSVAD_SA.CopyList]
+VibeCodingRemoteMic.sys
+
+[SYSVAD_SA.AddReg]
+HKR,,AssociatedFilters,,"wdmaud,swmidi,redbook"
+HKR,,Driver,,VibeCodingRemoteMic.sys
+
+;
+; For demo only, please review these power management settings for your architecture. 
+;
+HKR,PowerSettings,SingleComponentMultiFxStates,3,1,0,0,0  ; Turn on multi Fx support.
+HKR,PowerSettings,ConservationIdleTime,3,3,0,0,0          ; 3 seconds for idle power management when on battery
+HKR,PowerSettings,PerformanceIdleTime,3,3,0,0,0           ; 3 seconds for idle power management when on AC power
+HKR,PowerSettings,IdlePowerState,3,3,0,0,0                ; go to D3 for idle power management
+
+HKR,Drivers,SubClasses,,"wave,midi,mixer"
+
+HKR,Drivers\wave\wdmaud.drv,Driver,,wdmaud.drv
+HKR,Drivers\midi\wdmaud.drv,Driver,,wdmaud.drv
+HKR,Drivers\mixer\wdmaud.drv,Driver,,wdmaud.drv
+
+HKR,Drivers\wave\wdmaud.drv,Description,,%SYSVAD_SA.DeviceDesc%
+HKR,Drivers\midi\wdmaud.drv,Description,,%SYSVAD_MIDI%
+HKR,Drivers\mixer\wdmaud.drv,Description,,%SYSVAD_SA.DeviceDesc%
+
+HKR,%MEDIA_CATEGORIES%\%MicArray1CustomNameGUID%,Name,,%MicArray1CustomName%
+HKR,%MEDIA_CATEGORIES%\%MicArray2CustomNameGUID%,Name,,%MicArray2CustomName%
+HKR,%MEDIA_CATEGORIES%\%MicArray3CustomNameGUID%,Name,,%MicArray3CustomName%
+HKR,%MEDIA_CATEGORIES%\%MicInCustomNameGUID%,Name,,%MicInCustomName%
+
+
+;======================================================
+; render interfaces: speaker (internal)
+;======================================================
+[SYSVAD.I.WaveSpeaker]
+AddReg=SYSVAD.I.WaveSpeaker.AddReg
+
+[SYSVAD.I.WaveSpeaker.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.WaveSpeaker.szPname%
+
+[SYSVAD.I.TopologySpeaker]
+AddReg=SYSVAD.I.TopologySpeaker.AddReg
+
+[SYSVAD.I.TopologySpeaker.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.TopologySpeaker.szPname%
+
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
+HKR,FX\0\%CAPXSAMPLEAPOMFX_PROPERTYSTORE_CONTEXT%,%PKEY_FX_Association%,,%KSNODETYPE_ANY%
+HKR,FX\0\%CAPXSAMPLEAPOSFX_PROPERTYSTORE_CONTEXT%,%PKEY_FX_Association%,,%KSNODETYPE_ANY%
+HKR,FX\0\%CAPXSAMPLEAPOSFX_PROPERTYSTORE_CONTEXT%\User,%PKEY_Endpoint_Enable_Channel_Swap_SFX%,0x00010001,0x0
+
+; The following lines opt-in to pull mode.
+HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
+
+;======================================================
+; render interfaces: HDMI (external)
+;======================================================
+[SYSVAD.I.WaveHdmi]
+AddReg=SYSVAD.I.WaveHdmi.AddReg
+[SYSVAD.I.WaveHdmi.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.WaveHdmi.szPname%
+
+[SYSVAD.I.TopologyHdmi]
+AddReg=SYSVAD.I.TopologyHdmi.AddReg
+[SYSVAD.I.TopologyHdmi.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.TopologyHdmi.szPname%
+; The following lines opt-in to pull mode.
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
+HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
+
+;======================================================
+; render interfaces: SPDIF (external)
+;======================================================
+[SYSVAD.I.WaveSpdif]
+AddReg=SYSVAD.I.WaveSpdif.AddReg
+[SYSVAD.I.WaveSpdif.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.WaveSpdif.szPname%
+
+[SYSVAD.I.TopologySpdif]
+AddReg=SYSVAD.I.TopologySpdif.AddReg
+[SYSVAD.I.TopologySpdif.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.TopologySpdif.szPname%
+; The following lines opt-in to pull mode.
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
+HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
+
+;======================================================
+; render interfaces: speaker (external: headphone)
+;======================================================
+[SYSVAD.I.WaveSpeakerHeadphone]
+AddReg=SYSVAD.I.WaveSpeakerHeadphone.AddReg
+[SYSVAD.I.WaveSpeakerHeadphone.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.WaveSpeakerHeadphone.szPname%
+
+[SYSVAD.I.TopologySpeakerHeadphone]
+AddReg=SYSVAD.I.TopologySpeakerHeadphone.AddReg
+[SYSVAD.I.TopologySpeakerHeadphone.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.TopologySpeakerHeadphone.szPname%
+; The following lines opt-in to pull mode.
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
+HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
+
+;======================================================
+; capture interfaces: mic in (external: headphone)
+;======================================================
+[SYSVAD.I.WaveMicIn]
+AddReg=SYSVAD.I.WaveMicIn.AddReg
+[SYSVAD.I.WaveMicIn.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.WaveMicIn.szPname%
+
+[SYSVAD.I.TopologyMicIn]
+AddReg=SYSVAD.I.TopologyMicIn.AddReg
+[SYSVAD.I.TopologyMicIn.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.TopologyMicIn.szPname%
+; The following lines opt-in to pull mode.
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
+HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
+
+;======================================================
+; capture interfaces: mic array (internal: front)
+;======================================================
+[SYSVAD.I.WaveMicArray1]
+AddReg=SYSVAD.I.WaveMicArray1.AddReg
+[SYSVAD.I.WaveMicArray1.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.WaveMicArray1.szPname%
+
+[SYSVAD.I.TopologyMicArray1]
+AddReg=SYSVAD.I.TopologyMicArray1.AddReg,MsApoFxProxyEFX.I.Association0.AddReg
+
+[SYSVAD.I.TopologyMicArray1.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.TopologyMicArray1.szPname%
+
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
+HKR,FX\0\%CAPXSAMPLEAPOMFX_PROPERTYSTORE_CONTEXT%,%PKEY_FX_Association%,,%KSNODETYPE_ANY%
+HKR,FX\0\%CAPXSAMPLEAPOSFX_PROPERTYSTORE_CONTEXT%,%PKEY_FX_Association%,,%KSNODETYPE_ANY%
+HKR,FX\0\%CAPXSAMPLEAPOSFX_PROPERTYSTORE_CONTEXT%\User,%PKEY_Endpoint_Enable_Channel_Swap_SFX%,0x00010001,0x0
+
+; The following lines opt-in to pull mode.
+HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
+
+; The following line overrides the default volume (in dB) for an endpoint.
+; It is only applicable when hardware volume is not implemented.
+; Float value expressed in fixed point 16.16 format and stored as a DWORD.
+; 10 dB
+;HKR,EP\0,%PKEY_AudioEndpoint_Default_VolumeInDb%,0x00010001,0xA0000
+;-10 dB
+;HKR,EP\0,%PKEY_AudioEndpoint_Default_VolumeInDb%,0x00010001,0xFFF60000
+
+;======================================================
+; capture interfaces: mic array (internal: back)
+;======================================================
+[SYSVAD.I.WaveMicArray2]
+AddReg=SYSVAD.I.WaveMicArray2.AddReg
+[SYSVAD.I.WaveMicArray2.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.WaveMicArray2.szPname%
+
+[SYSVAD.I.TopologyMicArray2]
+AddReg=SYSVAD.I.TopologyMicArray2.AddReg
+
+[SYSVAD.I.TopologyMicArray2.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.TopologyMicArray2.szPname%
+
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
+HKR,FX\0\%CAPXSAMPLEAPOMFX_PROPERTYSTORE_CONTEXT%,%PKEY_FX_Association%,,%KSNODETYPE_ANY%
+HKR,FX\0\%CAPXSAMPLEAPOSFX_PROPERTYSTORE_CONTEXT%,%PKEY_FX_Association%,,%KSNODETYPE_ANY%
+HKR,FX\0\%CAPXSAMPLEAPOSFX_PROPERTYSTORE_CONTEXT%\User,%PKEY_Endpoint_Enable_Channel_Swap_SFX%,0x00010001,0x0
+
+; The following lines opt-in to pull mode.
+HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
+
+;======================================================
+; capture interfaces: mic array (internal: combined: front/back)
+;======================================================
+[SYSVAD.I.WaveMicArray3]
+AddReg=SYSVAD.I.WaveMicArray3.AddReg
+[SYSVAD.I.WaveMicArray3.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.WaveMicArray3.szPname%
+
+[SYSVAD.I.TopologyMicArray3]
+AddReg=SYSVAD.I.TopologyMicArray3.AddReg
+
+[SYSVAD.I.TopologyMicArray3.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.TopologyMicArray3.szPname%
+
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
+HKR,FX\0\%CAPXSAMPLEAPOMFX_PROPERTYSTORE_CONTEXT%,%PKEY_FX_Association%,,%KSNODETYPE_ANY%
+HKR,FX\0\%CAPXSAMPLEAPOSFX_PROPERTYSTORE_CONTEXT%,%PKEY_FX_Association%,,%KSNODETYPE_ANY%
+HKR,FX\0\%CAPXSAMPLEAPOSFX_PROPERTYSTORE_CONTEXT%\User,%PKEY_Endpoint_Enable_Channel_Swap_SFX%,0x00010001,0x0
+
+; The following lines opt-in to pull mode.
+HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
+
+;======================================================
+; render interfaces: Bluetooth HFP speaker (external)
+;======================================================
+[SYSVAD.I.WaveBthHfpSpeaker]
+AddReg=SYSVAD.I.WaveBthHfpSpeaker.AddReg
+[SYSVAD.I.WaveBthHfpSpeaker.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.WaveBthHfpSpeaker.szPname%
+
+[SYSVAD.I.TopologyBthHfpSpeaker]
+AddReg=SYSVAD.I.TopologyBthHfpSpeaker.AddReg
+[SYSVAD.I.TopologyBthHfpSpeaker.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.TopologyBthHfpSpeaker.szPname%
+; The following lines opt-in to pull mode.
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
+HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
+
+;======================================================
+; capture interfaces: Bluetooth HFP mic (external)
+;======================================================
+[SYSVAD.I.WaveBthHfpMic]
+AddReg=SYSVAD.I.WaveBthHfpMic.AddReg
+[SYSVAD.I.WaveBthHfpMic.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.WaveBthHfpMic.szPname%
+
+[SYSVAD.I.TopologyBthHfpMic]
+AddReg=SYSVAD.I.TopologyBthHfpMic.AddReg,MsApoFxProxy.I.Association0.AddReg
+[SYSVAD.I.TopologyBthHfpMic.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.TopologyBthHfpMic.szPname%
+; The following lines opt-in to pull mode.
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
+HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
+
+;======================================================
+; render interfaces: USB Headset speaker (external)
+;======================================================
+[SYSVAD.I.WaveUsbHsSpeaker]
+AddReg=SYSVAD.I.WaveUsbHsSpeaker.AddReg
+[SYSVAD.I.WaveUsbHsSpeaker.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.WaveUsbHsSpeaker.szPname%
+
+[SYSVAD.I.TopologyUsbHsSpeaker]
+AddReg=SYSVAD.I.TopologyUsbHsSpeaker.AddReg
+[SYSVAD.I.TopologyUsbHsSpeaker.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.TopologyUsbHsSpeaker.szPname%
+; The following lines opt-in to pull mode.
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
+HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
+
+;======================================================
+; capture interfaces: USB Headset mic (external)
+;======================================================
+[SYSVAD.I.WaveUsbHsMic]
+AddReg=SYSVAD.I.WaveUsbHsMic.AddReg
+[SYSVAD.I.WaveUsbHsMic.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.WaveUsbHsMic.szPname%
+
+[SYSVAD.I.TopologyUsbHsMic]
+AddReg=SYSVAD.I.TopologyUsbHsMic.AddReg,MsApoFxProxy.I.Association0.AddReg
+[SYSVAD.I.TopologyUsbHsMic.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%SYSVAD.TopologyUsbHsMic.szPname%
+; The following lines opt-in to pull mode.
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
+HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
+
+;======================================================
+; MsApoFxProxy APO registry
+;======================================================
+[MsApoFxProxy.I.Association0.AddReg]
+HKR,FX\0,%PKEY_FX_Association%,,%KSNODETYPE_ANY%
+HKR,FX\0,%PKEY_FX_EndpointEffectClsid%,,%FX_DISCOVER_EFFECTS_APO_CLSID%
+
+[MsApoFxProxyEFX.I.Association0.AddReg]
+HKR,FX\0,%PKEY_FX_Association%,,%KSNODETYPE_ANY%
+HKR,FX\0,%PKEY_FX_KeywordDetector_ModeEffectClsid%,,%FX_DISCOVER_EFFECTS_APO_CLSID%
+
+;======================================================
+; SYSVAD_SA
+;======================================================
+[SYSVAD_SA.NT]
+Include=ks.inf,wdmaudio.inf
+Needs=KS.Registration, WDMAUDIO.Registration
+CopyFiles=SYSVAD_SA.CopyList
+AddReg=SYSVAD_SA.AddReg
+
+[SYSVAD_SA.NT.Interfaces]
+;
+; Interfaces for speaker (internal) render endpoint.
+;
+AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_WaveSpeaker%, SYSVAD.I.WaveSpeaker
+AddInterface=%KSCATEGORY_RENDER%, %KSNAME_WaveSpeaker%, SYSVAD.I.WaveSpeaker
+AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveSpeaker%, SYSVAD.I.WaveSpeaker
+AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_TopologySpeaker%, SYSVAD.I.TopologySpeaker
+AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologySpeaker%, SYSVAD.I.TopologySpeaker
+
+;
+; Interfaces for speaker (external: headphone) render endpoint.
+;
+AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_WaveSpeakerHeadphone%, SYSVAD.I.WaveSpeakerHeadphone
+AddInterface=%KSCATEGORY_RENDER%, %KSNAME_WaveSpeakerHeadphone%, SYSVAD.I.WaveSpeakerHeadphone
+AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveSpeakerHeadphone%, SYSVAD.I.WaveSpeakerHeadphone
+AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_TopologySpeakerHeadphone%, SYSVAD.I.TopologySpeakerHeadphone
+AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologySpeakerHeadphone%, SYSVAD.I.TopologySpeakerHeadphone
+
+;
+; Interfaces for HDMI (external) render endpoint.
+;
+AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_WaveHdmi%, SYSVAD.I.WaveHdmi
+AddInterface=%KSCATEGORY_RENDER%, %KSNAME_WaveHdmi%, SYSVAD.I.WaveHdmi
+AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveHdmi%, SYSVAD.I.WaveHdmi
+AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_TopologyHdmi%, SYSVAD.I.TopologyHdmi
+AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyHdmi%, SYSVAD.I.TopologyHdmi
+
+;
+; Interfaces for SPDIF (external) render endpoint.
+;
+AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_WaveSpdif%, SYSVAD.I.WaveSpdif
+AddInterface=%KSCATEGORY_RENDER%, %KSNAME_WaveSpdif%, SYSVAD.I.WaveSpdif
+AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveSpdif%, SYSVAD.I.WaveSpdif
+AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_TopologySpdif%, SYSVAD.I.TopologySpdif
+AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologySpdif%, SYSVAD.I.TopologySpdif
+
+;
+; Interfaces for microphone (external: headphone) capture endpoint 
+;
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_WaveMicIn%, SYSVAD.I.WaveMicIn
+AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveMicIn%, SYSVAD.I.WaveMicIn
+AddInterface=%KSCATEGORY_CAPTURE%,  %KSNAME_WaveMicIn%, SYSVAD.I.WaveMicIn
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_TopologyMicIn%, SYSVAD.I.TopologyMicIn
+AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyMicIn%, SYSVAD.I.TopologyMicIn
+
+;
+; Interfaces for microphone array 1 (internal: front) capture endpoint.
+;
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_WaveMicArray1%, SYSVAD.I.WaveMicArray1
+AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveMicArray1%, SYSVAD.I.WaveMicArray1
+AddInterface=%KSCATEGORY_CAPTURE%,  %KSNAME_WaveMicArray1%, SYSVAD.I.WaveMicArray1
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_TopologyMicArray1%, SYSVAD.I.TopologyMicArray1
+AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyMicArray1%, SYSVAD.I.TopologyMicArray1
+
+;
+; Interfaces for microphone array 2 (internal: back) capture endpoint.
+;
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_WaveMicArray2%, SYSVAD.I.WaveMicArray2
+AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveMicArray2%, SYSVAD.I.WaveMicArray2
+AddInterface=%KSCATEGORY_CAPTURE%,  %KSNAME_WaveMicArray2%, SYSVAD.I.WaveMicArray2
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_TopologyMicArray2%, SYSVAD.I.TopologyMicArray2
+AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyMicArray2%, SYSVAD.I.TopologyMicArray2
+
+;
+; Interfaces for microphone array 3 (internal: combined: front/back) capture endpoint.
+;
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_WaveMicArray3%, SYSVAD.I.WaveMicArray3
+AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveMicArray3%, SYSVAD.I.WaveMicArray3
+AddInterface=%KSCATEGORY_CAPTURE%,  %KSNAME_WaveMicArray3%, SYSVAD.I.WaveMicArray3
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_TopologyMicArray3%, SYSVAD.I.TopologyMicArray3
+AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyMicArray3%, SYSVAD.I.TopologyMicArray3
+
+;
+; Interfaces for Bluetooth HFP speaker (external) render endpoint.
+;
+AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_WaveBthHfpSpeaker%, SYSVAD.I.WaveBthHfpSpeaker
+AddInterface=%KSCATEGORY_RENDER%, %KSNAME_WaveBthHfpSpeaker%, SYSVAD.I.WaveBthHfpSpeaker
+AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveBthHfpSpeaker%, SYSVAD.I.WaveBthHfpSpeaker
+AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_TopologyBthHfpSpeaker%, SYSVAD.I.TopologyBthHfpSpeaker
+AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyBthHfpSpeaker%, SYSVAD.I.TopologyBthHfpSpeaker
+
+;
+; Interfaces for Bluetooth HFP mic (external) capture endpoint 
+;
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_WaveBthHfpMic%, SYSVAD.I.WaveBthHfpMic
+AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveBthHfpMic%, SYSVAD.I.WaveBthHfpMic
+AddInterface=%KSCATEGORY_CAPTURE%,  %KSNAME_WaveBthHfpMic%, SYSVAD.I.WaveBthHfpMic
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_TopologyBthHfpMic%, SYSVAD.I.TopologyBthHfpMic
+AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyBthHfpMic%, SYSVAD.I.TopologyBthHfpMic
+
+;
+; Interfaces for USB Headset speaker (external) render endpoint.
+;
+AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_WaveUsbHsSpeaker%, SYSVAD.I.WaveUsbHsSpeaker
+AddInterface=%KSCATEGORY_RENDER%, %KSNAME_WaveUsbHsSpeaker%, SYSVAD.I.WaveUsbHsSpeaker
+AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveUsbHsSpeaker%, SYSVAD.I.WaveUsbHsSpeaker
+AddInterface=%KSCATEGORY_AUDIO%, %KSNAME_TopologyUsbHsSpeaker%, SYSVAD.I.TopologyUsbHsSpeaker
+AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyUsbHsSpeaker%, SYSVAD.I.TopologyUsbHsSpeaker
+
+;
+; Interfaces for USB Headset mic (external) capture endpoint 
+;
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_WaveUsbHsMic%, SYSVAD.I.WaveUsbHsMic
+AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveUsbHsMic%, SYSVAD.I.WaveUsbHsMic
+AddInterface=%KSCATEGORY_CAPTURE%,  %KSNAME_WaveUsbHsMic%, SYSVAD.I.WaveUsbHsMic
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_TopologyUsbHsMic%, SYSVAD.I.TopologyUsbHsMic
+AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyUsbHsMic%, SYSVAD.I.TopologyUsbHsMic
+
+[SYSVAD_SA.NT.Services]
+AddService=sysvad_componentizedaudiosample,0x00000002,sysvad_ComponentizedAudioSample_Service_Inst
+
+[sysvad_ComponentizedAudioSample_Service_Inst]
+DisplayName=%SYSVAD_ComponentizedAudioSample.SvcDesc%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%13%\VibeCodingRemoteMic.sys
+
+[SYSVAD_SA.NT.HW]
+AddReg = AUDIOHW.AddReg
+
+[AUDIOHW.AddReg]
+; FILE_DEVICE_SOUND
+HKR,,DeviceType,0x10001,0x0000001D
+; SDDL_DEVOBJ_SYS_ALL_ADM_RWX_WORLD_RWX_RES_RWX
+HKR,,Security,,"D:P(A;;GA;;;SY)(A;;GRGWGX;;;BA)(A;;GRGWGX;;;WD)(A;;GRGWGX;;;RC)"
+
+
+;======================================================
+; WDF
+;======================================================
+[SYSVAD_SA.NT.Wdf]
+KmdfService = sysvad_componentizedaudiosample, SYSVAD_SA_WdfSect
+[SYSVAD_SA_WdfSect]
+KmdfLibraryVersion = $KMDFVERSION$
+
+;======================================================
+; COMMON
+;======================================================
+[Strings]
+
+;Non-localizable
+
+KSNAME_WaveSpeaker="WaveSpeaker"
+KSNAME_TopologySpeaker="TopologySpeaker"
+
+
+KSNAME_WaveSpeakerHeadphone="WaveSpeakerHeadphone"
+KSNAME_TopologySpeakerHeadphone="TopologySpeakerHeadphone"
+
+KSNAME_WaveHdmi="WaveHdmi"
+KSNAME_TopologyHdmi= "TopologyHdmi"
+
+KSNAME_WaveSpdif="WaveSpdif"
+KSNAME_TopologySpdif= "TopologySpdif"
+
+KSNAME_WaveMicIn="WaveMicIn"
+KSNAME_TopologyMicIn="TopologyMicIn"
+
+KSNAME_WaveMicArray1="WaveMicArray1"
+KSNAME_TopologyMicArray1="TopologyMicArray1"
+
+KSNAME_WaveMicArray2="WaveMicArray2"
+KSNAME_TopologyMicArray2="TopologyMicArray2"
+
+KSNAME_WaveMicArray3="WaveMicArray3"
+KSNAME_TopologyMicArray3="TopologyMicArray3"
+
+KSNAME_WaveBthHfpSpeaker="WaveBthHfpSpeaker"
+KSNAME_TopologyBthHfpSpeaker="TopologyBthHfpSpeaker"
+
+KSNAME_WaveBthHfpMic="WaveBthHfpMic"
+KSNAME_TopologyBthHfpMic="TopologyBthHfpMic"
+
+KSNAME_WaveUsbHsSpeaker="WaveUsbHsSpeaker"
+KSNAME_TopologyUsbHsSpeaker="TopologyUsbHsSpeaker"
+
+KSNAME_WaveUsbHsMic="WaveUsbHsMic"
+KSNAME_TopologyUsbHsMic="TopologyUsbHsMic"
+
+Proxy.CLSID="{17CCA71B-ECD7-11D0-B908-00A0C9223196}"
+KSCATEGORY_AUDIO="{6994AD04-93EF-11D0-A3CC-00A0C9223196}"
+KSCATEGORY_RENDER="{65E8773E-8F56-11D0-A3B9-00A0C9223196}"
+KSCATEGORY_CAPTURE="{65E8773D-8F56-11D0-A3B9-00A0C9223196}"
+KSCATEGORY_REALTIME ="{EB115FFC-10C8-4964-831D-6DCB02E6F23F}"
+KSCATEGORY_TOPOLOGY = "{DDA54A40-1E4C-11D1-A050-405705C10000}"
+
+KSNODETYPE_ANY   = "{00000000-0000-0000-0000-000000000000}"
+
+PKEY_AudioEndpoint_Association               = "{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},2"
+PKEY_AudioEndpoint_Supports_EventDriven_Mode = "{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},7"
+;PKEY_AudioEndpoint_Default_VolumeInDb        = "{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},9"
+
+PKEY_FX_Association         = "{D04E05A6-594B-4FB6-A80D-01AF5EED7D1D},0"
+PKEY_FX_EndpointEffectClsid = "{D04E05A6-594B-4fb6-A80D-01AF5EED7D1D},7"
+PKEY_FX_KeywordDetector_ModeEffectClsid = "{D04E05A6-594B-4fb6-A80D-01AF5EED7D1D},9"
+PKEY_Endpoint_Enable_Channel_Swap_SFX = "{A44531EF-5377-4944-AE15-53789A9629C7},2"
+
+CAPXSAMPLEAPOMFX_PROPERTYSTORE_CONTEXT = "{5DB5B4C8-6C37-450E-93F5-1E275AFDF87F}"
+CAPXSAMPLEAPOSFX_PROPERTYSTORE_CONTEXT = "{99817AE5-E6DC-4074-B513-8A872178DA12}"
+
+; Driver developers would replace these CLSIDs with those of their own APOs
+FX_DISCOVER_EFFECTS_APO_CLSID  = "{889C03C8-ABAD-4004-BF0A-BC7BB825E166}"
+
+
+MEDIA_CATEGORIES = "MediaCategories"
+MicArray1CustomNameGUID = {6ae81ff4-203e-4fe1-88aa-f2d57775cd4a}
+MicArray2CustomNameGUID = {3fe0e3e1-ad16-4772-8382-4129169018ce}
+MicArray3CustomNameGUID = {c04bdb7c-2138-48da-9dd4-2af9ff2e58c2}
+MicInCustomNameGUID = {d48deb08-fd1c-4d1e-b821-9064d49ae96e}
+
+; Driver developers would replace this CLSID with their own keyword detector OEM adapter
+KEYWORDDETECTORCONTOSOADAPTER_CLSID = {6F7DBCC1-202E-498D-99C5-61C36C4EB2DC}
+KEYWORDDETECTORCONTOSOADAPTER_CLSID2 = {207F3D0C-5C79-496F-A94C-D3D2934DBFA9}
+
+;Localizable
+
+ProviderName = "mac20777"
+MfgName      = "mac20777"
+MsCopyRight  = "Copyright (c) 2026 mac20777"
+
+
+SYSVAD_SA.DeviceDesc="VibeCoding Remote Microphone"
+SYSVAD_ComponentizedAudioSample.SvcDesc="VibeCoding Remote Microphone Driver"
+SYSVAD_MIDI="VibeCoding Remote Microphone MIDI"
+
+;; friendly names
+SYSVAD.WaveSpeaker.szPname="VibeCoding Remote Microphone Input"
+SYSVAD.TopologySpeaker.szPname="VibeCoding Remote Microphone Input"
+
+SYSVAD.WaveSpeakerHeadphone.szPname="SYSVAD Wave Speaker Headphone"
+SYSVAD.TopologySpeakerHeadphone.szPname="SYSVAD Topology Speaker Headphone"
+
+SYSVAD.WaveHdmi.szPname="SYSVAD Wave HDMI"
+SYSVAD.TopologyHdmi.szPname="SYSVAD Topology HDMI"
+
+SYSVAD.WaveSpdif.szPname="SYSVAD Wave SPDIF"
+SYSVAD.TopologySpdif.szPname="SYSVAD Topology SPDIF"
+
+SYSVAD.WaveMicIn.szPname="VibeCoding Remote Microphone"
+SYSVAD.TopologyMicIn.szPname="VibeCoding Remote Microphone"
+
+SYSVAD.WaveMicArray1.szPname="SYSVAD Wave Microphone Array - Front"
+SYSVAD.TopologyMicArray1.szPname="SYSVAD Topology Microphone Array - Front"
+
+SYSVAD.WaveMicArray2.szPname="SYSVAD Wave Microphone Array - Rear"
+SYSVAD.TopologyMicArray2.szPname="SYSVAD Topology Microphone Array - Rear"
+
+SYSVAD.WaveMicArray3.szPname="SYSVAD Wave Microphone Array - Front/Rear"
+SYSVAD.TopologyMicArray3.szPname="SYSVAD Topology Microphone Array - Front/Rear"
+
+SYSVAD.WaveBthHfpSpeaker.szPname="SYSVAD Wave Bluetooth HFP Speaker"
+SYSVAD.TopologyBthHfpSpeaker.szPname="SYSVAD Topology Bluetooth HFP Speaker"
+
+SYSVAD.WaveBthHfpMic.szPname="SYSVAD Wave Bluetooth HFP Microphone"
+SYSVAD.TopologyBthHfpMic.szPname="SYSVAD Topology Bluetooth HFP Microphone"
+
+SYSVAD.WaveUsbHsSpeaker.szPname="SYSVAD Wave USB Headset Speaker"
+SYSVAD.TopologyUsbHsSpeaker.szPname="SYSVAD Topology USB Headset Speaker"
+
+SYSVAD.WaveUsbHsMic.szPname="SYSVAD Wave USB Headset Microphone"
+SYSVAD.TopologyUsbHsMic.szPname="SYSVAD Topology USB Headset Microphone"
+
+MicArray1CustomName= "Internal Microphone Array - Front"
+MicArray2CustomName= "Internal Microphone Array - Rear"
+MicArray3CustomName= "Internal Microphone Array - Front/Rear"
+MicInCustomName= "VibeCoding Remote Microphone"
+
+

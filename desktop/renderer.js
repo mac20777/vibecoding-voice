@@ -29,6 +29,10 @@ const I18N = {
     optSendZhEn: "只输出中文和英语", optSendAll: "输出中文、英语、韩语、日语",
     fTransModel: "模型", fTransTimeout: "超时 (ms)",
     fXiaomi: "启用小米蓝牙遥控器（需 USBPcap 驱动）",
+    remoteVoiceModeLabel: "语音键模式",
+    remoteVoiceModeBuiltin: "内置语音识别（火山 / OpenAI）",
+    remoteVoiceModeWechat: "微信语音输入（推荐，无需 API Key）",
+    remoteVoiceModeHint: "微信模式会按住微信默认的 Ctrl+Win 语音快捷键，并把遥控器声音实时送入 VibeCoding Remote Microphone。",
     remoteNote: "点击遥控器上的按键，再点右侧动作完成映射。语音键固定为「按住说话」，不可改。菜单键默认禁用，避免 Windows 原生菜单事件被重复执行；你仍可把它改成其他动作。",
     advCli: "CLI 行为", fCodexSkip: "Codex：跳过 Git 仓库检查", fClaudeSkip: "Claude：减少权限确认",
     advWorkspace: "工作目录", fCodexCwd: "Codex 工作目录", fClaudeCwd: "Claude 工作目录", browse: "浏览…",
@@ -61,6 +65,9 @@ const I18N = {
     sendWithKey: "发送 {key}", undoWithKey: "撤销 {key}",
     checkStt: "语音识别服务", checkSttOk: "{provider} · 已配置密钥", checkSttMiss: "{provider} 还没填密钥",
     checkSttFix: "去填写 →",
+    checkWechat: "微信语音输入",
+    checkWechatReady: "VibeCoding Remote Microphone 已就绪；请在微信中把麦克风选为该设备，不需要 API Key",
+    checkWechatMissing: "虚拟麦克风驱动尚未安装，微信模式暂不可用",
     checkTarget: "发送目标",
     targetDescInject: "文字直接打进当前窗口", targetDescCodex: "发送到 Codex CLI 会话", targetDescClaude: "发送到 Claude Code 会话",
     checkMicOk: "语音输入已验证", checkMicMiss: "还没试过说一句话",
@@ -93,6 +100,7 @@ const I18N = {
     configIssuePrefix: "当前配置不完整：",
     overrideNote: "注意：以下配置文件会覆盖用户配置，界面里保存的值可能不会立即生效：",
     providerDetailOpenai: "模型：{model}", providerDetailVolc: "适合中文语音环境",
+    providerWechat: "微信语音输入",
     translationOn: "翻译开启 · 目标：{lang} · {mode}",
     transLangEnglish: "英语", transLangKorean: "韩语", transLangJapanese: "日语",
     sendModeTarget: "只发目标语言", sendModeBilingual: "中文+目标语言", sendModeZhEn: "中文+英语", sendModeAll: "中文+英韩日",
@@ -121,6 +129,7 @@ const I18N = {
     wizBack: "上一步", wizNext: "下一步", wizSkip: "跳过", wizFinish: "完成并保存",
     wizStartService: "启动服务", wizTestOk: "✓ 收到！语音识别工作正常",
     wizSttNeedKey: "请先把 Key 填上（点右侧「获取 Key」去控制台复制）",
+    wizWechatModeNote: "按住遥控器语音键时，软件会调用微信的 Ctrl+Win 语音输入，并使用 VibeCoding Remote Microphone。",
     wizOptVolc: "Volcengine（推荐中文）",
     overlayPreviewHint: "{confirm} 发送 · {undo} 撤销一段 · {discard} 整段取消",
     overlayPreviewHintLocal: "{send} 发送 · {undo} 撤销",
@@ -186,6 +195,10 @@ const I18N = {
     optSendZhEn: "Chinese & English only", optSendAll: "Chinese, English, Korean & Japanese",
     fTransModel: "Model", fTransTimeout: "Timeout (ms)",
     fXiaomi: "Enable Xiaomi Bluetooth remote (needs USBPcap driver)",
+    remoteVoiceModeLabel: "Voice button mode",
+    remoteVoiceModeBuiltin: "Built-in speech recognition (Volcengine / OpenAI)",
+    remoteVoiceModeWechat: "WeChat voice input (recommended, no API key)",
+    remoteVoiceModeHint: "WeChat mode holds WeChat's default Ctrl+Win voice shortcut and streams the remote live into VibeCoding Remote Microphone.",
     remoteNote: "Click a button on the remote, then pick an action on the right. The voice key is fixed to push-to-talk. Menu defaults to disabled to avoid duplicating Windows' native Menu event; you can still map it to another action.",
     advCli: "CLI behavior", fCodexSkip: "Codex: skip Git repo check", fClaudeSkip: "Claude: reduce permission prompts",
     advWorkspace: "Workspaces", fCodexCwd: "Codex workspace", fClaudeCwd: "Claude workspace", browse: "Browse…",
@@ -218,6 +231,9 @@ const I18N = {
     sendWithKey: "Send {key}", undoWithKey: "Undo {key}",
     checkStt: "Speech recognition", checkSttOk: "{provider} · key configured", checkSttMiss: "{provider} has no API key yet",
     checkSttFix: "Fill it in →",
+    checkWechat: "WeChat voice input",
+    checkWechatReady: "VibeCoding Remote Microphone is ready. Select it as WeChat's microphone; no API key is needed",
+    checkWechatMissing: "The virtual microphone driver is not installed, so WeChat mode is unavailable",
     checkTarget: "Send target",
     targetDescInject: "Types into the focused window", targetDescCodex: "Sends to a Codex CLI session", targetDescClaude: "Sends to a Claude Code session",
     checkMicOk: "Voice input verified", checkMicMiss: "No voice test yet",
@@ -250,6 +266,7 @@ const I18N = {
     configIssuePrefix: "Configuration is incomplete: ",
     overrideNote: "Note: these config files override the user config; values saved here may not take effect:",
     providerDetailOpenai: "Model: {model}", providerDetailVolc: "Recommended for Chinese",
+    providerWechat: "WeChat voice input",
     translationOn: "Translation on · target: {lang} · {mode}",
     transLangEnglish: "English", transLangKorean: "Korean", transLangJapanese: "Japanese",
     sendModeTarget: "Target only", sendModeBilingual: "Chinese + target", sendModeZhEn: "Chinese + English", sendModeAll: "All four languages",
@@ -278,6 +295,7 @@ const I18N = {
     wizBack: "Back", wizNext: "Next", wizSkip: "Skip", wizFinish: "Finish & save",
     wizStartService: "Start service", wizTestOk: "✓ Got it — recognition works",
     wizSttNeedKey: "Paste your API key first (use the Get Key link to open the console)",
+    wizWechatModeNote: "Holding the remote voice button invokes WeChat's Ctrl+Win voice input through VibeCoding Remote Microphone.",
     wizOptVolc: "Volcengine (best for Chinese)",
     overlayPreviewHint: "{confirm} send · {undo} undo last · {discard} discard all",
     overlayPreviewHintLocal: "{send} send · {undo} undo",
@@ -393,6 +411,7 @@ const elements = {
   codexSkipGitRepoCheck: document.querySelector("#codex-skip-git-repo-check"),
   claudeDangerouslySkipPermissions: document.querySelector("#claude-dangerously-skip-permissions"),
   xiaomiRemoteEnabled: document.querySelector("#xiaomi-remote-enabled"),
+  xiaomiRemoteVoiceMode: document.querySelector("#xiaomi-remote-voice-mode"),
   userConfigPath: document.querySelector("#user-config-path"),
   desktopSettingsPath: document.querySelector("#desktop-settings-path"),
   cliLogTail: document.querySelector("#cli-log-tail"),
@@ -480,6 +499,7 @@ const elements = {
   wizardNext: document.querySelector("#wizard-next"),
   wizardSkip: document.querySelector("#wizard-skip"),
   wizSttProvider: document.querySelector("#wiz-stt-provider"),
+  wizVoiceMode: document.querySelector("#wiz-voice-mode"),
   wizVolcAppKey: document.querySelector("#wiz-volc-app-key"),
   wizVolcAccessKey: document.querySelector("#wiz-volc-access-key"),
   wizOpenaiKey: document.querySelector("#wiz-openai-key"),
@@ -553,6 +573,7 @@ const appState = {
   remote: null,
   remoteCaptureStatus: null,
   remoteMenuGuardStatus: null,
+  virtualMicrophone: null,
   socket: null,
   socketReady: false,
   reconnectTimer: null,
@@ -1666,6 +1687,7 @@ async function pollWizPairing() {
       const bootstrap = await window.vibeApp.saveConfig(collectFormPayload());
       appState.bootstrap = bootstrap;
       appState.service = bootstrap.service;
+      appState.virtualMicrophone = bootstrap.virtualMicrophone ?? null;
       fillForm(bootstrap.form, bootstrap.desktopSettingsPath);
       renderNotices(bootstrap.form);
       renderService();
@@ -1693,6 +1715,7 @@ function openWizard() {
   wizPair.saveTriggered = false;
   wizPair.voiceTested = false;
   elements.wizSttProvider.value = elements.sttProvider.value || "volcengine";
+  elements.wizVoiceMode.value = elements.xiaomiRemoteVoiceMode.value || "wechat";
   elements.wizVolcAppKey.value = elements.volcengineAppKey.value || "";
   elements.wizVolcAccessKey.value = elements.volcengineAccessKey.value || "";
   elements.wizOpenaiKey.value = elements.openaiApiKey.value || "";
@@ -1711,6 +1734,10 @@ function closeWizard() {
 }
 
 function renderWizardProvider() {
+  const voiceMode = elements.wizVoiceMode.value;
+  document.querySelectorAll("[data-wiz-voice-mode]").forEach((section) => {
+    section.hidden = section.dataset.wizVoiceMode !== voiceMode;
+  });
   const provider = elements.wizSttProvider.value;
   document.querySelectorAll("[data-wiz-provider]").forEach((section) => {
     section.hidden = section.dataset.wizProvider !== provider;
@@ -1721,6 +1748,18 @@ async function wizardNextStep() {
   const stepName = WIZARD_STEPS[wizardState.step];
 
   if (stepName === "stt") {
+    const voiceMode = elements.wizVoiceMode.value;
+    elements.xiaomiRemoteVoiceMode.value = voiceMode;
+    if (voiceMode === "wechat") {
+      elements.wizSttError.hidden = true;
+      elements.wizRemoteEnabled.checked = true;
+      updateFormAffordances();
+      renderChecklist();
+      await saveConfigFlow(elements.wizardNext);
+      wizardState.step = WIZARD_STEPS.indexOf("remote");
+      renderWizard();
+      return;
+    }
     const provider = elements.wizSttProvider.value;
     const appKey = elements.wizVolcAppKey.value.trim();
     const accessKey = elements.wizVolcAccessKey.value.trim();
@@ -1734,6 +1773,7 @@ async function wizardNextStep() {
     elements.wizSttError.hidden = true;
     // Copy into the real form and save so the service restarts with the keys.
     elements.sttProvider.value = provider;
+    elements.xiaomiRemoteVoiceMode.value = "builtin_stt";
     elements.volcengineAppKey.value = appKey;
     elements.volcengineAccessKey.value = accessKey;
     elements.openaiApiKey.value = openaiKey;
@@ -1818,6 +1858,15 @@ function updateFormAffordances() {
   updateProviderVisibility();
   updateModeVisibility();
   updateTranslationVisibility();
+  const wechatMode = elements.xiaomiRemoteVoiceMode.value === "wechat";
+  const virtualMicReady = appState.virtualMicrophone?.ready === true;
+  const hint = document.querySelector("#remote-voice-mode-hint");
+  if (hint) {
+    hint.textContent = wechatMode
+      ? (virtualMicReady ? t("checkWechatReady") : t("checkWechatMissing"))
+      : t("fSttHint");
+    hint.classList.toggle("warning-text", wechatMode && !virtualMicReady);
+  }
   renderAbout();
   renderBanner();
 }
@@ -1911,6 +1960,7 @@ function collectFormPayload() {
       codexSkipGitRepoCheck: elements.codexSkipGitRepoCheck.checked,
       claudeDangerouslySkipPermissions: elements.claudeDangerouslySkipPermissions.checked,
       xiaomiRemoteEnabled: elements.xiaomiRemoteEnabled.checked,
+      xiaomiRemoteVoiceMode: elements.xiaomiRemoteVoiceMode.value,
       xiaomiRemoteButtonMap: serializeRemoteActions(),
       xiaomiRemotePromptTemplates: JSON.stringify(
         promptTemplates.filter((template) => template.name.trim() && template.body.trim())
@@ -1963,6 +2013,7 @@ function fillForm(form, desktopSettingsPath) {
   elements.codexSkipGitRepoCheck.checked = Boolean(form.codexSkipGitRepoCheck);
   elements.claudeDangerouslySkipPermissions.checked = Boolean(form.claudeDangerouslySkipPermissions);
   elements.xiaomiRemoteEnabled.checked = Boolean(form.xiaomiRemoteEnabled);
+  elements.xiaomiRemoteVoiceMode.value = form.xiaomiRemoteVoiceMode || "builtin_stt";
   remoteButtonActions = parseRemoteActions(form.xiaomiRemoteButtonMap);
   promptTemplates = parsePromptTemplates(form.xiaomiRemotePromptTemplates);
   if (selectedPromptIndex >= promptTemplates.length) {
@@ -2317,6 +2368,8 @@ function renderChecklist() {
     ? Boolean(elements.openaiApiKey.value)
     : Boolean(elements.volcengineAppKey.value && elements.volcengineAccessKey.value);
   const remoteOn = elements.xiaomiRemoteEnabled.checked || form?.xiaomiRemoteEnabled === true;
+  const wechatMode = remoteOn && elements.xiaomiRemoteVoiceMode.value === "wechat";
+  const virtualMicReady = appState.virtualMicrophone?.ready === true;
   const autoLaunchOn = elements.autoLaunch.checked;
   const mode = elements.sendTarget.value;
   const targetDesc = mode === "codex_exec"
@@ -2326,14 +2379,21 @@ function renderChecklist() {
       : t("targetDescInject");
 
   const items = [
-    {
-      icon: sttOk ? "ok" : "miss",
-      title: t("checkStt"),
-      desc: sttOk
-        ? t("checkSttOk", { provider: providerLabel(elements.sttProvider.value) })
-        : t("checkSttMiss", { provider: providerLabel(elements.sttProvider.value) }),
-      fix: sttOk ? null : { label: t("checkSttFix"), page: "settings", tab: "speech" }
-    },
+    wechatMode
+      ? {
+          icon: virtualMicReady ? "ok" : "miss",
+          title: t("checkWechat"),
+          desc: virtualMicReady ? t("checkWechatReady") : t("checkWechatMissing"),
+          fix: virtualMicReady ? null : { label: t("checkRemoteFix"), page: "remote" }
+        }
+      : {
+          icon: sttOk ? "ok" : "miss",
+          title: t("checkStt"),
+          desc: sttOk
+            ? t("checkSttOk", { provider: providerLabel(elements.sttProvider.value) })
+            : t("checkSttMiss", { provider: providerLabel(elements.sttProvider.value) }),
+          fix: sttOk ? null : { label: t("checkSttFix"), page: "settings", tab: "speech" }
+        },
     {
       icon: "ok",
       title: t("checkTarget"),
@@ -2398,7 +2458,8 @@ function renderChecklist() {
     elements.checklist.appendChild(row);
   }
 
-  const allGood = sttOk && hasUsedVoice && remoteOn && autoLaunchOn;
+  const voiceBackendReady = wechatMode ? virtualMicReady : sttOk;
+  const allGood = voiceBackendReady && hasUsedVoice && remoteOn && autoLaunchOn;
   elements.checklistCard.classList.toggle("hidden", allGood);
 }
 
@@ -2411,16 +2472,21 @@ function renderAbout() {
     elements.sendTarget.value === "text_injector"
       ? `${deliveryLabel(elements.transcriptDeliveryMode.value)} · ${injectionLabel(elements.textInjectionMode.value)}`
       : deliveryLabel(elements.transcriptDeliveryMode.value);
-  elements.aboutProvider.textContent = providerLabel(elements.sttProvider.value);
+  const wechatMode = elements.xiaomiRemoteVoiceMode.value === "wechat";
+  elements.aboutProvider.textContent = wechatMode
+    ? t("providerWechat")
+    : providerLabel(elements.sttProvider.value);
   const providerDetail = elements.sttProvider.value === "openai"
     ? t("providerDetailOpenai", { model: elements.openaiModel.value || "whisper-1" })
     : t("providerDetailVolc");
-  elements.aboutProviderSub.textContent = elements.voiceTranslationEnabled.checked
-    ? `${providerDetail} · ${t("translationOn", {
-        lang: translationTargetLabel(elements.voiceTranslationTargetLanguage.value),
-        mode: translationSendModeLabel(elements.voiceTranslationSendMode.value)
-      })}`
-    : providerDetail;
+  elements.aboutProviderSub.textContent = wechatMode
+    ? (appState.virtualMicrophone?.ready ? t("checkWechatReady") : t("checkWechatMissing"))
+    : elements.voiceTranslationEnabled.checked
+      ? `${providerDetail} · ${t("translationOn", {
+          lang: translationTargetLabel(elements.voiceTranslationTargetLanguage.value),
+          mode: translationSendModeLabel(elements.voiceTranslationSendMode.value)
+        })}`
+      : providerDetail;
   elements.aboutLaunch.textContent = launchLabel({
     autoLaunch: elements.autoLaunch.checked,
     launchToTray: elements.launchToTray.checked
@@ -2699,6 +2765,7 @@ function applyLang() {
   renderPromptsPage();
   renderPreviewKeyPickers();
   renderPairGuide();
+  updateFormAffordances();
 }
 
 function resetLiveConnection() {
@@ -2946,6 +3013,7 @@ async function refreshBootstrap() {
   appState.remoteHidProblem = bootstrap.remoteHidProblem ?? appState.remoteHidProblem;
   appState.remoteCaptureStatus = bootstrap.remoteCaptureStatus ?? null;
   appState.remoteMenuGuardStatus = bootstrap.remoteMenuGuardStatus ?? null;
+  appState.virtualMicrophone = bootstrap.virtualMicrophone ?? null;
   const savedLang = bootstrap.form?.desktopSettings?.uiLanguage;
   if ((savedLang === "en" || savedLang === "zh") && savedLang !== lang) {
     lang = savedLang;
@@ -3074,6 +3142,10 @@ elements.xiaomiRemoteEnabled.addEventListener("change", () => {
   renderChecklist();
   renderRemoteStatus();
 });
+elements.xiaomiRemoteVoiceMode.addEventListener("change", () => {
+  updateFormAffordances();
+  renderChecklist();
+});
 elements.volcengineAppKey.addEventListener("input", renderChecklist);
 elements.volcengineAccessKey.addEventListener("input", renderChecklist);
 elements.openaiApiKey.addEventListener("input", renderChecklist);
@@ -3085,6 +3157,7 @@ async function saveConfigFlow(button) {
     const bootstrap = await window.vibeApp.saveConfig(collectFormPayload());
     appState.bootstrap = bootstrap;
     appState.service = bootstrap.service;
+    appState.virtualMicrophone = bootstrap.virtualMicrophone ?? null;
     fillForm(bootstrap.form, bootstrap.desktopSettingsPath);
     renderNotices(bootstrap.form);
     renderService();
@@ -3273,8 +3346,12 @@ document.addEventListener("click", (event) => {
 });
 
 elements.wizSttProvider.addEventListener("change", renderWizardProvider);
+elements.wizVoiceMode.addEventListener("change", renderWizardProvider);
 elements.wizardBack.addEventListener("click", () => {
-  wizardState.step = Math.max(0, wizardState.step - 1);
+  wizardState.step =
+    WIZARD_STEPS[wizardState.step] === "remote" && elements.wizVoiceMode.value === "wechat"
+      ? WIZARD_STEPS.indexOf("stt")
+      : Math.max(0, wizardState.step - 1);
   renderWizard();
 });
 elements.wizardNext.addEventListener("click", () => {
@@ -3519,6 +3596,17 @@ window.vibeApp.onState((payload) => {
   }
   if (payload.remoteCaptureStatus !== undefined) {
     appState.remoteCaptureStatus = payload.remoteCaptureStatus;
+    const captureState = payload.remoteCaptureStatus?.state;
+    if (captureState === "wechat_start") {
+      remoteVoiceStatus = "recording";
+      markVoiceUsed();
+      if (wizardState.open && WIZARD_STEPS[wizardState.step] === "remote") {
+        wizPair.voiceTested = true;
+        renderWizPairing();
+      }
+    } else if (captureState === "wechat_stop" || captureState === "wechat_cancel") {
+      remoteVoiceStatus = "idle";
+    }
   }
   if (payload.remoteMenuGuardStatus !== undefined) {
     appState.remoteMenuGuardStatus = payload.remoteMenuGuardStatus;

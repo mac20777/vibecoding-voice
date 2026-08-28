@@ -8,7 +8,7 @@ function menuCycle(guard) {
   return guard.handle({ button: "menu", pressed: false });
 }
 
-test("three completed menu cycles in the window trip the anomaly guard once", () => {
+test("six completed menu cycles in the window trip the anomaly guard once", () => {
   let now = 1_000;
   const trips = [];
   const guard = new XiaomiRemoteMenuGuard({
@@ -16,16 +16,31 @@ test("three completed menu cycles in the window trip the anomaly guard once", ()
     onTrip: (details) => trips.push(details)
   });
 
-  assert.equal(menuCycle(guard), false);
-  now += 500;
-  assert.equal(menuCycle(guard), false);
-  now += 500;
+  for (let index = 0; index < 5; index += 1) {
+    assert.equal(menuCycle(guard), false);
+    now += 300;
+  }
   assert.equal(menuCycle(guard), true);
   assert.equal(trips.length, 1);
 
   now += 500;
   assert.equal(menuCycle(guard), false, "cooldown prevents a repair loop");
   assert.equal(trips.length, 1);
+});
+
+test("four rapid deliberate menu clicks do not restart the HID child", () => {
+  let now = 1_000;
+  const trips = [];
+  const guard = new XiaomiRemoteMenuGuard({
+    now: () => now,
+    onTrip: (details) => trips.push(details)
+  });
+
+  for (let index = 0; index < 4; index += 1) {
+    assert.equal(menuCycle(guard), false);
+    now += 300;
+  }
+  assert.equal(trips.length, 0);
 });
 
 test("a held key or key-up without a matching key-down never trips", () => {

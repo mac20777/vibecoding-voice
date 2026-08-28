@@ -5,6 +5,7 @@ import {
   normalizeVoiceTranslationSendMode,
   normalizeVoiceTranslationTargetLanguage
 } from "./translation-service.mjs";
+import { normalizeXiaomiRemoteVoiceMode } from "./virtual-microphone-protocol.mjs";
 
 const VALID_SEND_TARGETS = new Set(["text_injector", "codex_exec", "claude_code"]);
 const VALID_STT_PROVIDERS = new Set(["volcengine", "openai"]);
@@ -56,6 +57,7 @@ export function buildDesktopFormState(config, desktopSettings = {}) {
     codexSkipGitRepoCheck: Boolean(config.codexSkipGitRepoCheck),
     claudeDangerouslySkipPermissions: Boolean(config.claudeDangerouslySkipPermissions),
     xiaomiRemoteEnabled: config.xiaomiRemoteEnabled === true,
+    xiaomiRemoteVoiceMode: normalizeXiaomiRemoteVoiceMode(config.xiaomiRemoteVoiceMode),
     xiaomiRemoteButtonMap: String(config.xiaomiRemoteButtonMap || ""),
     xiaomiRemotePromptTemplates: String(config.xiaomiRemotePromptTemplates || ""),
     xiaomiRemotePreviewKeys: String(config.xiaomiRemotePreviewKeys || ""),
@@ -123,6 +125,7 @@ export function buildUserConfigUpdates(formState = {}) {
     CODEX_SKIP_GIT_REPO_CHECK: formState.codexSkipGitRepoCheck ? "1" : null,
     CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS: formState.claudeDangerouslySkipPermissions ? "1" : null,
     XIAOMI_REMOTE_ENABLED: formState.xiaomiRemoteEnabled ? "1" : null,
+    XIAOMI_REMOTE_VOICE_MODE: normalizeXiaomiRemoteVoiceMode(formState.xiaomiRemoteVoiceMode),
     XIAOMI_REMOTE_BUTTON_MAP: normalizeOptionalText(formState.xiaomiRemoteButtonMap),
     XIAOMI_REMOTE_PROMPT_TEMPLATES: normalizeOptionalText(formState.xiaomiRemotePromptTemplates),
     XIAOMI_REMOTE_PREVIEW_KEYS: normalizeOptionalText(formState.xiaomiRemotePreviewKeys)

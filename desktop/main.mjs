@@ -17,6 +17,7 @@ import {
   checkXiaomiRemoteHidHealth,
   restartXiaomiRemoteHidChild
 } from "../src/xiaomi-remote-hid-health.mjs";
+import { inspectWindowsVirtualMicrophone } from "../src/windows-virtual-microphone.mjs";
 
 const APP_ID = "com.mac20777.vibecodingvoice";
 const HIDDEN_LAUNCH_ARG = "--hidden";
@@ -1055,7 +1056,8 @@ function startXiaomiRemoteProcess(config) {
     env: {
       ...process.env,
       VIBE_INVOKE_CWD: process.env.VIBE_INVOKE_CWD || DEFAULT_INVOKE_CWD,
-      VIBE_DESKTOP: "1"
+      VIBE_DESKTOP: "1",
+      VIBE_RESOURCES_PATH: process.resourcesPath
     },
     silent: true,
     windowsHide: false
@@ -1471,6 +1473,12 @@ function refreshTrayMenu() {
 async function buildBootstrap() {
   const config = loadEffectiveConfig();
   const desktopSettings = loadDesktopSettings();
+  const virtualMicrophone = await inspectWindowsVirtualMicrophone({
+    env: {
+      ...process.env,
+      VIBE_RESOURCES_PATH: app.isPackaged ? process.resourcesPath : ""
+    }
+  });
 
   return {
     appVersion: app.getVersion(),
@@ -1485,7 +1493,8 @@ async function buildBootstrap() {
     remote: latestRemoteInfo,
     remoteHidProblem: latestRemoteHidProblem,
     remoteCaptureStatus: latestRemoteCaptureStatus,
-    remoteMenuGuardStatus: latestRemoteMenuGuardStatus
+    remoteMenuGuardStatus: latestRemoteMenuGuardStatus,
+    virtualMicrophone
   };
 }
 

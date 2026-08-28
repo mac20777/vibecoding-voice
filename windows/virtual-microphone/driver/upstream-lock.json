@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/microsoft/Windows-driver-samples.git",
+  "commit": "197ba2156a60e2b76fcd4820bae594223e91a1e9",
+  "samplePath": "audio/sysvad",
+  "purpose": "Pinned Microsoft SysVAD baseline for the VibeCoding WaveRT render/capture driver"
+}
+

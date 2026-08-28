@@ -1,6 +1,6 @@
 {
   "name": "@mac20777/vibecoding-voice",
-  "version": "0.4.13",
+  "version": "0.5.0",
   "private": false,
   "description": "Voice-driven AI coding bridge and Windows desktop app for ESP32 e-paper devices or global-hotkey USB microphones with Inject, Codex, Claude, and Chinese-to-English/Korean/Japanese voice translation.",
   "type": "module",
@@ -39,7 +39,9 @@
     "remote:xiaomi:doctor": "node scripts/xiaomi-remote-input.mjs --doctor",
     "remote:xiaomi:fix-hid": "node scripts/xiaomi-remote-input.mjs --fix-hid",
     "desktop:dev": "electron .",
-    "predesktop:dist": "node scripts/windows/fetch-usbpcap-installer.mjs && node scripts/windows/build-remote-broker.mjs",
+    "virtual-mic:validate-driver": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/validate-virtual-microphone-driver.ps1 -AllowMissing",
+    "virtual-mic:build-driver": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/build-virtual-microphone-driver.ps1 -Configuration Release",
+    "predesktop:dist": "node scripts/windows/fetch-usbpcap-installer.mjs && node scripts/windows/build-remote-broker.mjs && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/build-virtual-microphone-publisher.ps1 && npm run virtual-mic:validate-driver",
     "desktop:dist": "electron-builder --win nsis",
     "desktop:dist:linux": "electron-builder --linux deb AppImage --x64",
     "desktop:dist:ubuntu": "electron-builder --linux dir --x64 && bash scripts/build-ubuntu-deb.sh"
@@ -78,12 +80,28 @@
     "asar": true,
     "asarUnpack": [
       "scripts/windows/xiaomi-usbpcap-pipe.ps1",
-      "scripts/windows/install-remote-broker.ps1"
+      "scripts/windows/install-remote-broker.ps1",
+      "scripts/windows/install-virtual-microphone.ps1",
+      "scripts/windows/validate-virtual-microphone-driver.ps1"
     ],
     "extraResources": [
       {
         "from": "build-assets/remote-broker",
         "to": "remote-broker",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "build-assets/virtual-microphone",
+        "to": "virtual-microphone",
+        "filter": [
+          "vibecoding-virtual-mic-publisher.exe"
+        ]
+      },
+      {
+        "from": "build-assets/virtual-microphone-driver",
+        "to": "virtual-microphone-driver",
         "filter": [
           "**/*"
         ]

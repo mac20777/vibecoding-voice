@@ -17,6 +17,8 @@ import {
 
 const CONTROL_START = `0x0025|${"01" + "00".repeat(19)}`;
 const CONTROL_STOP = `0x0025|${"00".repeat(20)}`;
+const ALTERNATE_CONTROL_START = `0x0035|${"01" + "00".repeat(19)}`;
+const ALTERNATE_CONTROL_STOP = `0x0035|${"00".repeat(20)}`;
 
 function audioLine(handle, sequence, fill = 0x55) {
   const packet = Buffer.alloc(60, fill);
@@ -184,6 +186,34 @@ test("physical application/menu HID code is emitted as the configurable menu but
   );
 });
 
+test("alternate-handle remote emits buttons and preserves simultaneous HID usages", () => {
+  const parser = new XiaomiRemoteProtocolParser();
+  assert.deepEqual(
+    parser.pushLine("0x0027|0000284f00000000"),
+    [
+      { type: "button", code: 0x28, button: "ok", pressed: true },
+      { type: "button", code: 0x4f, button: "right", pressed: true }
+    ]
+  );
+  assert.deepEqual(
+    parser.pushLine("0x0027|00004f0000000000"),
+    [{ type: "button", code: 0x28, button: "ok", pressed: false }]
+  );
+  assert.deepEqual(
+    parser.pushLine("0x0027|0000000000000000"),
+    [{ type: "button", code: 0x4f, button: "right", pressed: false }]
+  );
+
+  assert.deepEqual(
+    parser.pushLine("0x0027|0000650000000000"),
+    [{ type: "button", code: 0x65, button: "menu", pressed: true }]
+  );
+  assert.deepEqual(
+    parser.pushLine("0x0027|0000000000000000"),
+    [{ type: "button", code: 0x65, button: "menu", pressed: false }]
+  );
+});
+
 test("Xiaomi remote parser emits one complete zero-loss voice session", () => {
   const parser = new XiaomiRemoteProtocolParser();
   assert.deepEqual(parser.pushLine(CONTROL_START), [{ type: "start", reason: "control" }]);
@@ -200,6 +230,26 @@ test("Xiaomi remote parser emits one complete zero-loss voice session", () => {
     type: "stop",
     reason: "control",
     frameCount: 5,
+    sequenceErrors: 0
+  }]);
+});
+
+test("alternate-handle remote emits one complete voice session", () => {
+  const parser = new XiaomiRemoteProtocolParser();
+  assert.deepEqual(parser.pushLine(ALTERNATE_CONTROL_START), [{ type: "start", reason: "control" }]);
+
+  const sequences = [0x08, 0x38, 0xc8, 0xf8];
+  const frames = sequences.flatMap((sequence, index) =>
+    parser.pushLine(audioLine(["0x0039", "0x003d", "0x0041"][index % 3], sequence, 0x50 + index))
+  );
+  assert.equal(frames.length, 4);
+  assert.ok(frames.every((event) => event.type === "audio" && event.frame.length === 57));
+  assert.equal(frames.at(-1).sequenceErrors, 0);
+
+  assert.deepEqual(parser.pushLine(ALTERNATE_CONTROL_STOP), [{
+    type: "stop",
+    reason: "control",
+    frameCount: 4,
     sequenceErrors: 0
   }]);
 });

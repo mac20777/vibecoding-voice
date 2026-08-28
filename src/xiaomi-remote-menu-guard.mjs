@@ -1,4 +1,8 @@
-const DEFAULT_THRESHOLD = 3;
+// A real stuck HID child emits a dense stream of completed Menu cycles. Keep
+// the threshold above a plausible burst of deliberate diagnostic clicks: the
+// captured fault produced at least six releases inside two seconds, while a
+// user pressing the button four times quickly must remain harmless.
+const DEFAULT_THRESHOLD = 6;
 const DEFAULT_WINDOW_MS = 2_500;
 const DEFAULT_COOLDOWN_MS = 60_000;
 

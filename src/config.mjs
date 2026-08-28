@@ -8,6 +8,7 @@ import {
   normalizeVoiceTranslationSendMode,
   normalizeVoiceTranslationTargetLanguage
 } from "./translation-service.mjs";
+import { normalizeXiaomiRemoteVoiceMode } from "./virtual-microphone-protocol.mjs";
 
 const INITIAL_ENV_KEYS = new Set(Object.keys(process.env));
 let appliedConfigKeys = new Set();
@@ -247,8 +248,10 @@ export function detectConfiguredSttProvider(config) {
 
 export function getConfigIssues(config) {
   const issues = [];
+  const keylessRemoteVoice =
+    normalizeXiaomiRemoteVoiceMode(config.xiaomiRemoteVoiceMode) === "wechat";
 
-  if (!config.mockTranscript) {
+  if (!config.mockTranscript && !keylessRemoteVoice) {
     const provider = detectConfiguredSttProvider(config);
     if (!provider) {
       issues.push(
@@ -275,6 +278,16 @@ export function getConfigIssues(config) {
   }
 
   return issues;
+}
+
+export function resolveXiaomiRemoteVoiceModeDefault(explicitValue, loadedConfigFiles = []) {
+  const configured = String(explicitValue || "").trim();
+  if (configured) {
+    return normalizeXiaomiRemoteVoiceMode(configured);
+  }
+  // New installs get the zero-key WeChat path. Existing users keep the STT
+  // behavior they already configured until they explicitly switch modes.
+  return loadedConfigFiles.length === 0 ? "wechat" : "builtin_stt";
 }
 
 export function hasRequiredConfig(config) {
@@ -431,6 +444,10 @@ export function loadConfig(options = {}) {
     xiaomiRemoteFfmpegPath: process.env.XIAOMI_REMOTE_FFMPEG_PATH || "",
     xiaomiRemoteWslDistro: process.env.XIAOMI_REMOTE_WSL_DISTRO || "Ubuntu",
     xiaomiRemoteInactivityMs: Number(process.env.XIAOMI_REMOTE_INACTIVITY_MS || "900"),
+    xiaomiRemoteVoiceMode: resolveXiaomiRemoteVoiceModeDefault(
+      process.env.XIAOMI_REMOTE_VOICE_MODE,
+      loadedConfigFiles
+    ),
     xiaomiRemoteSendTarget: process.env.XIAOMI_REMOTE_SEND_TARGET || "",
     xiaomiRemoteHidDeviceMatch: process.env.XIAOMI_REMOTE_HID_DEVICE_MATCH || "VID&012717_PID&32B8",
     xiaomiRemoteHidAutoRepair: process.env.XIAOMI_REMOTE_HID_AUTOREPAIR === "1",

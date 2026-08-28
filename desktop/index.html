@@ -219,6 +219,14 @@
                 <input id="xiaomi-remote-enabled" name="xiaomiRemoteEnabled" type="checkbox" class="switch" />
                 <span data-i18n="fXiaomi">启用小米蓝牙遥控器（需 USBPcap 驱动）</span>
               </div>
+              <div class="field remote-voice-mode-field">
+                <label class="field-label" for="xiaomi-remote-voice-mode" data-i18n="remoteVoiceModeLabel">语音键模式</label>
+                <select id="xiaomi-remote-voice-mode" name="xiaomiRemoteVoiceMode">
+                  <option value="builtin_stt" data-i18n="remoteVoiceModeBuiltin">内置语音识别（火山 / OpenAI）</option>
+                  <option value="wechat" data-i18n="remoteVoiceModeWechat">微信语音输入（推荐，无需 API Key）</option>
+                </select>
+                <div class="hint" id="remote-voice-mode-hint" data-i18n="remoteVoiceModeHint">微信模式会按住微信默认的 Ctrl+Win 语音快捷键，并把遥控器声音实时送入 VibeCoding Remote Microphone。</div>
+              </div>
               <div class="remote-hid-warning" id="remote-hid-warning" hidden>
                 <span class="remote-hid-warning-text">
                   <span data-i18n="remoteHidWarning">Windows 报告遥控器「驱动程序错误」。这不影响本软件的语音和按键（走 USBPcap 通道），保持现状即可；修复后按键会由 Windows 原生投递而重复触发。</span>
@@ -692,40 +700,50 @@
 
         <div class="wizard-step" data-wstep="welcome">
           <div class="wizard-hero">🎙️</div>
-          <p class="wizard-text" data-i18n="wizWelcome">花一分钟完成基础配置：填语音识别的 Key → 试说一句话 →（可选）配遥控器。</p>
+          <p class="wizard-text" data-i18n="wizWelcome">花一分钟完成基础配置：默认使用微信语音输入，不需要 API Key；也可以切换到火山或 OpenAI。</p>
         </div>
 
         <div class="wizard-step" data-wstep="stt" hidden>
           <div class="field">
-            <label class="field-label" for="wiz-stt-provider" data-i18n="fStt">语音识别服务</label>
-            <select id="wiz-stt-provider">
-              <option value="volcengine" data-i18n="wizOptVolc">Volcengine（推荐中文）</option>
-              <option value="openai">OpenAI Whisper</option>
+            <label class="field-label" for="wiz-voice-mode" data-i18n="remoteVoiceModeLabel">语音输入方式</label>
+            <select id="wiz-voice-mode">
+              <option value="wechat" data-i18n="remoteVoiceModeWechat">微信语音输入（推荐，无需 API Key）</option>
+              <option value="builtin_stt" data-i18n="remoteVoiceModeBuiltin">内置语音识别（火山 / OpenAI）</option>
             </select>
           </div>
-          <div data-wiz-provider="volcengine">
+          <div class="hint" data-wiz-voice-mode="wechat" data-i18n="wizWechatModeNote">按住遥控器语音键时，软件会调用微信的 Ctrl+Win 语音输入，并使用 VibeCoding Remote Microphone。</div>
+          <div data-wiz-voice-mode="builtin_stt" hidden>
             <div class="field">
-              <div class="field-head">
-                <label class="field-label" for="wiz-volc-app-key">Volcengine App Key</label>
-                <button type="button" class="key-link" data-open-url="https://console.volcengine.com/speech/app" data-i18n="getApiKey">获取 Key →</button>
+              <label class="field-label" for="wiz-stt-provider" data-i18n="fStt">语音识别服务</label>
+              <select id="wiz-stt-provider">
+                <option value="volcengine" data-i18n="wizOptVolc">Volcengine（推荐中文）</option>
+                <option value="openai">OpenAI Whisper</option>
+              </select>
+            </div>
+            <div data-wiz-provider="volcengine">
+              <div class="field">
+                <div class="field-head">
+                  <label class="field-label" for="wiz-volc-app-key">Volcengine App Key</label>
+                  <button type="button" class="key-link" data-open-url="https://console.volcengine.com/speech/app" data-i18n="getApiKey">获取 Key →</button>
+                </div>
+                <input id="wiz-volc-app-key" type="password" autocomplete="off" />
               </div>
-              <input id="wiz-volc-app-key" type="password" autocomplete="off" />
-            </div>
-            <div class="field">
-              <label class="field-label" for="wiz-volc-access-key">Volcengine Access Key</label>
-              <input id="wiz-volc-access-key" type="password" autocomplete="off" />
-            </div>
-            <div class="hint" data-i18n="wizSttVolcNote">打开火山引擎控制台 → 语音识别 → 创建应用，把 App Key 和 Access Key 复制到这里。</div>
-          </div>
-          <div data-wiz-provider="openai" hidden>
-            <div class="field">
-              <div class="field-head">
-                <label class="field-label" for="wiz-openai-key">OpenAI API Key</label>
-                <button type="button" class="key-link" data-open-url="https://platform.openai.com/api-keys" data-i18n="getApiKey">获取 Key →</button>
+              <div class="field">
+                <label class="field-label" for="wiz-volc-access-key">Volcengine Access Key</label>
+                <input id="wiz-volc-access-key" type="password" autocomplete="off" />
               </div>
-              <input id="wiz-openai-key" type="password" autocomplete="off" />
+              <div class="hint" data-i18n="wizSttVolcNote">打开火山引擎控制台 → 语音识别 → 创建应用，把 App Key 和 Access Key 复制到这里。</div>
             </div>
-            <div class="hint" data-i18n="wizSttOpenaiNote">打开 OpenAI 平台创建 API Key，复制到这里。</div>
+            <div data-wiz-provider="openai" hidden>
+              <div class="field">
+                <div class="field-head">
+                  <label class="field-label" for="wiz-openai-key">OpenAI API Key</label>
+                  <button type="button" class="key-link" data-open-url="https://platform.openai.com/api-keys" data-i18n="getApiKey">获取 Key →</button>
+                </div>
+                <input id="wiz-openai-key" type="password" autocomplete="off" />
+              </div>
+              <div class="hint" data-i18n="wizSttOpenaiNote">打开 OpenAI 平台创建 API Key，复制到这里。</div>
+            </div>
           </div>
           <div class="wizard-error" id="wiz-stt-error" hidden></div>
         </div>

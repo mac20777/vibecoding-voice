@@ -1,10 +1,28 @@
-const CONTROL_HANDLE = "0x0025";
-const AUDIO_HANDLES = new Set(["0x0029", "0x002d", "0x0031"]);
+// Xiaomi-compatible remotes can expose the same reports at different GATT
+// handles. The alternate profile below was captured from a REV&0004 clone:
+// every relevant handle is shifted by 0x10, while the payload format and HID
+// usage codes stay identical.
+const HANDLE_PROFILES = Object.freeze([
+  Object.freeze({
+    name: "original",
+    controlHandle: "0x0025",
+    audioHandles: Object.freeze(["0x0029", "0x002d", "0x0031"]),
+    buttonHandle: "0x0017"
+  }),
+  Object.freeze({
+    name: "alternate_0x10",
+    controlHandle: "0x0035",
+    audioHandles: Object.freeze(["0x0039", "0x003d", "0x0041"]),
+    buttonHandle: "0x0027"
+  })
+]);
+const CONTROL_HANDLES = new Set(HANDLE_PROFILES.map((profile) => profile.controlHandle));
+const AUDIO_HANDLES = new Set(HANDLE_PROFILES.flatMap((profile) => profile.audioHandles));
+const BUTTON_HANDLES = new Set(HANDLE_PROFILES.map((profile) => profile.buttonHandle));
 const H2_SEQUENCE = Object.freeze([0x08, 0x38, 0xc8, 0xf8]);
 
-// The remaining keys arrive on handle 0x0017 as standard 8-byte HID keyboard
-// reports: byte2 is the usage code while held, all-zero on release.
-const BUTTON_HANDLE = "0x0017";
+// The remaining keys arrive as standard 8-byte HID keyboard reports: bytes
+// 2..7 contain held usage codes, and an all-zero report releases every key.
 const BUTTON_CODES = Object.freeze({
   0x52: "up",
   0x51: "down",
@@ -44,6 +62,13 @@ export function parseHidButtonReport(packet) {
   };
 }
 
+function parseHidUsageCodes(packet) {
+  if (!Buffer.isBuffer(packet) || packet.length !== 8 || packet[0] !== 0 || packet[1] !== 0) {
+    return null;
+  }
+  return [...new Set([...packet.subarray(2)].filter((code) => code !== 0))];
+}
+
 export function parseUsbPcapNotificationLine(line) {
   const [rawHandle = "", rawValue = ""] = String(line || "").trim().split("|", 2);
   const handle = rawHandle.toLowerCase();
@@ -80,7 +105,7 @@ export class XiaomiRemoteProtocolParser {
     this.frameCount = 0;
     this.sequenceErrors = 0;
     this.previousSequence = null;
-    this.buttonDownCode = 0;
+    this.buttonDownCodes = new Set();
   }
 
   pushLine(line) {
@@ -90,7 +115,7 @@ export class XiaomiRemoteProtocolParser {
     }
 
     const { handle, value } = notification;
-    if (handle === CONTROL_HANDLE && value.length > 0) {
+    if (CONTROL_HANDLES.has(handle) && value.length > 0) {
       if (value[0] === 0x01) {
         return this.#start("control");
       }
@@ -100,23 +125,35 @@ export class XiaomiRemoteProtocolParser {
       return [];
     }
 
-    if (handle === BUTTON_HANDLE) {
+    if (BUTTON_HANDLES.has(handle)) {
       const report = parseHidButtonReport(value);
-      if (!report) {
+      const codes = parseHidUsageCodes(value);
+      if (!report || !codes) {
         // A packet on the button handle that is not the standard 8-byte
         // keyboard report — some keys (power/menu) may use a different report
         // format. Surface it once so the key can be identified from the log.
         return [{ type: "unknown_report", handle, valueHex: value.toString("hex") }];
       }
-      // A release report is all zeros, so it only makes sense relative to the
-      // code currently held down.
-      const code = report.pressed ? report.code : this.buttonDownCode;
-      this.buttonDownCode = report.pressed ? report.code : 0;
-      const button = BUTTON_CODES[code] || "unknown";
-      if (button === "voice" || code === 0) {
-        return [];
+      const nextCodes = new Set(codes);
+      const events = [];
+      for (const code of this.buttonDownCodes) {
+        if (!nextCodes.has(code)) {
+          const button = BUTTON_CODES[code] || "unknown";
+          if (button !== "voice") {
+            events.push({ type: "button", code, button, pressed: false });
+          }
+        }
       }
-      return [{ type: "button", code, button, pressed: report.pressed }];
+      for (const code of nextCodes) {
+        if (!this.buttonDownCodes.has(code)) {
+          const button = BUTTON_CODES[code] || "unknown";
+          if (button !== "voice") {
+            events.push({ type: "button", code, button, pressed: true });
+          }
+        }
+      }
+      this.buttonDownCodes = nextCodes;
+      return events;
     }
 
     if (!AUDIO_HANDLES.has(handle)) {
@@ -182,9 +219,13 @@ export class XiaomiRemoteProtocolParser {
 }
 
 export const XIAOMI_REMOTE_PROTOCOL = Object.freeze({
-  controlHandle: CONTROL_HANDLE,
+  controlHandle: HANDLE_PROFILES[0].controlHandle,
   audioHandles: [...AUDIO_HANDLES],
-  buttonHandle: BUTTON_HANDLE,
+  buttonHandle: HANDLE_PROFILES[0].buttonHandle,
+  handleProfiles: HANDLE_PROFILES.map((profile) => ({
+    ...profile,
+    audioHandles: [...profile.audioHandles]
+  })),
   buttonCodes: { ...BUTTON_CODES },
   h2Sequence: [...H2_SEQUENCE],
   msbcFrameBytes: 57,

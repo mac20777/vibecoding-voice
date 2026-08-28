@@ -38,6 +38,21 @@
     /SD IDOK
   Abort
   vibecodingBrokerInstalled:
+
+  ; A release may include the production-signed virtual microphone package.
+  ; Development packages intentionally omit it and continue without changing
+  ; Windows driver-signing policy.
+  IfFileExists "$INSTDIR\resources\virtual-microphone-driver\VibeCodingRemoteMic.inf" 0 vibecodingSkipVirtualMic
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\resources\app.asar.unpacked\scripts\windows\install-virtual-microphone.ps1" -InstallRoot "$INSTDIR"'
+  Pop $0
+  Pop $1
+  StrCmp $0 "0" vibecodingVirtualMicInstalled
+  MessageBox MB_OK|MB_ICONSTOP \
+    "The signed VibeCoding Remote Microphone driver could not be installed. Details: $1$\r$\n$\r$\nRepair or rerun setup as an administrator.$\r$\n$\r$\nVibeCoding Remote Microphone 驱动安装失败，请使用管理员权限修复或重新运行安装程序。" \
+    /SD IDOK
+  Abort
+  vibecodingVirtualMicInstalled:
+  vibecodingSkipVirtualMic:
 !macroend
 
 !macro customUnInstall
@@ -47,4 +62,6 @@
   StrCmp $0 "0" 0 +2
   Sleep 5000
   nsExec::ExecToLog '"$SYSDIR\sc.exe" delete "VibeCodingVoiceRemoteBroker"'
+  IfFileExists "$INSTDIR\resources\app.asar.unpacked\scripts\windows\install-virtual-microphone.ps1" 0 +2
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\resources\app.asar.unpacked\scripts\windows\install-virtual-microphone.ps1" -InstallRoot "$INSTDIR" -Uninstall'
 !macroend

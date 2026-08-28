@@ -9,6 +9,12 @@ import {
 } from "../src/xiaomi-remote-hid-health.mjs";
 import { XiaomiRemoteMenuGuard } from "../src/xiaomi-remote-menu-guard.mjs";
 import { XiaomiRemoteSessionController } from "../src/xiaomi-remote-session.mjs";
+import { MsbcDecoder } from "../src/msbc-decoder.mjs";
+import {
+  XIAOMI_REMOTE_VOICE_MODES,
+  normalizeXiaomiRemoteVoiceMode
+} from "../src/virtual-microphone-protocol.mjs";
+import { WindowsVirtualMicrophonePublisher } from "../src/windows-virtual-microphone.mjs";
 import {
   decodeMsbcFrames,
   resolveXiaomiRemoteRuntime,
@@ -212,6 +218,11 @@ async function main() {
   }
 
   let capture = null;
+  const voiceMode = normalizeXiaomiRemoteVoiceMode(config.xiaomiRemoteVoiceMode);
+  const virtualMicrophone = voiceMode === XIAOMI_REMOTE_VOICE_MODES.WECHAT
+    ? new WindowsVirtualMicrophonePublisher({ log, wechatShortcut: true })
+    : null;
+  let streamDecoder = null;
   let shuttingDown = false;
   let adapterRecoveryAwaitingInput = false;
   let menuRepairInFlight = false;
@@ -256,9 +267,47 @@ async function main() {
   const controller = new XiaomiRemoteSessionController({
     inactivityMs: config.xiaomiRemoteInactivityMs,
     log,
-    sendJson: (message) => ws.send(JSON.stringify(message)),
-    sendAudio: (pcm) => ws.send(pcm, { binary: true }),
-    decodeFrames: (frames) => decodeMsbcFrames(frames),
+    sendJson: (message) => {
+      // WeChat consumes the live audio through the Windows microphone endpoint;
+      // PTT lifecycle messages must not also start the built-in STT path.
+      if (
+        voiceMode === XIAOMI_REMOTE_VOICE_MODES.WECHAT &&
+        ["ptt_start", "ptt_stop", "ptt_cancel"].includes(message.type)
+      ) {
+        sendDesktopCaptureStatus(`wechat_${message.type.slice(4)}`, { ts: message.ts });
+        return;
+      }
+      ws.send(JSON.stringify(message));
+    },
+    ...(virtualMicrophone
+      ? {
+          streamAudio: {
+            start: async () => {
+              streamDecoder = new MsbcDecoder();
+              await virtualMicrophone.start();
+            },
+            decodeFrame: (frame) => {
+              if (!streamDecoder) {
+                throw new Error("mSBC stream decoder is not ready");
+              }
+              const pcm = streamDecoder.decodeFrame(frame);
+              return Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+            },
+            write: (pcm) => virtualMicrophone.write(pcm),
+            stop: async () => {
+              await virtualMicrophone.stop();
+              streamDecoder = null;
+            },
+            cancel: async () => {
+              await virtualMicrophone.cancel();
+              streamDecoder = null;
+            }
+          }
+        }
+      : {
+          sendAudio: (pcm) => ws.send(pcm, { binary: true }),
+          decodeFrames: (frames) => decodeMsbcFrames(frames)
+        }),
     onButtonEvent: (event) => menuGuard.handle(event)
   });
 
@@ -333,7 +382,8 @@ async function main() {
   });
   log("listening; hold the Xiaomi voice key to speak", {
     capturePid: capture.capturePid,
-    transport: capture.transport
+    transport: capture.transport,
+    voiceMode
   });
 
   async function shutdown(exitCode) {
@@ -341,7 +391,8 @@ async function main() {
       return;
     }
     shuttingDown = true;
-    controller.dispose();
+    await controller.dispose();
+    await virtualMicrophone?.dispose();
     capture?.stop();
     if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
       ws.close();

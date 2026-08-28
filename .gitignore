@@ -12,3 +12,10 @@ npm-debug.log*
 dist-desktop/
 build-assets/installers/*.exe
 build-assets/remote-broker/*.exe
+build-assets/virtual-microphone/*
+windows/virtual-microphone/publisher/obj/
+windows/virtual-microphone/.reference/
+
+windows/virtual-microphone/driver/sysvad/**/obj/
+windows/virtual-microphone/driver/sysvad/**/x64/
+windows/virtual-microphone/driver/sysvad/TabletAudioSample/TabletAu.*/

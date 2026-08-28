@@ -5,6 +5,8 @@ import { XiaomiRemoteSessionController } from "../src/xiaomi-remote-session.mjs"
 
 const CONTROL_START = `0x0025|${"01" + "00".repeat(19)}`;
 const CONTROL_STOP = `0x0025|${"00".repeat(20)}`;
+const ALTERNATE_CONTROL_START = `0x0035|${"01" + "00".repeat(19)}`;
+const ALTERNATE_CONTROL_STOP = `0x0035|${"00".repeat(20)}`;
 
 function audioLine(sequence, handle = "0x0029") {
   const packet = Buffer.alloc(60, 0x55);
@@ -115,6 +117,157 @@ test("complete session decodes frames and sends audio before ptt_stop", async (t
   assert.equal(decoded[0].length, 2);
   assert.equal(audio.length, 1);
   assert.deepEqual([...audio[0]], [1, 2, 3, 4]);
+});
+
+test("streaming mode decodes and publishes each frame before key release", async (t) => {
+  const sent = [];
+  const events = [];
+  const controller = new XiaomiRemoteSessionController({
+    inactivityMs: 250,
+    sendJson: (message) => sent.push(message),
+    streamAudio: {
+      start: async () => events.push("start"),
+      decodeFrame: async (frame) => Buffer.from([frame[0], frame[1]]),
+      write: async (pcm) => events.push(`pcm:${pcm.toString("hex")}`),
+      stop: async () => events.push("stop"),
+      cancel: async (reason) => events.push(`cancel:${reason}`)
+    },
+    log: () => {}
+  });
+  t.after(() => controller.dispose());
+
+  controller.pushLine(CONTROL_START);
+  await sleep(10);
+  controller.pushLine(audioLine(0x38));
+  await sleep(10);
+  assert.deepEqual(events, ["start", "pcm:ad55"]);
+  assert.deepEqual(sentTypes(sent), ["ptt_start"]);
+
+  controller.pushLine(CONTROL_STOP);
+  await sleep(25);
+  assert.deepEqual(events, ["start", "pcm:ad55", "stop"]);
+  assert.deepEqual(sentTypes(sent), ["ptt_start", "ptt_stop"]);
+});
+
+test("streaming mode cancels a key press that produced no audio", async (t) => {
+  const sent = [];
+  const events = [];
+  const controller = new XiaomiRemoteSessionController({
+    inactivityMs: 250,
+    sendJson: (message) => sent.push(message),
+    streamAudio: {
+      start: async () => events.push("start"),
+      decodeFrame: async () => Buffer.alloc(0),
+      write: async () => {},
+      stop: async () => events.push("stop"),
+      cancel: async (reason) => events.push(`cancel:${reason}`)
+    },
+    log: () => {}
+  });
+  t.after(() => controller.dispose());
+
+  controller.pushLine(CONTROL_START);
+  await sleep(350);
+  assert.deepEqual(events, ["start", "cancel:no_audio"]);
+  assert.deepEqual(sentTypes(sent), ["ptt_start", "ptt_cancel"]);
+});
+
+test("streaming stop waits for a slow publisher start so control messages stay ordered", async (t) => {
+  let releaseStart;
+  const startGate = new Promise((resolve) => {
+    releaseStart = resolve;
+  });
+  const events = [];
+  const controller = new XiaomiRemoteSessionController({
+    inactivityMs: 250,
+    sendJson: () => {},
+    streamAudio: {
+      start: async () => {
+        await startGate;
+        events.push("start");
+      },
+      decodeFrame: async () => Buffer.from([1, 2]),
+      write: async () => events.push("pcm"),
+      stop: async () => events.push("stop"),
+      cancel: async () => events.push("cancel")
+    },
+    log: () => {}
+  });
+  t.after(() => {
+    releaseStart();
+    controller.dispose();
+  });
+
+  controller.pushLine(CONTROL_START);
+  controller.pushLine(audioLine(0x38));
+  controller.pushLine(CONTROL_STOP);
+  await sleep(20);
+  assert.deepEqual(events, []);
+
+  releaseStart();
+  await sleep(40);
+  assert.deepEqual(events, ["start", "pcm", "stop"]);
+});
+
+test("capture reset finishes the old stream cancellation before a new stream starts", async (t) => {
+  let releaseCancel;
+  const cancelGate = new Promise((resolve) => {
+    releaseCancel = resolve;
+  });
+  const events = [];
+  let starts = 0;
+  const controller = new XiaomiRemoteSessionController({
+    inactivityMs: 250,
+    sendJson: () => {},
+    streamAudio: {
+      start: async () => events.push(`start:${++starts}`),
+      decodeFrame: async () => Buffer.from([1, 2]),
+      write: async () => {},
+      stop: async () => {},
+      cancel: async (reason) => {
+        events.push(`cancel-begin:${reason}`);
+        await cancelGate;
+        events.push(`cancel-end:${reason}`);
+      }
+    },
+    log: () => {}
+  });
+  t.after(async () => {
+    releaseCancel();
+    await controller.dispose();
+  });
+
+  controller.pushLine(CONTROL_START);
+  await sleep(15);
+  controller.reset("adapter_replug");
+  controller.pushLine(CONTROL_START);
+  await sleep(15);
+  assert.deepEqual(events, ["start:1", "cancel-begin:adapter_replug"]);
+
+  releaseCancel();
+  await sleep(25);
+  assert.deepEqual(events, [
+    "start:1",
+    "cancel-begin:adapter_replug",
+    "cancel-end:adapter_replug",
+    "start:2"
+  ]);
+});
+
+test("alternate-handle remote starts the overlay path and sends decoded audio", async (t) => {
+  const { controller, sent, audio, decoded } = createController();
+  t.after(() => controller.dispose());
+
+  controller.pushLine(ALTERNATE_CONTROL_START);
+  controller.pushLine(audioLine(0x08, "0x0039"));
+  controller.pushLine(audioLine(0x38, "0x003d"));
+  controller.pushLine(audioLine(0xc8, "0x0041"));
+  controller.pushLine(ALTERNATE_CONTROL_STOP);
+  await sleep(50);
+
+  assert.deepEqual(sentTypes(sent), ["ptt_start", "ptt_stop"]);
+  assert.equal(decoded[0].length, 3);
+  assert.equal(audio.length, 1);
 });
 
 test("decode failure cancels the session instead of sending audio", async (t) => {

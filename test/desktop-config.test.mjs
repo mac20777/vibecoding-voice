@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 
 import { buildDesktopFormState, buildUserConfigUpdates } from "../src/desktop-config.mjs";
 import { normalizeDesktopSettings } from "../src/desktop-settings.mjs";
-import { listConfigFileCandidatesForMode, resolveSendTarget } from "../src/config.mjs";
+import {
+  getConfigIssues,
+  listConfigFileCandidatesForMode,
+  resolveSendTarget,
+  resolveXiaomiRemoteVoiceModeDefault
+} from "../src/config.mjs";
 
 test("normalizeDesktopSettings applies safe defaults", () => {
   assert.deepEqual(normalizeDesktopSettings(), {
@@ -77,6 +82,8 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
       claudeCwd: "D:/claude",
       codexSkipGitRepoCheck: true,
       claudeDangerouslySkipPermissions: true,
+      xiaomiRemoteEnabled: true,
+      xiaomiRemoteVoiceMode: "wechat",
       loadedConfigFiles: ["C:/Users/test/AppData/Roaming/vibecoding-voice/config.env", "D:/github/app/.env"],
       userConfigPath: "C:/Users/test/AppData/Roaming/vibecoding-voice/config.env",
       cwdConfigPath: "D:/github/app/.env",
@@ -105,6 +112,7 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
   assert.equal(formState.voiceTranslationPrompt, "Translate to idiomatic English.");
   assert.equal(formState.voiceTranslationTargetLanguage, "korean");
   assert.equal(formState.voiceTranslationSendMode, "all");
+  assert.equal(formState.xiaomiRemoteVoiceMode, "wechat");
   assert.equal(formState.voiceTranslationSendBilingual, true);
   assert.deepEqual(formState.overrideFiles, ["D:/github/app/.env"]);
   assert.deepEqual(formState.desktopSettings, {
@@ -175,6 +183,7 @@ test("buildUserConfigUpdates normalizes desktop form payload into env values", (
     CODEX_SKIP_GIT_REPO_CHECK: "1",
     CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS: null,
     XIAOMI_REMOTE_ENABLED: null,
+    XIAOMI_REMOTE_VOICE_MODE: "builtin_stt",
     XIAOMI_REMOTE_BUTTON_MAP: null,
     XIAOMI_REMOTE_PROMPT_TEMPLATES: null,
     XIAOMI_REMOTE_PREVIEW_KEYS: null
@@ -193,6 +202,32 @@ test("resolveSendTarget defaults desktop mode to inject", () => {
     sendTarget: "text_injector",
     sendTargetAuto: false
   });
+});
+
+test("WeChat remote mode can start without a cloud STT API key", () => {
+  assert.deepEqual(getConfigIssues({
+    xiaomiRemoteEnabled: true,
+    xiaomiRemoteVoiceMode: "wechat",
+    mockTranscript: "",
+    voiceTranslationEnabled: false
+  }), []);
+
+  assert.match(
+    getConfigIssues({
+      xiaomiRemoteEnabled: true,
+      xiaomiRemoteVoiceMode: "builtin_stt",
+      mockTranscript: "",
+      voiceTranslationEnabled: false
+    })[0],
+    /No STT provider/
+  );
+});
+
+test("new installs default to WeChat while existing configs preserve built-in STT", () => {
+  assert.equal(resolveXiaomiRemoteVoiceModeDefault("", []), "wechat");
+  assert.equal(resolveXiaomiRemoteVoiceModeDefault("", ["C:\\Users\\me\\voice.env"]), "builtin_stt");
+  assert.equal(resolveXiaomiRemoteVoiceModeDefault("wechat", ["existing.env"]), "wechat");
+  assert.equal(resolveXiaomiRemoteVoiceModeDefault("builtin_stt", []), "builtin_stt");
 });
 
 test("resolveSendTarget auto-detects CLI target in Linux desktop mode", () => {
