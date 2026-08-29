@@ -15,7 +15,7 @@ import { getUserTodoListPath } from "./paths.mjs";
 import { createRuntimeLogger } from "./runtime-log.mjs";
 import { ClaudeSessionManager } from "./claude-session.mjs";
 import { CodexSessionManager } from "./codex-session.mjs";
-import { transcribePcm16Mono } from "./stt.mjs";
+import { STT_ERROR_CODES, transcribePcm16Mono } from "./stt.mjs";
 import { createTodoAssistant } from "./todo-assistant.mjs";
 import { createTodoService, VALID_VOICE_MODES } from "./todo-service.mjs";
 import {
@@ -38,6 +38,8 @@ import {
 } from "./remote-buttons.mjs";
 import { RemoteGestureEngine } from "./remote-gestures.mjs";
 import { runSystemCommand } from "./system-actions.mjs";
+import { normalizeXiaomiRemoteVoiceMode } from "./virtual-microphone-protocol.mjs";
+import { WindowsVirtualMicrophonePublisher } from "./windows-virtual-microphone.mjs";
 
 const config = loadConfig();
 
@@ -57,6 +59,46 @@ applyRateLimitSnapshot(readLatestRateLimits());
 const MIN_PLAUSIBLE_EPOCH_MS = Date.UTC(2020, 0, 1);
 const VALID_SEND_TARGETS = new Set(["text_injector", "codex_exec", "claude_code"]);
 const { log, logPath: runtimeLogPath } = createRuntimeLogger();
+
+// In wechat voice mode the desktop mic (F8) streams straight into the virtual
+// microphone publisher (VB-CABLE → WeChat) instead of the STT providers,
+// exactly like the Xiaomi remote does. One publisher child is reused across
+// segments; it self-cleans (releasing the WeChat shortcut and restoring the
+// default microphone) when its stdin breaks on server exit.
+let desktopVirtualMic = null;
+
+function isWechatVoiceMode() {
+  return normalizeXiaomiRemoteVoiceMode(config.xiaomiRemoteVoiceMode) === "wechat";
+}
+
+function getDesktopVirtualMic() {
+  if (!desktopVirtualMic) {
+    desktopVirtualMic = new WindowsVirtualMicrophonePublisher({ wechatShortcut: true, log });
+  }
+  return desktopVirtualMic;
+}
+
+function writeDesktopVirtualMicChunk(ws, state, chunk) {
+  const publisher = desktopVirtualMic;
+  if (!publisher) {
+    return;
+  }
+  publisher.write(Buffer.from(chunk)).catch((error) => {
+    if (!state.segmentWechat) {
+      return;
+    }
+    state.segmentActive = false;
+    state.segmentWechat = false;
+    state.chunks = [];
+    log("desktop virtual microphone write failed", error.message);
+    sendDictationJson(ws, {
+      type: "status",
+      status: "wechat_error",
+      text: String(error?.message || error)
+    });
+    void publisher.cancel().catch(() => {});
+  });
+}
 
 function getVoiceMode(state) {
   const mode = String(state?.voiceMode || "").trim().toLowerCase();
@@ -396,9 +438,12 @@ function createClientState() {
     authenticated: !config.lanSharedSecret,
     voiceMode: "normal",
     segmentActive: false,
+    segmentWechat: false,
     segmentSource: "",
     segmentTranscriptDeliveryMode: null,
     segmentTextInjectionMode: null,
+    activeDictation: null,
+    dictationSequence: 0,
     chunks: [],
     pendingSegments: [],
     pendingTranslatedSegments: [],
@@ -754,6 +799,10 @@ function launchClaudePrompt(prompt) {
   });
 }
 
+function isCurrentDictation(state, operation) {
+  return state.activeDictation === operation && operation.cancelled !== true;
+}
+
 async function finalizeSegment(ws, state) {
   const pcmBuffer = Buffer.concat(state.chunks);
   state.segmentActive = false;
@@ -767,127 +816,165 @@ async function finalizeSegment(ws, state) {
     return;
   }
 
+  const operation = {
+    id: ++state.dictationSequence,
+    controller: new AbortController(),
+    cancelled: false
+  };
+  state.activeDictation = operation;
+
   sendDictationJson(ws, {
     type: "status",
     status: "transcribing",
-    bytes: pcmBuffer.length
+    bytes: pcmBuffer.length,
+    timeoutMs: config.sttTimeoutMs
   });
 
   const startedAt = Date.now();
-  const transcript = String(await transcribePcm16Mono({ pcmBuffer, config }) || "").trim();
-  const hadPendingTranscript = Boolean(String(state.pendingTranscript || "").trim());
-
-  if (!transcript) {
-    sendDictationJson(ws, {
-      type: "status",
-      status: hadPendingTranscript ? "empty_segment" : "transcript_empty",
-      text: state.pendingTranscript,
-      translatedText: state.pendingTranslatedTranscript,
-      originalText: state.pendingOriginalTranscript,
-      transform: state.pendingTransform
-    });
-    return;
-  }
-
-  if (voiceMode === "todo") {
-    sendDictationJson(ws, {
-      type: "transcript_final",
-      text: transcript,
-      latencyMs: Date.now() - startedAt,
-      requiresAction: false
-    });
-    state.pendingTranscript = "";
-    state.pendingSegments = [];
-    state.pendingTranslatedTranscript = "";
-    state.pendingTranslatedSegments = [];
-    state.pendingOriginalTranscript = "";
-    state.pendingOriginalSegments = [];
-    state.pendingTransform = "none";
-    await dispatchTodoPrompt(ws, transcript, state);
-    return;
-  }
-
-  const translationResult = await translateVoiceTranscript(ws, transcript);
-  const translatedTranscript = translationResult.text;
-  const transcriptTransform = translationResult.transform;
-  const sendTranscript = applyArmedPromptTemplate(formatVoiceSendText({
-    originalText: transcript,
-    translatedText: translatedTranscript,
-    translations: translationResult.translations,
-    transform: transcriptTransform
-  }));
-
-  if (transcriptDeliveryMode === "remote_preview") {
-    // Segments accumulate: hold the voice key again to append, the undo
-    // gesture pops the last segment, confirm sends the joined text.
-    if (!remotePreview || remotePreview.ws !== ws) {
-      remotePreview = { ws, segments: [], textInjectionMode };
+  try {
+    const transcript = String(await transcribePcm16Mono({
+      pcmBuffer,
+      config,
+      signal: operation.controller.signal
+    }) || "").trim();
+    if (!isCurrentDictation(state, operation)) {
+      return;
     }
-    remotePreview.segments.push(sendTranscript);
-    const previewText = joinPendingSegments(remotePreview.segments);
+    const hadPendingTranscript = Boolean(String(state.pendingTranscript || "").trim());
+
+    if (!transcript) {
+      sendDictationJson(ws, {
+        type: "status",
+        status: hadPendingTranscript ? "empty_segment" : "transcript_empty",
+        text: state.pendingTranscript,
+        translatedText: state.pendingTranslatedTranscript,
+        originalText: state.pendingOriginalTranscript,
+        transform: state.pendingTransform
+      });
+      return;
+    }
+
+    if (voiceMode === "todo") {
+      sendDictationJson(ws, {
+        type: "transcript_final",
+        text: transcript,
+        latencyMs: Date.now() - startedAt,
+        requiresAction: false
+      });
+      state.pendingTranscript = "";
+      state.pendingSegments = [];
+      state.pendingTranslatedTranscript = "";
+      state.pendingTranslatedSegments = [];
+      state.pendingOriginalTranscript = "";
+      state.pendingOriginalSegments = [];
+      state.pendingTransform = "none";
+      await dispatchTodoPrompt(ws, transcript, state);
+      return;
+    }
+
+    const translationResult = await translateVoiceTranscript(ws, transcript);
+    if (!isCurrentDictation(state, operation)) {
+      return;
+    }
+    const translatedTranscript = translationResult.text;
+    const transcriptTransform = translationResult.transform;
+    const sendTranscript = applyArmedPromptTemplate(formatVoiceSendText({
+      originalText: transcript,
+      translatedText: translatedTranscript,
+      translations: translationResult.translations,
+      transform: transcriptTransform
+    }));
+
+    if (transcriptDeliveryMode === "remote_preview") {
+      appendRemotePreviewSegment(ws, {
+        textInjectionMode,
+        sendTranscript,
+        transcript,
+        translationResult,
+        latencyMs: Date.now() - startedAt
+      });
+      return;
+    }
+
+    if (transcriptDeliveryMode === "confirm_on_device") {
+      state.pendingSegments.push(sendTranscript);
+      state.pendingTranslatedSegments.push(translatedTranscript);
+      state.pendingOriginalSegments.push(transcript);
+      state.pendingTransform = transcriptTransform;
+      const pendingTranscript = updatePendingTranscript(state);
+      sendDictationJson(ws, {
+        type: "transcript_final",
+        text: pendingTranscript,
+        translatedText: state.pendingTranslatedTranscript,
+        originalText: state.pendingOriginalTranscript,
+        targetLanguage: translationResult.targetLanguage,
+        transform: state.pendingTransform,
+        latencyMs: Date.now() - startedAt,
+        requiresAction: true
+      });
+      sendDictationJson(ws, {
+        type: "status",
+        status: "awaiting_action",
+        text: pendingTranscript,
+        translatedText: state.pendingTranslatedTranscript,
+        originalText: state.pendingOriginalTranscript,
+        targetLanguage: translationResult.targetLanguage,
+        transform: state.pendingTransform
+      });
+      return;
+    }
+
     sendDictationJson(ws, {
       type: "transcript_final",
-      text: previewText,
+      text: sendTranscript,
       translatedText: translatedTranscript,
       originalText: transcript,
       targetLanguage: translationResult.targetLanguage,
       translations: translationResult.translations,
       transform: transcriptTransform,
       latencyMs: Date.now() - startedAt,
-      requiresAction: true
+      requiresAction: false
     });
-    sendDictationJson(ws, {
-      type: "status",
-      status: "awaiting_action",
-      text: previewText
-    });
-    return;
-  }
 
-  if (transcriptDeliveryMode === "confirm_on_device") {
-    state.pendingSegments.push(sendTranscript);
-    state.pendingTranslatedSegments.push(translatedTranscript);
-    state.pendingOriginalSegments.push(transcript);
-    state.pendingTransform = transcriptTransform;
-    const pendingTranscript = updatePendingTranscript(state);
-    sendDictationJson(ws, {
-      type: "transcript_final",
-      text: pendingTranscript,
-      translatedText: state.pendingTranslatedTranscript,
-      originalText: state.pendingOriginalTranscript,
-      targetLanguage: translationResult.targetLanguage,
-      transform: state.pendingTransform,
-      latencyMs: Date.now() - startedAt,
-      requiresAction: true
-    });
-    sendDictationJson(ws, {
-      type: "status",
-      status: "awaiting_action",
-      text: pendingTranscript,
-      translatedText: state.pendingTranslatedTranscript,
-      originalText: state.pendingOriginalTranscript,
-      targetLanguage: translationResult.targetLanguage,
-      transform: state.pendingTransform
-    });
-    return;
-  }
-
-  sendDictationJson(ws, {
-    type: "transcript_final",
-    text: sendTranscript,
-    translatedText: translatedTranscript,
-    originalText: transcript,
-    targetLanguage: translationResult.targetLanguage,
-    translations: translationResult.translations,
-    transform: transcriptTransform,
-    latencyMs: Date.now() - startedAt,
-    requiresAction: false
-  });
-
-  if (config.sendTarget === "codex_exec") {
-    if (codexSession.isRunning()) {
-      throw new Error("Codex session is busy");
+    if (config.sendTarget === "codex_exec") {
+      if (codexSession.isRunning()) {
+        throw new Error("Codex session is busy");
+      }
+      state.pendingTranscript = "";
+      sendDictationJson(ws, {
+        type: "status",
+        status: "typed",
+        text: sendTranscript,
+        translatedText: translatedTranscript,
+        originalText: transcript,
+        targetLanguage: translationResult.targetLanguage,
+        translations: translationResult.translations,
+        transform: transcriptTransform
+      });
+      launchCodexPrompt(sendTranscript);
+      return;
     }
+
+    if (config.sendTarget === "claude_code") {
+      if (claudeSession.isRunning()) {
+        throw new Error("Claude session is busy");
+      }
+      state.pendingTranscript = "";
+      sendDictationJson(ws, {
+        type: "status",
+        status: "typed",
+        text: sendTranscript,
+        translatedText: translatedTranscript,
+        originalText: transcript,
+        targetLanguage: translationResult.targetLanguage,
+        translations: translationResult.translations,
+        transform: transcriptTransform
+      });
+      launchClaudePrompt(sendTranscript);
+      return;
+    }
+
+    await dispatchPrompt(sendTranscript, { textInjectionMode });
     state.pendingTranscript = "";
     sendDictationJson(ws, {
       type: "status",
@@ -899,41 +986,24 @@ async function finalizeSegment(ws, state) {
       translations: translationResult.translations,
       transform: transcriptTransform
     });
-    launchCodexPrompt(sendTranscript);
-    return;
-  }
-
-  if (config.sendTarget === "claude_code") {
-    if (claudeSession.isRunning()) {
-      throw new Error("Claude session is busy");
+  } catch (error) {
+    if (!isCurrentDictation(state, operation) || error?.code === STT_ERROR_CODES.CANCELLED) {
+      return;
     }
-    state.pendingTranscript = "";
+    const timedOut = error?.code === STT_ERROR_CODES.TIMEOUT;
+    const message = error instanceof Error ? error.message : String(error);
+    log(timedOut ? "transcription timeout" : "transcription failed", message);
     sendDictationJson(ws, {
       type: "status",
-      status: "typed",
-      text: sendTranscript,
-      translatedText: translatedTranscript,
-      originalText: transcript,
-      targetLanguage: translationResult.targetLanguage,
-      translations: translationResult.translations,
-      transform: transcriptTransform
+      status: timedOut ? "transcription_timeout" : "transcription_error",
+      text: message,
+      timeoutMs: config.sttTimeoutMs
     });
-    launchClaudePrompt(sendTranscript);
-    return;
+  } finally {
+    if (state.activeDictation === operation) {
+      state.activeDictation = null;
+    }
   }
-
-  await dispatchPrompt(sendTranscript, { textInjectionMode });
-  state.pendingTranscript = "";
-  sendDictationJson(ws, {
-    type: "status",
-    status: "typed",
-    text: sendTranscript,
-    translatedText: translatedTranscript,
-    originalText: transcript,
-    targetLanguage: translationResult.targetLanguage,
-    translations: translationResult.translations,
-    transform: transcriptTransform
-  });
 }
 
 function emitVoiceTranslationState(ws) {
@@ -1206,6 +1276,143 @@ function launchRemoteApp(command) {
 // OK injects + sends the previewed transcript, Back discards it.
 let remotePreview = null;
 
+function cancelClientInFlightDictation(ws, state, origin, { notify = true } = {}) {
+  let cancelled = false;
+  if (state.activeDictation) {
+    const operation = state.activeDictation;
+    state.activeDictation = null;
+    operation.cancelled = true;
+    operation.controller.abort();
+    cancelled = true;
+  }
+  if (state.segmentActive || state.segmentWechat) {
+    if (state.segmentWechat) {
+      void desktopVirtualMic?.cancel().catch((error) => {
+        log("desktop virtual microphone cancel failed", error.message);
+      });
+    }
+    state.segmentActive = false;
+    state.segmentWechat = false;
+    state.chunks = [];
+    cancelled = true;
+  }
+  if (cancelled) {
+    log("dictation cancelled", state.deviceId, origin);
+    if (notify) {
+      sendDictationJson(ws, { type: "status", status: "cancelled", reason: origin });
+    }
+  }
+  return cancelled;
+}
+
+function cancelInFlightDictations(origin, options = {}) {
+  let cancelled = false;
+  for (const client of wss.clients) {
+    if (client.clientState) {
+      cancelled = cancelClientInFlightDictation(client, client.clientState, origin, options) || cancelled;
+    }
+  }
+  return cancelled;
+}
+
+function clearPendingDictation(ws, state, origin) {
+  if (state.pendingSegments.length === 0 && !state.pendingTranscript) {
+    return false;
+  }
+  state.pendingSegments = [];
+  state.pendingTranslatedSegments = [];
+  state.pendingOriginalSegments = [];
+  state.pendingTranscript = "";
+  state.pendingTranslatedTranscript = "";
+  state.pendingOriginalTranscript = "";
+  state.pendingTransform = "none";
+  log("pending dictation cancelled", state.deviceId, origin);
+  sendDictationJson(ws, { type: "status", status: "cancelled", reason: origin });
+  return true;
+}
+
+function cancelActiveDictation(origin) {
+  let cancelled = cancelInFlightDictations(origin);
+  cancelled = discardRemotePreview(origin) || cancelled;
+  for (const client of wss.clients) {
+    if (client.clientState) {
+      cancelled = clearPendingDictation(client, client.clientState, origin) || cancelled;
+    }
+  }
+  cancelled = cancelSystemAction(origin) || cancelled;
+  return cancelled;
+}
+
+function appendRemotePreviewSegment(ws, {
+  textInjectionMode,
+  sendTranscript,
+  transcript,
+  translationResult,
+  latencyMs
+}) {
+  // Segments accumulate: hold the voice key again to append, the undo
+  // gesture pops the last segment, confirm sends the joined text.
+  if (!remotePreview || remotePreview.ws !== ws) {
+    remotePreview = { ws, segments: [], textInjectionMode };
+  }
+  remotePreview.segments.push(sendTranscript);
+  const previewText = joinPendingSegments(remotePreview.segments);
+  sendDictationJson(ws, {
+    type: "transcript_final",
+    text: previewText,
+    translatedText: translationResult.text,
+    originalText: transcript,
+    targetLanguage: translationResult.targetLanguage,
+    translations: translationResult.translations,
+    transform: translationResult.transform,
+    latencyMs,
+    requiresAction: true
+  });
+  sendDictationJson(ws, {
+    type: "status",
+    status: "awaiting_action",
+    text: previewText
+  });
+}
+
+// WeChat is only the recognition engine: its transcript always waits in the
+// overlay preview (remote_preview) until the send key (F9 / remote OK)
+// confirms, regardless of the TRANSCRIPT_DELIVERY_MODE setting.
+async function handleWechatTranscript(ws, message) {
+  const source = String(message.source || "").trim();
+  if (source !== "desktop_mic" && source !== "xiaomi_remote") {
+    log("wechat_transcript rejected: unknown source", source);
+    return;
+  }
+  const transcript = String(message.text || "").trim();
+  if (!transcript) {
+    sendDictationJson(ws, { type: "status", status: "transcript_empty" });
+    return;
+  }
+  const { textInjectionMode } = resolveSegmentOptions({ source });
+  log("wechat_transcript", { source, chars: transcript.length });
+  try {
+    const translationResult = await translateVoiceTranscript(ws, transcript);
+    const sendTranscript = applyArmedPromptTemplate(formatVoiceSendText({
+      originalText: transcript,
+      translatedText: translationResult.text,
+      translations: translationResult.translations,
+      transform: translationResult.transform
+    }));
+    appendRemotePreviewSegment(ws, {
+      textInjectionMode,
+      sendTranscript,
+      transcript,
+      translationResult,
+      latencyMs: 0
+    });
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error);
+    log("wechat_transcript failed", text);
+    sendDictationJson(ws, { type: "status", status: "transcription_error", text });
+  }
+}
+
 async function confirmRemotePreview(origin) {
   const preview = remotePreview;
   if (!preview) {
@@ -1406,6 +1613,12 @@ const remoteGestureEngine = remoteButtonActions
           }
           return;
         }
+        // During recording/recognition, Back is an unconditional escape hatch.
+        // Once a transcript is awaiting confirmation, the existing preview
+        // bindings keep their undo/discard semantics.
+        if (button === "back" && gesture === "click" && cancelInFlightDictations("remote_back")) {
+          return;
+        }
         const previewAction = remotePreview ? previewActionForGesture(button, gesture) : null;
         if (previewAction === "confirm") {
           void confirmRemotePreview("gesture");
@@ -1577,7 +1790,11 @@ wss.on("connection", (ws, req) => {
 
       if (isBinary) {
         if (state.segmentActive) {
-          state.chunks.push(Buffer.from(data));
+          if (state.segmentWechat) {
+            writeDesktopVirtualMicChunk(ws, state, data);
+          } else {
+            state.chunks.push(Buffer.from(data));
+          }
         }
         return;
       }
@@ -1612,6 +1829,25 @@ wss.on("connection", (ws, req) => {
             state.segmentTranscriptDeliveryMode = segmentOptions.transcriptDeliveryMode;
             state.segmentTextInjectionMode = segmentOptions.textInjectionMode;
           }
+          cancelClientInFlightDictation(ws, state, "new_recording", { notify: false });
+          state.segmentWechat =
+            state.segmentSource === "desktop_mic" && isWechatVoiceMode();
+          if (state.segmentWechat) {
+            try {
+              await getDesktopVirtualMic().start();
+            } catch (error) {
+              state.segmentWechat = false;
+              state.segmentActive = false;
+              state.chunks = [];
+              log("desktop virtual microphone start failed", error);
+              sendDictationJson(ws, {
+                type: "status",
+                status: "wechat_error",
+                text: String(error?.message || error)
+              });
+              break;
+            }
+          }
           log("ptt_start", state.deviceId);
           if (remotePreview && remotePreview.ws !== ws) {
             discardRemotePreview("new_recording_elsewhere");
@@ -1626,6 +1862,23 @@ wss.on("connection", (ws, req) => {
             break;
           }
           log("ptt_stop", state.deviceId, state.chunks.length);
+          if (state.segmentWechat) {
+            state.segmentWechat = false;
+            state.segmentActive = false;
+            state.chunks = [];
+            try {
+              await desktopVirtualMic?.stop();
+              sendDictationJson(ws, { type: "status", status: "wechat_sent" });
+            } catch (error) {
+              log("desktop virtual microphone stop failed", error);
+              sendDictationJson(ws, {
+                type: "status",
+                status: "wechat_error",
+                text: String(error?.message || error)
+              });
+            }
+            break;
+          }
           await finalizeSegment(ws, state);
           break;
         case "ptt_cancel":
@@ -1634,9 +1887,24 @@ wss.on("connection", (ws, req) => {
             break;
           }
           log("ptt_cancel", state.deviceId, state.chunks.length);
-          state.segmentActive = false;
-          state.chunks = [];
-          sendDictationJson(ws, { type: "status", status: "cancelled" });
+          if (!cancelClientInFlightDictation(ws, state, "ptt_cancel")) {
+            sendDictationJson(ws, { type: "status", status: "cancelled", reason: "ptt_cancel" });
+          }
+          break;
+        case "wechat_transcript":
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
+          await handleWechatTranscript(ws, message);
+          break;
+        case "cancel_active_dictation":
+          if (!state.authenticated) {
+            closeWithAuthError(ws, state, "auth_required");
+            break;
+          }
+          log("cancel_active_dictation", state.deviceId, message.origin || "client");
+          cancelActiveDictation(String(message.origin || "client"));
           break;
         case "remote_button":
           if (!state.authenticated) {
@@ -1877,6 +2145,7 @@ wss.on("connection", (ws, req) => {
   });
 
   ws.on("close", () => {
+    cancelClientInFlightDictation(ws, state, "client_disconnect", { notify: false });
     clearPendingTodoIntent(state);
     log("client disconnected", state.deviceId);
   });
@@ -1895,6 +2164,8 @@ server.listen(config.port, config.bindHost, () => {
 function shutdown() {
   log("shutting down");
   clearInterval(keepaliveInterval);
+  // The publisher also self-cleans when its stdin breaks; dispose just hurries it.
+  void desktopVirtualMic?.dispose().catch(() => {});
   discoveryServer?.close();
   for (const client of wss.clients) {
     client.terminate();

@@ -27,6 +27,8 @@ const isDoctor = process.argv.includes("--doctor");
 const isFixHid = process.argv.includes("--fix-hid");
 const once = process.argv.includes("--once");
 const config = loadConfig();
+let wechatCaptureRequestSequence = 0;
+const pendingWechatCaptureRequests = new Map();
 
 function log(message, details = "") {
   const suffix = details ? ` ${typeof details === "string" ? details : JSON.stringify(details)}` : "";
@@ -46,6 +48,49 @@ function sendDesktopCaptureStatus(state, metadata = {}) {
   } catch {
     // The desktop may already be shutting down; capture cleanup still runs.
   }
+}
+
+process.on("message", (message) => {
+  if (message?.type !== "xiaomi_remote_wechat_capture_prepared") {
+    return;
+  }
+  const requestId = String(message.requestId || "");
+  const pending = pendingWechatCaptureRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingWechatCaptureRequests.delete(requestId);
+  clearTimeout(pending.timer);
+  if (message.ok === true) {
+    pending.resolve(message);
+  } else {
+    pending.reject(new Error(String(message.error || "微信语音接收框准备失败。")));
+  }
+});
+
+function prepareDesktopWechatCapture() {
+  if (process.env.VIBE_DESKTOP !== "1" || typeof process.send !== "function") {
+    return Promise.resolve(null);
+  }
+  const requestId = `${process.pid}-${Date.now()}-${++wechatCaptureRequestSequence}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingWechatCaptureRequests.delete(requestId);
+      reject(new Error("等待桌面微信语音接收框超时。"));
+    }, 3_000);
+    timer.unref?.();
+    pendingWechatCaptureRequests.set(requestId, { resolve, reject, timer });
+    try {
+      process.send({
+        type: "xiaomi_remote_wechat_capture_prepare",
+        requestId
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      pendingWechatCaptureRequests.delete(requestId);
+      reject(error);
+    }
+  });
 }
 
 function sendDesktopMenuGuardStatus(state, metadata = {}) {
@@ -283,6 +328,7 @@ async function main() {
       ? {
           streamAudio: {
             start: async () => {
+              await prepareDesktopWechatCapture();
               streamDecoder = new MsbcDecoder();
               await virtualMicrophone.start();
             },

@@ -54,6 +54,14 @@ export function selectVirtualMicrophonePair(endpoints = []) {
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(MODULE_DIR, "..");
 
+// Tests and development can point VIBE_VIRTUAL_MIC_PUBLISHER_PATH at a Node
+// script; run it through the current Node executable instead of exec directly.
+function publisherCommand(executablePath, args) {
+  return /\.(mjs|cjs|js)$/i.test(executablePath)
+    ? { command: process.execPath, args: [executablePath, ...args] }
+    : { command: executablePath, args };
+}
+
 export function resolveVirtualMicrophonePublisherPath(env = process.env) {
   const explicit = String(env.VIBE_VIRTUAL_MIC_PUBLISHER_PATH || "").trim();
   if (explicit) {
@@ -126,7 +134,8 @@ export function inspectWindowsVirtualMicrophone({ executablePath, env = process.
     });
   }
   const inspect = () => new Promise((resolve) => {
-    execFile(resolvedPath, ["--list"], {
+    const listed = publisherCommand(resolvedPath, ["--list"]);
+    execFile(listed.command, listed.args, {
       encoding: "utf8",
       windowsHide: true,
       timeout: 5_000,
@@ -165,7 +174,8 @@ export function inspectWindowsVirtualMicrophone({ executablePath, env = process.
     return inspect();
   }
   return new Promise((resolve) => {
-    execFile(resolvedPath, ["--restore-route", routeStatePath], {
+    const restored = publisherCommand(resolvedPath, ["--restore-route", routeStatePath]);
+    execFile(restored.command, restored.args, {
       encoding: "utf8",
       windowsHide: true,
       timeout: 5_000,
@@ -263,7 +273,8 @@ export class WindowsVirtualMicrophonePublisher {
       routeStatePath: this.routeStatePath,
       wechatShortcut: this.wechatShortcut
     });
-    const child = spawn(this.executablePath, args, {
+    const launched = publisherCommand(this.executablePath, args);
+    const child = spawn(launched.command, launched.args, {
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"]
     });

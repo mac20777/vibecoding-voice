@@ -197,3 +197,107 @@ test("ptt_cancel clears the recording segment and the next session still works",
     `server should handle ptt_cancel natively\n${serverOutput.join("")}`
   );
 });
+
+test("active recognition can be cancelled by desktop escape command and remote Back", async (t) => {
+  const port = await getFreePort();
+  const appDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-recognition-cancel-"));
+  const server = spawn(process.execPath, ["src/server.mjs"], {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      APPDATA: appDataRoot,
+      LAN_SHARED_SECRET: "",
+      LAN_DISCOVERY_ENABLED: "0",
+      LAN_VOICE_BIND: "127.0.0.1",
+      LAN_VOICE_PORT: String(port),
+      MOCK_TRANSCRIPT: "这个迟到结果不应出现",
+      MOCK_TRANSCRIPT_DELAY_MS: "1500",
+      STT_TIMEOUT_MS: "5000",
+      SEND_TARGET: "text_injector",
+      DRY_RUN_TEXT_INJECTION: "1",
+      TRANSCRIPT_DELIVERY_MODE: "immediate",
+      XIAOMI_REMOTE_BUTTONS: "1"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  t.after(async () => {
+    await stopServer(server);
+    fs.rmSync(appDataRoot, { recursive: true, force: true });
+  });
+
+  const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
+  const messages = createMessageCollector(ws);
+  t.after(() => closeWebSocket(ws));
+  ws.send(JSON.stringify({ type: "hello", deviceId: "xiaomi-test", boardType: "xiaomi-remote-msbc" }));
+  await messages.waitFor((message) => message.type === "hello_ack");
+  await messages.waitFor((message) => message.type === "server_ready");
+
+  const startRecognition = async () => {
+    ws.send(JSON.stringify({ type: "ptt_start", source: "xiaomi_remote" }));
+    ws.send(Buffer.from([0x00, 0x00]), { binary: true });
+    ws.send(JSON.stringify({ type: "ptt_stop", source: "xiaomi_remote" }));
+    await messages.waitFor((message) => message.type === "status" && message.status === "transcribing");
+  };
+
+  await startRecognition();
+  ws.send(JSON.stringify({ type: "cancel_active_dictation", origin: "escape" }));
+  await messages.waitFor((message) => message.type === "status" && message.status === "cancelled");
+
+  await startRecognition();
+  ws.send(JSON.stringify({ type: "remote_button", button: "back", pressed: true }));
+  ws.send(JSON.stringify({ type: "remote_button", button: "back", pressed: false }));
+  await messages.waitFor((message) => message.type === "status" && message.status === "cancelled");
+
+  await assert.rejects(
+    messages.waitFor((message) => message.type === "transcript_final", 400),
+    /message_timeout/
+  );
+});
+
+test("recognition timeout reports a terminal status instead of leaving the overlay busy", async (t) => {
+  const port = await getFreePort();
+  const appDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-recognition-timeout-"));
+  const server = spawn(process.execPath, ["src/server.mjs"], {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      APPDATA: appDataRoot,
+      LAN_SHARED_SECRET: "",
+      LAN_DISCOVERY_ENABLED: "0",
+      LAN_VOICE_BIND: "127.0.0.1",
+      LAN_VOICE_PORT: String(port),
+      MOCK_TRANSCRIPT: "超时后不应返回",
+      MOCK_TRANSCRIPT_DELAY_MS: "1000",
+      STT_TIMEOUT_MS: "80",
+      SEND_TARGET: "text_injector",
+      DRY_RUN_TEXT_INJECTION: "1",
+      TRANSCRIPT_DELIVERY_MODE: "immediate"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  t.after(async () => {
+    await stopServer(server);
+    fs.rmSync(appDataRoot, { recursive: true, force: true });
+  });
+
+  const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
+  const messages = createMessageCollector(ws);
+  t.after(() => closeWebSocket(ws));
+  ws.send(JSON.stringify({ type: "hello", deviceId: "timeout-test", boardType: "xiaomi-remote-msbc" }));
+  await messages.waitFor((message) => message.type === "hello_ack");
+  await messages.waitFor((message) => message.type === "server_ready");
+  ws.send(JSON.stringify({ type: "ptt_start", source: "xiaomi_remote" }));
+  ws.send(Buffer.from([0x00, 0x00]), { binary: true });
+  ws.send(JSON.stringify({ type: "ptt_stop", source: "xiaomi_remote" }));
+
+  const timeoutMessage = await messages.waitFor(
+    (message) => message.type === "status" && message.status === "transcription_timeout"
+  );
+  assert.equal(timeoutMessage.timeoutMs, 80);
+  await assert.rejects(
+    messages.waitFor((message) => message.type === "transcript_final", 250),
+    /message_timeout/
+  );
+});

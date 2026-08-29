@@ -5,6 +5,79 @@ import { randomUUID } from "node:crypto";
 import { projectRoot } from "./paths.mjs";
 import { pcm16MonoToWav } from "./wav.mjs";
 
+export const STT_ERROR_CODES = Object.freeze({
+  CANCELLED: "STT_CANCELLED",
+  TIMEOUT: "STT_TIMEOUT"
+});
+
+function sttError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function abortableDelay(ms, signal) {
+  if (!(Number(ms) > 0)) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, Number(ms));
+    const onAbort = () => {
+      clearTimeout(timer);
+      cleanup();
+      reject(signal.reason || sttError(STT_ERROR_CODES.CANCELLED, "Speech recognition was cancelled."));
+    };
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function withTranscriptionDeadline({ timeoutMs, signal }, operation) {
+  const controller = new AbortController();
+  const effectiveTimeoutMs = Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0
+    ? Number(timeoutMs)
+    : 15_000;
+  let abortCause = "";
+  const onExternalAbort = () => {
+    abortCause = "cancelled";
+    controller.abort(signal?.reason);
+  };
+  if (signal?.aborted) {
+    throw sttError(STT_ERROR_CODES.CANCELLED, "Speech recognition was cancelled.");
+  }
+  signal?.addEventListener("abort", onExternalAbort, { once: true });
+  const timer = setTimeout(() => {
+    abortCause = "timeout";
+    controller.abort();
+  }, effectiveTimeoutMs);
+  timer.unref?.();
+
+  try {
+    return await operation(controller.signal);
+  } catch (error) {
+    if (abortCause === "cancelled" || signal?.aborted) {
+      throw sttError(STT_ERROR_CODES.CANCELLED, "Speech recognition was cancelled.");
+    }
+    if (abortCause === "timeout") {
+      throw sttError(
+        STT_ERROR_CODES.TIMEOUT,
+        `Speech recognition timed out after ${effectiveTimeoutMs} ms.`
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onExternalAbort);
+  }
+}
+
 async function saveDebugWavIfNeeded(wavBuffer, enabled) {
   if (!enabled) {
     return null;
@@ -17,28 +90,32 @@ async function saveDebugWavIfNeeded(wavBuffer, enabled) {
   return filePath;
 }
 
-export async function transcribePcm16Mono({ pcmBuffer, config }) {
+export async function transcribePcm16Mono({ pcmBuffer, config, signal }) {
   if (!pcmBuffer || pcmBuffer.length === 0) {
     return "";
   }
 
-  if (config.mockTranscript) {
-    const wav = pcm16MonoToWav(pcmBuffer);
-    await saveDebugWavIfNeeded(wav, config.saveDebugWav);
-    return config.mockTranscript;
-  }
-
   const wav = pcm16MonoToWav(pcmBuffer);
   await saveDebugWavIfNeeded(wav, config.saveDebugWav);
-  const provider = resolveProvider(config);
-  if (provider === "openai") {
-    return await transcribeWithOpenAI(wav, config);
-  }
-  if (provider === "volcengine") {
-    return await transcribeWithVolcengine(wav, config);
-  }
+  return await withTranscriptionDeadline(
+    { timeoutMs: config.sttTimeoutMs, signal },
+    async (requestSignal) => {
+      if (config.mockTranscript) {
+        await abortableDelay(config.mockTranscriptDelayMs, requestSignal);
+        return config.mockTranscript;
+      }
 
-  throw new Error("No STT provider is configured. Set STT_PROVIDER or provider-specific keys.");
+      const provider = resolveProvider(config);
+      if (provider === "openai") {
+        return await transcribeWithOpenAI(wav, config, requestSignal);
+      }
+      if (provider === "volcengine") {
+        return await transcribeWithVolcengine(wav, config, requestSignal);
+      }
+
+      throw new Error("No STT provider is configured. Set STT_PROVIDER or provider-specific keys.");
+    }
+  );
 }
 
 function resolveProvider(config) {
@@ -54,7 +131,7 @@ function resolveProvider(config) {
   return "";
 }
 
-async function transcribeWithOpenAI(wavBuffer, config) {
+async function transcribeWithOpenAI(wavBuffer, config, signal) {
   if (!config.openaiApiKey) {
     throw new Error("OPENAI_API_KEY is not set");
   }
@@ -71,7 +148,8 @@ async function transcribeWithOpenAI(wavBuffer, config) {
     headers: {
       Authorization: `Bearer ${config.openaiApiKey}`
     },
-    body: form
+    body: form,
+    signal
   });
 
   if (!response.ok) {
@@ -83,7 +161,7 @@ async function transcribeWithOpenAI(wavBuffer, config) {
   return String(payload.text || "").trim();
 }
 
-async function transcribeWithVolcengine(wavBuffer, config) {
+async function transcribeWithVolcengine(wavBuffer, config, signal) {
   if (!config.volcengineAppKey || !config.volcengineAccessKey) {
     throw new Error("VOLCENGINE_APP_KEY or VOLCENGINE_ACCESS_KEY is not set");
   }
@@ -114,7 +192,8 @@ async function transcribeWithVolcengine(wavBuffer, config) {
         enable_punc: true,
         show_utterances: false
       }
-    })
+    }),
+    signal
   });
 
   const statusCode = response.headers.get("X-Api-Status-Code") || "";

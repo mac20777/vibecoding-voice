@@ -40,6 +40,22 @@
     word-break: break-word;
   }
   .hint { font-size: 11px; color: #6dddff; margin-top: 3px; }
+  .cancel {
+    -webkit-app-region: no-drag;
+    width: 30px; height: 30px; flex: none;
+    border: 0; border-radius: 50%;
+    background: rgba(255, 255, 255, 0.09); color: #d8dae0;
+    font-size: 20px; line-height: 28px; cursor: pointer;
+  }
+  .cancel:hover { background: rgba(255, 138, 138, 0.22); color: #fff; }
+  .wechat-capture {
+    position: fixed;
+    left: 10px; top: 10px;
+    width: 2px; height: 2px;
+    opacity: 0;
+    border: 0; padding: 0;
+    resize: none;
+  }
   .hidden { display: none; }
 </style>
 </head>
@@ -51,13 +67,19 @@
       <div class="text hidden" id="text"></div>
       <div class="hint hidden" id="hint"></div>
     </div>
+    <button class="cancel hidden" id="cancel" type="button" aria-label="取消">×</button>
   </div>
+  <textarea id="wechat-capture" class="wechat-capture" aria-hidden="true"></textarea>
   <script>
     const T = {
       zh: {
         listening: "正在听…",
         transcribing: "识别中…",
+        cancelHint: "Esc / F8 / 遥控器返回键 / × 均可取消",
+        timeout: "识别超时，已自动取消",
+        failed: "识别失败，已取消",
         waiting: "待确认",
+        wechatProcessing: "微信识别中…",
         confirmHint: "按确认键发送 · 按返回键撤销",
         sent: "已发送 ✓",
         cancelled: "已取消",
@@ -69,7 +91,11 @@
       en: {
         listening: "Listening…",
         transcribing: "Transcribing…",
+        cancelHint: "Esc / F8 / remote Back / × to cancel",
+        timeout: "Recognition timed out and was cancelled",
+        failed: "Recognition failed and was cancelled",
         waiting: "Confirm",
+        wechatProcessing: "Waiting for WeChat…",
         confirmHint: "Press OK to send · Back to cancel",
         sent: "Sent ✓",
         cancelled: "Cancelled",
@@ -84,15 +110,74 @@
     const statusEl = document.getElementById("status");
     const textEl = document.getElementById("text");
     const hintEl = document.getElementById("hint");
+    const cancelEl = document.getElementById("cancel");
+    const wechatCaptureEl = document.getElementById("wechat-capture");
 
-    function render(statusKey, dotClass, text = "", hint = "") {
+    function render(statusKey, dotClass, text = "", hint = "", cancellable = false) {
       dot.className = `dot ${dotClass}`;
       statusEl.textContent = statusKey;
       textEl.textContent = text;
       textEl.classList.toggle("hidden", !text);
       hintEl.textContent = hint;
       hintEl.classList.toggle("hidden", !hint);
+      cancelEl.classList.toggle("hidden", !cancellable);
     }
+
+    cancelEl.addEventListener("click", () => window.vibeOverlay.cancel("overlay_click"));
+
+    let wechatCapture = null;
+    let wechatCommitTimer = null;
+    let wechatTimeoutTimer = null;
+    let wechatComposing = false;
+
+    function clearWechatCaptureTimers() {
+      clearTimeout(wechatCommitTimer);
+      clearTimeout(wechatTimeoutTimer);
+      wechatCommitTimer = null;
+      wechatTimeoutTimer = null;
+    }
+
+    function finishWechatCapture(reason = "settled") {
+      if (!wechatCapture) {
+        return;
+      }
+      const session = wechatCapture;
+      const text = wechatCaptureEl.value.trim();
+      wechatCapture = null;
+      clearWechatCaptureTimers();
+      wechatCaptureEl.blur();
+      window.vibeOverlay.wechatCaptureResult({
+        sessionId: session.sessionId,
+        source: session.source,
+        text,
+        reason
+      });
+    }
+
+    function scheduleWechatCaptureCommit() {
+      if (!wechatCapture?.stopped || wechatComposing || !wechatCaptureEl.value.trim()) {
+        return;
+      }
+      clearTimeout(wechatCommitTimer);
+      wechatCommitTimer = setTimeout(() => finishWechatCapture("settled"), 850);
+    }
+
+    wechatCaptureEl.addEventListener("compositionstart", () => {
+      wechatComposing = true;
+      clearTimeout(wechatCommitTimer);
+    });
+    wechatCaptureEl.addEventListener("compositionend", () => {
+      wechatComposing = false;
+      scheduleWechatCaptureCommit();
+    });
+    wechatCaptureEl.addEventListener("input", () => {
+      if (!wechatCapture) {
+        return;
+      }
+      const text = wechatCaptureEl.value.trim();
+      render(wechatCapture.labels.wechatProcessing, "busy", text, wechatCapture.labels.cancelHint, true);
+      scheduleWechatCaptureCommit();
+    });
 
     let powerCountdown = null;
     function clearPowerCountdown() {
@@ -105,25 +190,69 @@
     window.vibeOverlay.onEvent((payload = {}) => {
       const lang = T[payload.lang] ? payload.lang : "zh";
       const tt = T[lang];
+      cancelEl.setAttribute("aria-label", lang === "zh" ? "取消" : "Cancel");
+      cancelEl.title = lang === "zh" ? "取消语音识别" : "Cancel voice recognition";
       clearPowerCountdown();
+      if (payload.type === "wechat_capture_prepare") {
+        clearWechatCaptureTimers();
+        wechatCapture = {
+          sessionId: String(payload.sessionId || ""),
+          source: String(payload.source || ""),
+          stopped: false,
+          labels: tt
+        };
+        wechatComposing = false;
+        wechatCaptureEl.value = "";
+        render(tt.listening, "recording", "", tt.cancelHint, true);
+        requestAnimationFrame(() => {
+          wechatCaptureEl.focus({ preventScroll: true });
+          window.vibeOverlay.wechatCaptureReady(wechatCapture?.sessionId || "");
+        });
+        return;
+      }
+      if (payload.type === "wechat_capture_stop") {
+        if (!wechatCapture || wechatCapture.sessionId !== String(payload.sessionId || "")) {
+          return;
+        }
+        wechatCapture.stopped = true;
+        render(tt.wechatProcessing, "busy", wechatCaptureEl.value.trim(), tt.cancelHint, true);
+        scheduleWechatCaptureCommit();
+        wechatTimeoutTimer = setTimeout(() => finishWechatCapture("timeout"), 8_000);
+        return;
+      }
+      if (payload.type === "wechat_capture_cancel") {
+        if (!wechatCapture || wechatCapture.sessionId === String(payload.sessionId || "")) {
+          wechatCapture = null;
+          clearWechatCaptureTimers();
+          wechatCaptureEl.value = "";
+          wechatCaptureEl.blur();
+        }
+        return;
+      }
       if (payload.type === "transcript_final") {
         if (payload.requiresAction) {
-          render(tt.waiting, "busy", payload.text || "", payload.confirmHint || tt.confirmHint);
+          render(tt.waiting, "busy", payload.text || "", payload.confirmHint || tt.confirmHint, true);
         } else {
-          render(tt.transcribing, "busy", payload.text || "");
+          render(tt.transcribing, "busy", payload.text || "", tt.cancelHint, true);
         }
         return;
       }
       switch (payload.status) {
         case "recording":
-          render(tt.listening, "recording");
+          render(tt.listening, "recording", "", tt.cancelHint, true);
           break;
         case "transcribing":
         case "translating":
-          render(tt.transcribing, "busy");
+          render(tt.transcribing, "busy", "", tt.cancelHint, true);
           break;
         case "awaiting_action":
-          render(tt.waiting, "busy", payload.text || "", payload.confirmHint || tt.confirmHint);
+          render(tt.waiting, "busy", payload.text || "", payload.confirmHint || tt.confirmHint, true);
+          break;
+        case "transcription_timeout":
+          render(tt.timeout, "");
+          break;
+        case "transcription_error":
+          render(tt.failed, "", payload.text || "");
           break;
         case "typed":
           render(tt.sent, "ok", payload.text || "");
@@ -138,7 +267,7 @@
         case "power_confirm": {
           const label = tt.power[payload.command] || payload.command || "";
           let left = Number(payload.seconds) || 10;
-          const paint = () => render(`${label}?`, "recording", "", `${tt.powerHint} · ${left}s`);
+          const paint = () => render(`${label}?`, "recording", "", `${tt.powerHint} · ${left}s`, true);
           paint();
           powerCountdown = setInterval(() => {
             left -= 1;

@@ -377,7 +377,18 @@ function getGlobalHotkeyPowerShellScript() {
   // key before our configurable mapping runs. Suppress only non-injected
   // events while remote support is enabled; explicit key:menu mappings use
   // SendInput and are therefore still allowed through.
-  const suppressPhysicalMenuKey = loadEffectiveConfig().xiaomiRemoteEnabled === true;
+  const effectiveConfig = loadEffectiveConfig();
+  const suppressPhysicalMenuKey = effectiveConfig.xiaomiRemoteEnabled === true;
+  const recordHotkey = parseHotkey(loadDesktopSettings().localMicHoldKey);
+  // WeChat only accepts its Ctrl+Win voice chord when no unrelated physical
+  // key is held. Keep receiving the configured single-key PTT event through
+  // stdout, but consume it before Windows/WeChat updates its keyboard state.
+  const suppressPhysicalRecordKey = Boolean(
+    effectiveConfig.xiaomiRemoteVoiceMode === "wechat" &&
+    recordHotkey &&
+    recordHotkey.modifiers.size === 0
+  );
+  const physicalRecordKeyVk = suppressPhysicalRecordKey ? recordHotkey.keyVk : -1;
   return String.raw`
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @"
@@ -395,6 +406,8 @@ public static class GlobalKeyboardHook {
   private const int VK_APPS = 0x5D;
   private const int LLKHF_INJECTED = 0x10;
   private const bool SuppressPhysicalMenuKey = ${suppressPhysicalMenuKey ? "true" : "false"};
+  private const bool SuppressPhysicalRecordKey = ${suppressPhysicalRecordKey ? "true" : "false"};
+  private const int PhysicalRecordKeyVk = ${physicalRecordKeyVk};
   private static LowLevelKeyboardProc _proc = HookCallback;
   private static IntPtr _hookID = IntPtr.Zero;
 
@@ -433,7 +446,10 @@ public static class GlobalKeyboardHook {
         string eventType = (message == WM_KEYUP || message == WM_SYSKEYUP) ? "keyup" : "keydown";
         Console.WriteLine("{\"type\":\"" + eventType + "\",\"vkCode\":" + data.vkCode + ",\"flags\":" + data.flags + "}");
         Console.Out.Flush();
-        if (SuppressPhysicalMenuKey && data.vkCode == VK_APPS && (data.flags & LLKHF_INJECTED) == 0) {
+        bool physicalEvent = (data.flags & LLKHF_INJECTED) == 0;
+        if (physicalEvent &&
+            ((SuppressPhysicalMenuKey && data.vkCode == VK_APPS) ||
+             (SuppressPhysicalRecordKey && data.vkCode == PhysicalRecordKeyVk))) {
           return (IntPtr)1;
         }
       }
@@ -505,6 +521,11 @@ function handleGlobalKeyboardEvent(event) {
     const repeated = pressedGlobalKeys.has(vkCode);
     pressedGlobalKeys.add(vkCode);
     if (repeated) {
+      return;
+    }
+
+    if (vkCode === 0x1b) {
+      emitGlobalHotkey({ type: "cancel_active_dictation", origin: "escape" });
       return;
     }
 
@@ -1057,7 +1078,10 @@ function startXiaomiRemoteProcess(config) {
       ...process.env,
       VIBE_INVOKE_CWD: process.env.VIBE_INVOKE_CWD || DEFAULT_INVOKE_CWD,
       VIBE_DESKTOP: "1",
-      VIBE_RESOURCES_PATH: process.resourcesPath
+      // Electron's development resourcesPath points inside node_modules and
+      // does not contain our extraResources. Leaving this empty makes the
+      // helper resolve build-assets from the repository instead.
+      VIBE_RESOURCES_PATH: app.isPackaged ? process.resourcesPath : ""
     },
     silent: true,
     windowsHide: false
@@ -1094,6 +1118,31 @@ function startXiaomiRemoteProcess(config) {
     if (xiaomiRemoteChild !== child) {
       return;
     }
+    if (message?.type === "xiaomi_remote_wechat_capture_prepare") {
+      const requestId = String(message.requestId || "");
+      void prepareWechatCapture("xiaomi_remote")
+        .then((result) => {
+          if (xiaomiRemoteChild === child && child.connected) {
+            child.send({
+              type: "xiaomi_remote_wechat_capture_prepared",
+              requestId,
+              ok: true,
+              sessionId: result.sessionId
+            });
+          }
+        })
+        .catch((error) => {
+          if (xiaomiRemoteChild === child && child.connected) {
+            child.send({
+              type: "xiaomi_remote_wechat_capture_prepared",
+              requestId,
+              ok: false,
+              error: error?.message || String(error)
+            });
+          }
+        });
+      return;
+    }
     if (message?.type === "xiaomi_remote_menu_guard_status") {
       latestRemoteMenuGuardStatus = message.state === "ready"
         ? null
@@ -1121,6 +1170,11 @@ function startXiaomiRemoteProcess(config) {
           updatedAt: Date.now()
         };
     writeDesktopLog("xiaomi remote capture status", latestRemoteCaptureStatus || { state: "ready" });
+    if (message.state === "wechat_stop") {
+      finishWechatCapture("xiaomi_remote");
+    } else if (message.state === "wechat_cancel") {
+      cancelWechatCapture("xiaomi_remote");
+    }
     if (message.state === "adapter_changed") {
       void refreshRemoteInfoOnce("adapter-changed");
       void refreshRemoteHidHealth("adapter-changed");
@@ -1234,7 +1288,11 @@ async function startBridgeProcess({ revealOnError = true } = {}) {
     env: {
       ...process.env,
       VIBE_INVOKE_CWD: process.env.VIBE_INVOKE_CWD || DEFAULT_INVOKE_CWD,
-      VIBE_DESKTOP: "1"
+      VIBE_DESKTOP: "1",
+      // Lets the bridge resolve the bundled virtual-mic publisher in packaged
+      // builds. In development, an empty value deliberately falls back to the
+      // repository's build-assets directory.
+      VIBE_RESOURCES_PATH: app.isPackaged ? process.resourcesPath : ""
     },
     silent: true,
     windowsHide: true
@@ -1337,7 +1395,11 @@ async function persistDesktopSettings(patch) {
   });
 
   await syncAutoLaunch(settings);
-  emitGlobalHotkeyStatus();
+  if (settings.localMicHoldKey !== current.localMicHoldKey) {
+    restartGlobalHotkeyMonitor();
+  } else {
+    emitGlobalHotkeyStatus();
+  }
   emitState();
   return settings;
 }
@@ -1742,9 +1804,32 @@ ipcMain.on("desktop:set-tray-language-mode", (_event, mode) => {
 // target's focus). Draggable anywhere; position persists in desktop settings.
 let overlayWindow = null;
 let overlayHideTimer = null;
+let overlayRecognitionTimer = null;
 let overlayMoveTimer = null;
+let overlayLoadPromise = null;
+let activeWechatCapture = null;
+let wechatCaptureSequence = 0;
 const OVERLAY_WIDTH = 480;
 const OVERLAY_HEIGHT = 148;
+const OVERLAY_RECOGNITION_FAILSAFE_MS = 20_000;
+
+function clearOverlayTimers() {
+  if (overlayHideTimer) {
+    clearTimeout(overlayHideTimer);
+    overlayHideTimer = null;
+  }
+  if (overlayRecognitionTimer) {
+    clearTimeout(overlayRecognitionTimer);
+    overlayRecognitionTimer = null;
+  }
+}
+
+function requestOverlayCancel(origin) {
+  clearOverlayTimers();
+  cancelWechatCapture();
+  overlayWindow?.hide();
+  emitGlobalHotkey({ type: "cancel_active_dictation", origin });
+}
 
 function overlayDefaultPosition() {
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
@@ -1805,22 +1890,178 @@ function ensureOverlayWindow() {
     }, 400);
   });
   overlayWindow.on("closed", () => {
+    clearOverlayTimers();
     overlayWindow = null;
   });
-  void overlayWindow.loadFile(path.join(app.getAppPath(), "desktop", "overlay.html"));
+  overlayLoadPromise = overlayWindow.loadFile(path.join(app.getAppPath(), "desktop", "overlay.html"));
   return overlayWindow;
 }
 
+async function waitForOverlayLoad(win) {
+  if (overlayLoadPromise) {
+    await overlayLoadPromise;
+    overlayLoadPromise = null;
+  } else if (win.webContents.isLoadingMainFrame()) {
+    await new Promise((resolve) => win.webContents.once("did-finish-load", resolve));
+  }
+}
+
+function releaseWechatCaptureFocus({ keepOverlay = true } = {}) {
+  const win = overlayWindow;
+  if (!win || win.isDestroyed()) {
+    return;
+  }
+  // Hiding the focused capture window lets Windows reactivate the window that
+  // was focused before recording. Re-show it without activation so the user
+  // can preview the captured transcript without typing into the target early.
+  win.setFocusable(false);
+  win.hide();
+  if (keepOverlay) {
+    setTimeout(() => {
+      if (overlayWindow === win && !win.isDestroyed()) {
+        win.showInactive();
+      }
+    }, 40);
+  }
+}
+
+function cancelWechatCapture(source = "") {
+  const session = activeWechatCapture;
+  if (!session || (source && session.source !== source)) {
+    return false;
+  }
+  activeWechatCapture = null;
+  session.rejectReady?.(new Error("微信语音接收已取消。"));
+  session.rejectReady = null;
+  overlayWindow?.webContents.send("overlay:event", {
+    type: "wechat_capture_cancel",
+    sessionId: session.sessionId,
+    source: session.source,
+    lang: loadDesktopSettings().uiLanguage || "zh"
+  });
+  releaseWechatCaptureFocus({ keepOverlay: false });
+  return true;
+}
+
+async function prepareWechatCapture(source) {
+  const normalizedSource = String(source || "").trim();
+  if (!normalizedSource) {
+    throw new Error("缺少微信语音接收来源。 ");
+  }
+  if (activeWechatCapture) {
+    cancelWechatCapture();
+  }
+
+  const win = ensureOverlayWindow();
+  await waitForOverlayLoad(win);
+  const sessionId = `${Date.now()}-${++wechatCaptureSequence}`;
+  let resolveReady;
+  let rejectReady;
+  const ready = new Promise((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  activeWechatCapture = {
+    sessionId,
+    source: normalizedSource,
+    resolveReady,
+    rejectReady
+  };
+
+  win.setFocusable(true);
+  win.show();
+  win.focus();
+  win.webContents.send("overlay:event", {
+    type: "wechat_capture_prepare",
+    sessionId,
+    source: normalizedSource,
+    lang: loadDesktopSettings().uiLanguage || "zh"
+  });
+
+  const timeout = setTimeout(() => {
+    if (activeWechatCapture?.sessionId === sessionId) {
+      activeWechatCapture.rejectReady?.(new Error("微信语音接收框未能获得输入焦点。"));
+      activeWechatCapture.rejectReady = null;
+    }
+  }, 2_000);
+  try {
+    await ready;
+    win.focus();
+    return { sessionId };
+  } catch (error) {
+    cancelWechatCapture(normalizedSource);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function finishWechatCapture(source = "") {
+  const session = activeWechatCapture;
+  if (!session || (source && session.source !== source)) {
+    return false;
+  }
+  overlayWindow?.webContents.send("overlay:event", {
+    type: "wechat_capture_stop",
+    sessionId: session.sessionId,
+    source: session.source,
+    lang: loadDesktopSettings().uiLanguage || "zh"
+  });
+  return true;
+}
+
 const OVERLAY_SHOW_STATUSES = new Set(["recording", "transcribing", "translating", "awaiting_action", "power_confirm", "power_executing"]);
-const OVERLAY_HIDE_STATUSES = new Set(["typed", "cancelled", "empty_segment", "transcript_empty"]);
+const OVERLAY_HIDE_STATUSES = new Set([
+  "typed", "cancelled", "empty_segment", "transcript_empty",
+  "transcription_timeout", "transcription_error", "wechat_sent", "wechat_error"
+]);
+
+ipcMain.on("overlay:cancel", (_event, origin = "overlay_click") => {
+  requestOverlayCancel(String(origin || "overlay_click"));
+});
+
+ipcMain.on("overlay:wechat-capture-ready", (event, sessionId) => {
+  const session = activeWechatCapture;
+  if (!session || event.sender !== overlayWindow?.webContents || session.sessionId !== String(sessionId || "")) {
+    return;
+  }
+  session.resolveReady?.();
+  session.resolveReady = null;
+  session.rejectReady = null;
+});
+
+ipcMain.on("overlay:wechat-capture-result", (event, payload = {}) => {
+  const session = activeWechatCapture;
+  if (
+    !session ||
+    event.sender !== overlayWindow?.webContents ||
+    session.sessionId !== String(payload.sessionId || "")
+  ) {
+    return;
+  }
+  activeWechatCapture = null;
+  releaseWechatCaptureFocus({ keepOverlay: true });
+  const result = {
+    sessionId: session.sessionId,
+    source: session.source,
+    text: String(payload.text || ""),
+    reason: String(payload.reason || "")
+  };
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win !== overlayWindow && !win.isDestroyed()) {
+      win.webContents.send("desktop:wechat-capture-result", result);
+    }
+  }
+});
+
+ipcMain.handle("desktop:prepare-wechat-capture", (_event, source) => prepareWechatCapture(source));
+ipcMain.handle("desktop:finish-wechat-capture", (_event, source) => finishWechatCapture(source));
+ipcMain.handle("desktop:cancel-wechat-capture", (_event, source) => cancelWechatCapture(source));
 
 ipcMain.on("overlay:event", (_event, payload = {}) => {
   const win = ensureOverlayWindow();
   win.webContents.send("overlay:event", payload);
-  if (overlayHideTimer) {
-    clearTimeout(overlayHideTimer);
-    overlayHideTimer = null;
-  }
+  clearOverlayTimers();
   if (payload.type === "transcript_final" || OVERLAY_SHOW_STATUSES.has(payload.status)) {
     if (!win.isVisible()) {
       if (!overlaySavedPosition(loadDesktopSettings())) {
@@ -1829,10 +2070,21 @@ ipcMain.on("overlay:event", (_event, payload = {}) => {
       }
       win.showInactive();
     }
+    if (payload.status === "transcribing" || payload.status === "translating") {
+      overlayRecognitionTimer = setTimeout(
+        () => requestOverlayCancel("overlay_failsafe_timeout"),
+        OVERLAY_RECOGNITION_FAILSAFE_MS
+      );
+    }
     return;
   }
   if (OVERLAY_HIDE_STATUSES.has(payload.status)) {
-    overlayHideTimer = setTimeout(() => overlayWindow?.hide(), payload.status === "typed" ? 1400 : 500);
+    const delayMs = ["transcription_timeout", "transcription_error", "wechat_error"].includes(payload.status)
+      ? 2200
+      : payload.status === "typed"
+        ? 1400
+        : 500;
+    overlayHideTimer = setTimeout(() => overlayWindow?.hide(), delayMs);
   }
 });
 

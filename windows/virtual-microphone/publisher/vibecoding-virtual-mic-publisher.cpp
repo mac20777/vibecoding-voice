@@ -641,6 +641,16 @@ class SampleQueue {
   bool drainCompleted_ = false;
 };
 
+bool SendKeyboardScanCode(WORD scanCode, bool extended, bool keyUp) {
+  INPUT input{};
+  input.type = INPUT_KEYBOARD;
+  input.ki.wScan = scanCode;
+  input.ki.dwFlags = KEYEVENTF_SCANCODE |
+                     (extended ? KEYEVENTF_EXTENDEDKEY : 0) |
+                     (keyUp ? KEYEVENTF_KEYUP : 0);
+  return SendInput(1, &input, sizeof(INPUT)) == 1;
+}
+
 class WechatShortcut {
  public:
   WechatShortcut(bool enabled, std::wstring captureEndpointName, std::wstring routeStatePath)
@@ -664,20 +674,27 @@ class WechatShortcut {
       return false;
     }
     Sleep(kRouteSettleMs);
-    INPUT inputs[2]{};
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wVk = VK_LCONTROL;
-    inputs[1].type = INPUT_KEYBOARD;
-    inputs[1].ki.wVk = VK_LWIN;
-    if (SendInput(2, inputs, sizeof(INPUT)) == 2) {
+    // Emit the same Set-1 scan-code sequence as a physical left Ctrl + left
+    // Windows chord. WeChat's low-level shortcut hook is stricter than normal
+    // application accelerators and can ignore a batched virtual-key-only Win
+    // event that lacks KEYEVENTF_EXTENDEDKEY.
+    const bool controlPressed = SendKeyboardScanCode(0x1d, false, false);
+    Sleep(35);
+    const bool windowsPressed = controlPressed && SendKeyboardScanCode(0x5b, true, false);
+    if (controlPressed && windowsPressed) {
       held_ = true;
+      WriteJsonLine("{\"type\":\"shortcut_pressed\",\"shortcut\":\"Ctrl+Win\","
+                    "\"method\":\"scan_code\"}");
       return true;
     }
-    inputs[0].ki.dwFlags = KEYEVENTF_KEYUP;
-    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
-    SendInput(2, inputs, sizeof(INPUT));
+    if (windowsPressed) {
+      SendKeyboardScanCode(0x5b, true, true);
+    }
+    if (controlPressed) {
+      SendKeyboardScanCode(0x1d, false, true);
+    }
     router_.Restore();
-    WriteJsonLine("{\"type\":\"shortcut_error\",\"error\":\"SendInput failed\"}");
+    WriteJsonLine("{\"type\":\"shortcut_error\",\"error\":\"scan-code SendInput failed\"}");
     return false;
   }
 
@@ -686,18 +703,19 @@ class WechatShortcut {
       return;
     }
     std::lock_guard<std::mutex> lock(mutex_);
-    if (held_) {
-      INPUT inputs[2]{};
-      inputs[0].type = INPUT_KEYBOARD;
-      inputs[0].ki.wVk = VK_LWIN;
-      inputs[0].ki.dwFlags = KEYEVENTF_KEYUP;
-      inputs[1].type = INPUT_KEYBOARD;
-      inputs[1].ki.wVk = VK_LCONTROL;
-      inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
-      SendInput(2, inputs, sizeof(INPUT));
-      held_ = false;
-      Sleep(kRouteRestoreDelayMs);
+    if (!held_) {
+      // The desktop mic and Xiaomi remote each own a publisher process but
+      // intentionally share one crash-recovery route-state file. An idle
+      // publisher must not restore the route that the other publisher is
+      // actively using.
+      return;
     }
+    SendKeyboardScanCode(0x5b, true, true);
+    Sleep(20);
+    SendKeyboardScanCode(0x1d, false, true);
+    held_ = false;
+    WriteJsonLine("{\"type\":\"shortcut_released\",\"shortcut\":\"Ctrl+Win\"}");
+    Sleep(kRouteRestoreDelayMs);
     router_.Restore();
   }
 
@@ -717,6 +735,7 @@ class WechatShortcut {
 
 void ProtocolReader(HANDLE input, SampleQueue& queue, WechatShortcut& shortcut,
                     std::atomic<bool>& exiting) {
+  std::size_t sessionAudioBytes = 0;
   while (!exiting.load()) {
     MessageHeader header{};
     if (!ReadExact(input, &header, sizeof(header))) {
@@ -736,6 +755,7 @@ void ProtocolReader(HANDLE input, SampleQueue& queue, WechatShortcut& shortcut,
     shortcut.Touch();
     switch (header.type) {
       case kStart:
+        sessionAudioBytes = 0;
         queue.Start();
         if (!shortcut.Press()) {
           queue.Cancel();
@@ -748,9 +768,16 @@ void ProtocolReader(HANDLE input, SampleQueue& queue, WechatShortcut& shortcut,
           exiting.store(true);
           break;
         }
+        if (sessionAudioBytes == 0 && !payload.empty()) {
+          WriteJsonLine("{\"type\":\"audio_received\",\"bytes\":" +
+                        std::to_string(payload.size()) + "}");
+        }
+        sessionAudioBytes += payload.size();
         queue.Push(payload.data(), payload.size());
         break;
       case kStop:
+        WriteJsonLine("{\"type\":\"audio_completed\",\"bytes\":" +
+                      std::to_string(sessionAudioBytes) + "}");
         queue.Stop();
         break;
       case kCancel:

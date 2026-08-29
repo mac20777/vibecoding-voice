@@ -424,6 +424,7 @@ Screen footer shows `BOOT Add · UP Send · DN Undo` when a transcript is pendin
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `STT_PROVIDER` | auto-detect | `volcengine` or `openai` |
+| `STT_TIMEOUT_MS` | `15000` | Hard recognition deadline; aborts a stuck request and closes the overlay |
 | `VOLCENGINE_APP_KEY` | — | Volcengine app key |
 | `VOLCENGINE_ACCESS_KEY` | — | Volcengine access key |
 | `VOLCENGINE_RESOURCE_ID` | `volc.bigasr.auc_turbo` | ASR resource ID |
@@ -944,6 +945,7 @@ LAN_SHARED_SECRET=你的密钥
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `STT_PROVIDER` | 自动检测 | `volcengine` 或 `openai` |
+| `STT_TIMEOUT_MS` | `15000` | 识别硬超时；中止卡住的请求并自动收起悬浮窗 |
 | `VOLCENGINE_APP_KEY` | — | 火山引擎 App Key |
 | `VOLCENGINE_ACCESS_KEY` | — | 火山引擎 Access Key |
 | `VOLCENGINE_RESOURCE_ID` | `volc.bigasr.auc_turbo` | ASR 资源 ID |

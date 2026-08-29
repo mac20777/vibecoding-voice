@@ -75,6 +75,7 @@ server.mjs (entry point — HTTP + WebSocket server)
 - **Codex session**: Spawns via PowerShell wrapper, tracks thread ID for `codex exec resume` continuity
 - **CLI projector**: Maintains rolling 8-line log buffer, truncates for e-paper constraints
 - **Dictation relay**: Lifecycle events (recording/transcribing/typed/transcript_final…) are sent to the originating client and relayed to `desktop-window` clients (`sendDictationJson` in server.mjs) so the desktop UI can show live status, record transcripts, and drive the floating overlay
+- **WeChat voice mode is global**: when `XIAOMI_REMOTE_VOICE_MODE=wechat`, both the Xiaomi remote and the desktop F8 mic (`desktop_mic`) stream PCM straight into the virtual microphone publisher (`WindowsVirtualMicrophonePublisher` in server.mjs for the desktop mic) → VB-CABLE → WeChat's own voice-to-text — no STT API key needed. WeChat is only the recognizer: before recognition the desktop steals focus into a hidden textarea in the floating overlay (`prepareWechatCapture` in desktop/main.mjs, `#wechat-capture` in overlay.html), so the recognized text lands in our window, never in the original input; the captured text then goes to the server as a `wechat_transcript` message and always enters the `remote_preview` flow (`handleWechatTranscript` in server.mjs) — segments append, F10/Back undoes, F9/OK injects the joined text into the restored original focus in one shot
 - **Floating overlay**: `desktop/overlay.html` + `overlay-preload.cjs` — frameless always-on-top window, `focusable: false` so it never steals the injection target's focus; draggable, position persisted in desktop-settings.json (`overlayX/overlayY`)
 
 ## Configuration (.env)
@@ -98,5 +99,6 @@ server.mjs (entry point — HTTP + WebSocket server)
 
 **Debug/test flags**:
 - `MOCK_TRANSCRIPT`: bypass STT with fixed text
+- `STT_TIMEOUT_MS`: hard recognition deadline (default 15000 ms); timed-out requests are aborted
 - `DRY_RUN_TEXT_INJECTION`: log without typing
 - `SAVE_DEBUG_WAV`: save audio to tmp/
