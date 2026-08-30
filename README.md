@@ -175,6 +175,8 @@ npm run desktop:dist
 
 The packaged app keeps the bridge running in the background, so non-technical users do not need to touch `vibe`, PowerShell, or a command prompt.
 
+**Antivirus note (360, Windows Defender SmartScreen, etc.)**: test builds may still be unsigned. Do not disable antivirus protection or whitelist the whole installation directory. Verify the release source and published SHA-256 before allowing one exact installer. Starting with 0.5.11, the desktop app uses registered Windows hotkeys and a versioned input helper instead of a global low-level keyboard hook or runtime `PowerShell -EncodedCommand` keyboard/focus code; declining the optional USBPcap driver also skips the LocalSystem remote broker. Production releases should Authenticode-sign the installer and every bundled VibeCoding executable; signed release files can then be submitted to antivirus vendors for false-positive review.
+
 **2. Configure**
 
 ```powershell
@@ -698,6 +700,8 @@ npm run desktop:dist
 ```
 
 这样用户看到的是常规桌面软件，而不是 PowerShell 或命令行窗口。
+
+**杀毒软件提示（360、Windows SmartScreen 等）**：测试安装包仍可能没有代码签名。不要关闭杀毒软件，也不要把整个安装目录加入白名单；只应在确认发布来源和 SHA-256 后放行对应的单个安装包。从 0.5.11 起，桌面程序改用 Windows 注册快捷键和带固定名称、版本信息的输入辅助程序，不再使用全局低级键盘钩子，也不再用运行时 `PowerShell -EncodedCommand` 承载键盘/焦点逻辑；如果拒绝可选的 USBPcap 驱动，也不会再注册 LocalSystem 遥控器服务。正式发布时仍应给安装包和所有自研可执行文件做 Authenticode 签名，并把最终签名版本提交杀毒厂商做误报复核。
 
 **2. 配置**
 

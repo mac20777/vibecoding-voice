@@ -7,13 +7,15 @@ import {
   parseUsbPcapNotificationLine
 } from "../src/xiaomi-remote-protocol.mjs";
 import {
-  buildElevatedUsbPcapCommand,
-  encodePowerShellCommand,
   findUsbDeviceAddress,
   parseExtcapInterfaces,
   quotePowerShellSingle,
   resolveAsarUnpackedPath
 } from "../src/xiaomi-remote-runtime.mjs";
+import {
+  buildElevatedUsbPcapCommand,
+  encodePowerShellCommand
+} from "../src/xiaomi-remote-dev-elevation.mjs";
 
 const CONTROL_START = `0x0025|${"01" + "00".repeat(19)}`;
 const CONTROL_STOP = `0x0025|${"00".repeat(20)}`;

@@ -17,18 +17,18 @@
   ; Upgrades must not reinstall the already-present capture driver. Besides
   ; being unnecessary, restarting the driver can momentarily disturb the
   ; Bluetooth adapter and remote input state.
-  IfFileExists "$PROGRAMFILES64\USBPcap\USBPcapCMD.exe" vibecodingSkipUsbpcap 0
-  IfFileExists "$PROGRAMFILES\USBPcap\USBPcapCMD.exe" vibecodingSkipUsbpcap 0
+  IfFileExists "$PROGRAMFILES64\USBPcap\USBPcapCMD.exe" vibecodingInstallRemoteBroker 0
+  IfFileExists "$PROGRAMFILES\USBPcap\USBPcapCMD.exe" vibecodingInstallRemoteBroker 0
   File "/oname=$TEMP\USBPcapSetup-1.5.4.0.exe" "${PROJECT_DIR}\build-assets\installers\USBPcapSetup-1.5.4.0.exe"
   MessageBox MB_YESNO|MB_ICONQUESTION \
     "Install the USBPcap driver? It is required for Xiaomi Bluetooth remote voice input. Administrator approval is needed only during install or broker upgrades, not at daily startup.$\r$\n$\r$\n是否安装 USBPcap 驱动？小米蓝牙遥控器的语音输入需要它。只在安装或底层服务升级时需要管理员授权，日常开机不再弹出；安装后可能需要重启电脑。" \
-    /SD IDYES IDNO vibecodingSkipUsbpcap
+    /SD IDNO IDNO vibecodingSkipRemoteSupport
   ExecWait '"cmd.exe" /c start "" /wait "$TEMP\USBPcapSetup-1.5.4.0.exe" /S'
-  vibecodingSkipUsbpcap:
   Delete "$TEMP\USBPcapSetup-1.5.4.0.exe"
 
   ; Install a deliberately narrow LocalSystem broker. The fixed script avoids
   ; command-line quoting ambiguity for install paths containing spaces.
+  vibecodingInstallRemoteBroker:
   nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\resources\app.asar.unpacked\scripts\windows\install-remote-broker.ps1" -InstallRoot "$INSTDIR"'
   Pop $0
   Pop $1
@@ -38,6 +38,14 @@
     /SD IDOK
   Abort
   vibecodingBrokerInstalled:
+  Goto vibecodingRemoteSupportDone
+
+  ; Standard desktop/USB-microphone users do not need a packet-capture driver
+  ; or a LocalSystem service. Declining the optional remote driver now skips
+  ; both instead of silently registering the broker anyway.
+  vibecodingSkipRemoteSupport:
+  Delete "$TEMP\USBPcapSetup-1.5.4.0.exe"
+  vibecodingRemoteSupportDone:
 
   ; A release may include the production-signed virtual microphone package.
   ; Development packages intentionally omit it and continue without changing

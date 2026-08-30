@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { UsbPcapCaptureStreamDecoder } from "./usbpcap-pipe-protocol.mjs";
@@ -82,55 +82,6 @@ export function findUsbDeviceAddress(output, adapterMatch = "Bluetooth") {
 
 export function quotePowerShellSingle(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
-}
-
-export function encodePowerShellCommand(command) {
-  return Buffer.from(String(command), "utf16le").toString("base64");
-}
-
-export function buildElevatedUsbPcapCommand(runtime, pipeName, ownerPid = 0) {
-  const helperArgs = [
-    `-PipeName ${quotePowerShellSingle(pipeName)}`,
-    `-UsbPcapPath ${quotePowerShellSingle(runtime.usbPcapPath)}`,
-    `-InterfaceName ${quotePowerShellSingle(runtime.interfaceName)}`,
-    `-DeviceAddress ${quotePowerShellSingle(runtime.deviceAddress)}`
-  ];
-  if (Number.isInteger(ownerPid) && ownerPid > 0) {
-    helperArgs.push(`-OwnerPid ${ownerPid}`);
-  }
-  // The broker-owned helper watches the remote's HID child device and repairs
-  // a "driver error" in place without another UAC prompt, in any pair order.
-  if (runtime.hidDeviceMatch) {
-    helperArgs.push(`-HidDeviceMatch ${quotePowerShellSingle(runtime.hidDeviceMatch)}`);
-  }
-  // The helper re-resolves the Bluetooth adapter after an unplug/replug and
-  // restarts the capture at the (possibly new) USB address by itself.
-  if (runtime.usbAdapterMatch) {
-    helperArgs.push(`-AdapterMatch ${quotePowerShellSingle(runtime.usbAdapterMatch)}`);
-  }
-  // Unless the user explicitly pinned XIAOMI_REMOTE_USBPCAP_INTERFACE, let the
-  // helper search every USBPcap root after a Bluetooth-radio replacement.
-  if (runtime.allowInterfaceSwitch) {
-    helperArgs.push("-AllowInterfaceSwitch");
-  }
-  const innerCommand = [
-    "$ErrorActionPreference='Stop';",
-    "$ProgressPreference='SilentlyContinue';",
-    `& ${quotePowerShellSingle(runtime.pipeHelperPath)}`,
-    ...helperArgs
-  ].join(" ");
-  const innerEncoded = encodePowerShellCommand(innerCommand);
-  return [
-    "$ErrorActionPreference='Stop';",
-    "$ProgressPreference='SilentlyContinue';",
-    "$process = Start-Process",
-    "-FilePath 'powershell.exe'",
-    `-ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','${innerEncoded}')`,
-    "-Verb RunAs",
-    "-WindowStyle Hidden",
-    "-PassThru;",
-    "[Console]::Out.Write($process.Id)"
-  ].join(" ");
 }
 
 async function detectCaptureTarget(usbPcapPath, config) {
@@ -342,16 +293,8 @@ export async function startXiaomiRemoteCapture(runtime, handlers = {}) {
         );
       }
 
-      const elevatedCommand = buildElevatedUsbPcapCommand(runtime, pipeName, process.pid);
-      launcher = spawn("powershell.exe", [
-        "-NoProfile",
-        "-NonInteractive",
-        "-EncodedCommand",
-        encodePowerShellCommand(elevatedCommand)
-      ], {
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true
-      });
+      const { startElevatedUsbPcapCapture } = await import("./xiaomi-remote-dev-elevation.mjs");
+      launcher = startElevatedUsbPcapCapture(runtime, pipeName, process.pid);
       let launcherError = "";
       launcher.stdout.setEncoding("utf8");
       launcher.stdout.on("data", (chunk) => {

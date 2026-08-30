@@ -13,6 +13,7 @@ dist-desktop/
 out/
 build-assets/installers/*.exe
 build-assets/remote-broker/*.exe
+build-assets/input-helper/*.exe
 build-assets/virtual-microphone/*
 windows/virtual-microphone/publisher/obj/
 windows/virtual-microphone/.reference/

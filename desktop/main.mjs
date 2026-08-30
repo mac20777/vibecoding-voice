@@ -59,8 +59,6 @@ let bundledIconCache = null;
 const trayIconCache = new Map();
 let trayLanguageMode = "chinese";
 const desktopLogPath = path.join(getUserConfigDir(), "desktop.log");
-const pressedGlobalKeys = new Set();
-let activeGlobalRecordKey = null;
 
 function writeDesktopLog(message, details = null) {
   try {
@@ -252,22 +250,6 @@ for (let index = 1; index <= 24; index += 1) {
   NAMED_KEY_VKS.set(`F${index}`, 0x70 + index - 1);
 }
 
-function normalizeModifierVk(vkCode) {
-  if ([0x10, 0xa0, 0xa1].includes(vkCode)) {
-    return "Shift";
-  }
-  if ([0x11, 0xa2, 0xa3].includes(vkCode)) {
-    return "Ctrl";
-  }
-  if ([0x12, 0xa4, 0xa5].includes(vkCode)) {
-    return "Alt";
-  }
-  if ([0x5b, 0x5c].includes(vkCode)) {
-    return "Meta";
-  }
-  return null;
-}
-
 function keyPartToVk(keyPart) {
   const normalized = String(keyPart || "").trim().toUpperCase();
   if (/^[A-Z]$/.test(normalized)) {
@@ -318,37 +300,6 @@ function parseHotkey(value) {
   return { keyVk, modifiers };
 }
 
-function currentGlobalModifiers() {
-  const modifiers = new Set();
-  for (const vkCode of pressedGlobalKeys) {
-    const modifier = normalizeModifierVk(vkCode);
-    if (modifier) {
-      modifiers.add(modifier);
-    }
-  }
-  return modifiers;
-}
-
-function modifiersEqual(left, right) {
-  if (left.size !== right.size) {
-    return false;
-  }
-  for (const value of left) {
-    if (!right.has(value)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function hotkeyMatches(parsedHotkey, vkCode) {
-  return Boolean(
-    parsedHotkey &&
-    parsedHotkey.keyVk === vkCode &&
-    modifiersEqual(parsedHotkey.modifiers, currentGlobalModifiers())
-  );
-}
-
 function selectDesktopHotkeySettings(settings = loadDesktopSettings()) {
   return {
     localMicHoldKey: settings.localMicHoldKey,
@@ -372,189 +323,61 @@ function emitGlobalHotkeyStatus() {
   });
 }
 
-function getGlobalHotkeyPowerShellScript() {
-  // Windows exposes the remote's USB HID usage 0x65 as the global VK_APPS
-  // key before our configurable mapping runs. Suppress only non-injected
-  // events while remote support is enabled; explicit key:menu mappings use
-  // SendInput and are therefore still allowed through.
+const HOTKEY_MODIFIER_BITS = new Map([
+  ["Shift", 1],
+  ["Ctrl", 2],
+  ["Alt", 4],
+  ["Meta", 8]
+]);
+
+function hotkeyModifierMask(modifiers) {
+  let mask = 0;
+  for (const modifier of modifiers || []) {
+    mask |= HOTKEY_MODIFIER_BITS.get(modifier) || 0;
+  }
+  return mask;
+}
+
+function appendHotkeyHelperArgs(args, name, value) {
+  const hotkey = parseHotkey(value);
+  if (!hotkey) {
+    return;
+  }
+  args.push(`--${name}-vk`, String(hotkey.keyVk));
+  args.push(`--${name}-modifiers`, String(hotkeyModifierMask(hotkey.modifiers)));
+}
+
+function windowsInputHelperPath() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "input-helper", "VibeCodingVoiceInputHelper.exe");
+  }
+  return path.join(app.getAppPath(), "build-assets", "input-helper", "VibeCodingVoiceInputHelper.exe");
+}
+
+function buildHotkeyHelperArgs() {
+  const settings = loadDesktopSettings();
   const effectiveConfig = loadEffectiveConfig();
-  const suppressPhysicalMenuKey = effectiveConfig.xiaomiRemoteEnabled === true;
-  const recordHotkey = parseHotkey(loadDesktopSettings().localMicHoldKey);
-  // WeChat only accepts its Ctrl+Win voice chord when no unrelated physical
-  // key is held. Keep receiving the configured single-key PTT event through
-  // stdout, but consume it before Windows/WeChat updates its keyboard state.
-  const suppressPhysicalRecordKey = Boolean(
-    effectiveConfig.xiaomiRemoteVoiceMode === "wechat" &&
-    recordHotkey &&
-    recordHotkey.modifiers.size === 0
-  );
-  const physicalRecordKeyVk = suppressPhysicalRecordKey ? recordHotkey.keyVk : -1;
-  return String.raw`
-$ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition @"
-using System;
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-
-public static class GlobalKeyboardHook {
-  private const int WH_KEYBOARD_LL = 13;
-  private const int WM_KEYDOWN = 0x0100;
-  private const int WM_KEYUP = 0x0101;
-  private const int WM_SYSKEYDOWN = 0x0104;
-  private const int WM_SYSKEYUP = 0x0105;
-  private const int VK_APPS = 0x5D;
-  private const int LLKHF_INJECTED = 0x10;
-  private const bool SuppressPhysicalMenuKey = ${suppressPhysicalMenuKey ? "true" : "false"};
-  private const bool SuppressPhysicalRecordKey = ${suppressPhysicalRecordKey ? "true" : "false"};
-  private const int PhysicalRecordKeyVk = ${physicalRecordKeyVk};
-  private static LowLevelKeyboardProc _proc = HookCallback;
-  private static IntPtr _hookID = IntPtr.Zero;
-
-  public static void Start() {
-    using (Process curProcess = Process.GetCurrentProcess())
-    using (ProcessModule curModule = curProcess.MainModule) {
-      _hookID = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(curModule.ModuleName), 0);
-      if (_hookID == IntPtr.Zero) {
-        throw new Win32Exception(Marshal.GetLastWin32Error());
-      }
-    }
-    Console.Error.WriteLine("ready");
-    Console.Error.Flush();
+  const args = ["--monitor"];
+  appendHotkeyHelperArgs(args, "record", settings.localMicHoldKey);
+  appendHotkeyHelperArgs(args, "send", settings.localMicSendKey);
+  appendHotkeyHelperArgs(args, "undo", settings.localMicUndoKey);
+  appendHotkeyHelperArgs(args, "translate", settings.localMicTranslationToggleKey);
+  if (effectiveConfig.xiaomiRemoteEnabled === true) {
+    args.push("--suppress-menu");
   }
-
-  public static void Stop() {
-    if (_hookID != IntPtr.Zero) {
-      UnhookWindowsHookEx(_hookID);
-      _hookID = IntPtr.Zero;
-    }
-  }
-
-  public static void Run() {
-    MSG msg;
-    while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) {
-      TranslateMessage(ref msg);
-      DispatchMessage(ref msg);
-    }
-  }
-
-  private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
-    if (nCode >= 0) {
-      int message = wParam.ToInt32();
-      if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN || message == WM_KEYUP || message == WM_SYSKEYUP) {
-        KBDLLHOOKSTRUCT data = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
-        string eventType = (message == WM_KEYUP || message == WM_SYSKEYUP) ? "keyup" : "keydown";
-        Console.WriteLine("{\"type\":\"" + eventType + "\",\"vkCode\":" + data.vkCode + ",\"flags\":" + data.flags + "}");
-        Console.Out.Flush();
-        bool physicalEvent = (data.flags & LLKHF_INJECTED) == 0;
-        if (physicalEvent &&
-            ((SuppressPhysicalMenuKey && data.vkCode == VK_APPS) ||
-             (SuppressPhysicalRecordKey && data.vkCode == PhysicalRecordKeyVk))) {
-          return (IntPtr)1;
-        }
-      }
-    }
-    return CallNextHookEx(_hookID, nCode, wParam, lParam);
-  }
-
-  private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
-
-  [StructLayout(LayoutKind.Sequential)]
-  private struct KBDLLHOOKSTRUCT {
-    public int vkCode;
-    public int scanCode;
-    public int flags;
-    public int time;
-    public IntPtr dwExtraInfo;
-  }
-
-  [StructLayout(LayoutKind.Sequential)]
-  private struct MSG {
-    public IntPtr hwnd;
-    public uint message;
-    public IntPtr wParam;
-    public IntPtr lParam;
-    public uint time;
-    public int pt_x;
-    public int pt_y;
-  }
-
-  [DllImport("user32.dll", SetLastError = true)]
-  private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
-
-  [DllImport("user32.dll", SetLastError = true)]
-  [return: MarshalAs(UnmanagedType.Bool)]
-  private static extern bool UnhookWindowsHookEx(IntPtr hhk);
-
-  [DllImport("user32.dll", SetLastError = true)]
-  private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-
-  [DllImport("user32.dll", SetLastError = true)]
-  private static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
-
-  [DllImport("user32.dll")]
-  private static extern bool TranslateMessage(ref MSG lpMsg);
-
-  [DllImport("user32.dll")]
-  private static extern IntPtr DispatchMessage(ref MSG lpMsg);
-
-  [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-  private static extern IntPtr GetModuleHandle(string lpModuleName);
-}
-"@
-try {
-  [GlobalKeyboardHook]::Start()
-  [GlobalKeyboardHook]::Run()
-} finally {
-  [GlobalKeyboardHook]::Stop()
-}
-`;
+  return args;
 }
 
-function handleGlobalKeyboardEvent(event) {
-  const vkCode = Number(event.vkCode);
-  if (!Number.isInteger(vkCode)) {
-    return;
-  }
-
-  if (event.type === "keydown") {
-    const repeated = pressedGlobalKeys.has(vkCode);
-    pressedGlobalKeys.add(vkCode);
-    if (repeated) {
-      return;
-    }
-
-    if (vkCode === 0x1b) {
-      emitGlobalHotkey({ type: "cancel_active_dictation", origin: "escape" });
-      return;
-    }
-
-    const settings = loadDesktopSettings();
-    if (hotkeyMatches(parseHotkey(settings.localMicHoldKey), vkCode)) {
-      activeGlobalRecordKey = vkCode;
-      emitGlobalHotkey({ type: "record_start" });
-      return;
-    }
-    if (hotkeyMatches(parseHotkey(settings.localMicSendKey), vkCode)) {
-      emitGlobalHotkey({ type: "action_send" });
-      return;
-    }
-    if (hotkeyMatches(parseHotkey(settings.localMicUndoKey), vkCode)) {
-      emitGlobalHotkey({ type: "action_undo" });
-      return;
-    }
-    if (hotkeyMatches(parseHotkey(settings.localMicTranslationToggleKey), vkCode)) {
-      emitGlobalHotkey({ type: "toggle_english_output" });
-    }
-    return;
-  }
-
-  if (event.type === "keyup") {
-    if (activeGlobalRecordKey === vkCode) {
-      activeGlobalRecordKey = null;
-      emitGlobalHotkey({ type: "record_stop" });
-    }
-    pressedGlobalKeys.delete(vkCode);
+function handleGlobalHotkeyEvent(event) {
+  if ([
+    "record_start",
+    "record_stop",
+    "action_send",
+    "action_undo",
+    "toggle_english_output",
+    "cancel_active_dictation"
+  ].includes(event?.type)) {
+    emitGlobalHotkey(event);
   }
 }
 
@@ -564,27 +387,20 @@ function startGlobalHotkeyMonitor() {
     return;
   }
 
-  const encodedCommand = Buffer
-    .from(getGlobalHotkeyPowerShellScript(), "utf16le")
-    .toString("base64");
-  const powershellPath = process.env.SystemRoot
-    ? path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-    : "powershell.exe";
-  const child = spawn(powershellPath, [
-    "-NoProfile",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-EncodedCommand",
-    encodedCommand
-  ], {
+  const helperPath = windowsInputHelperPath();
+  if (!fs.existsSync(helperPath)) {
+    globalHotkeysReady = false;
+    appendProcessLog("hotkey", `Windows input helper is missing: ${helperPath}`);
+    emitGlobalHotkeyStatus();
+    return;
+  }
+  const child = spawn(helperPath, buildHotkeyHelperArgs(), {
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"]
   });
 
   globalHotkeyChild = child;
   globalHotkeysReady = false;
-  pressedGlobalKeys.clear();
-  activeGlobalRecordKey = null;
 
   const reader = readline.createInterface({ input: child.stdout });
   reader.on("line", (line) => {
@@ -618,8 +434,6 @@ function startGlobalHotkeyMonitor() {
     }
     globalHotkeyChild = null;
     globalHotkeysReady = false;
-    pressedGlobalKeys.clear();
-    activeGlobalRecordKey = null;
     appendProcessLog("hotkey", `global shortcuts stopped code=${code ?? "null"} signal=${signal ?? "null"}`);
     emitGlobalHotkeyStatus();
     if (!isQuitting && !globalHotkeyRestartTimer) {
@@ -641,8 +455,6 @@ function stopGlobalHotkeyMonitor() {
     globalHotkeyChild = null;
   }
   globalHotkeysReady = false;
-  pressedGlobalKeys.clear();
-  activeGlobalRecordKey = null;
 }
 
 function restartGlobalHotkeyMonitor() {

@@ -3,10 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 
-import {
-  encodePowerShellCommand,
-  quotePowerShellSingle
-} from "./xiaomi-remote-runtime.mjs";
+import { quotePowerShellSingle } from "./xiaomi-remote-runtime.mjs";
 import {
   isInstalledDesktopRuntime,
   restartRemoteHidViaBroker
@@ -22,8 +19,8 @@ export function runPowerShell(script, options = {}) {
     const child = spawn("powershell.exe", [
       "-NoProfile",
       "-NonInteractive",
-      "-EncodedCommand",
-      encodePowerShellCommand(script)
+      "-Command",
+      script
     ], {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -89,23 +86,6 @@ export async function checkXiaomiRemoteHidHealth(remoteMatch = DEFAULT_REMOTE_MA
   return parseHidChildReport(await runPowerShell(script));
 }
 
-export function buildHidRestartScript(instanceId, logPath) {
-  const inner = [
-    "$ErrorActionPreference='Stop';",
-    `pnputil /restart-device ${quotePowerShellSingle(instanceId)}`,
-    `  | Out-File -FilePath ${quotePowerShellSingle(logPath)} -Encoding utf8;`,
-    "exit $LASTEXITCODE"
-  ].join(" ");
-  return [
-    "$ErrorActionPreference='Stop';",
-    "$ProgressPreference='SilentlyContinue';",
-    "$process = Start-Process powershell.exe",
-    `-ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand','${encodePowerShellCommand(inner)}')`,
-    "-Verb RunAs -WindowStyle Hidden -Wait -PassThru;",
-    "[Console]::Out.Write($process.ExitCode)"
-  ].join(" ");
-}
-
 /**
  * Restarts the remote's HID-over-GATT child through the installed broker and
  * re-checks the problem code. Source/CLI development keeps a RunAs fallback.
@@ -131,7 +111,10 @@ export async function restartXiaomiRemoteHidChild(instanceId, remoteMatch = DEFA
       fs.mkdtempSync(path.join(os.tmpdir(), "vibe-hid-restart-")),
       "pnputil.log"
     );
-    const stdout = await runPowerShell(buildHidRestartScript(instanceId, logPath));
+    const { buildHidRestartScript, runEncodedPowerShell } = await import(
+      "./xiaomi-remote-dev-elevation.mjs"
+    );
+    const stdout = await runEncodedPowerShell(buildHidRestartScript(instanceId, logPath));
     exitCode = Number(String(stdout).trim());
     output = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8").trim() : "";
   }

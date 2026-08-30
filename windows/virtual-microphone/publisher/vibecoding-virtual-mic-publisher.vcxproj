@@ -24,6 +24,9 @@
     <OutDir>$(ProjectDir)..\..\..\build-assets\virtual-microphone\</OutDir>
     <IntDir>$(ProjectDir)obj\</IntDir>
     <TargetName>vibecoding-virtual-mic-publisher</TargetName>
+    <VibeVersionMajor Condition="'$(VibeVersionMajor)'==''">0</VibeVersionMajor>
+    <VibeVersionMinor Condition="'$(VibeVersionMinor)'==''">0</VibeVersionMinor>
+    <VibeVersionPatch Condition="'$(VibeVersionPatch)'==''">0</VibeVersionPatch>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -40,9 +43,13 @@
       <LinkIncremental>false</LinkIncremental>
       <AdditionalDependencies>ole32.lib;propsys.lib;uuid.lib;avrt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <ResourceCompile>
+      <PreprocessorDefinitions>VIBE_VERSION_MAJOR=$(VibeVersionMajor);VIBE_VERSION_MINOR=$(VibeVersionMinor);VIBE_VERSION_PATCH=$(VibeVersionPatch);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="vibecoding-virtual-mic-publisher.cpp" />
+    <ResourceCompile Include="version.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

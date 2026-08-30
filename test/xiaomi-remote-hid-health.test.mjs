@@ -2,9 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  buildHidRestartScript,
   parseHidChildReport
 } from "../src/xiaomi-remote-hid-health.mjs";
+import { buildHidRestartScript } from "../src/xiaomi-remote-dev-elevation.mjs";
 
 const SAMPLE_ID = String.raw`BTHLEDEVICE\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&012717_PID&32B8_REV&4981_D4B8FFBF804D\9&880E412&F&0008`;
 

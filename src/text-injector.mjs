@@ -11,41 +11,25 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function encodePowerShellCommand(command) {
-  return Buffer.from(command, "utf16le").toString("base64");
+function resolveWindowsInputHelperPath() {
+  const resourcesPath = String(process.env.VIBE_RESOURCES_PATH || "").trim();
+  if (resourcesPath) {
+    return path.join(resourcesPath, "input-helper", "VibeCodingVoiceInputHelper.exe");
+  }
+  return path.join(projectRoot, "build-assets", "input-helper", "VibeCodingVoiceInputHelper.exe");
 }
 
-function escapePowerShellSingleQuoted(value) {
-  return String(value).replace(/'/g, "''");
+function hasWindowsInputHelper() {
+  return fs.existsSync(resolveWindowsInputHelperPath());
 }
 
-function buildPowerShellInvocation(scriptContent, namedArgs = {}) {
-  const renderedArgs = Object.entries(namedArgs)
-    .filter(([, value]) => value !== undefined && value !== null)
-    .map(([name, value]) => `-${name} '${escapePowerShellSingleQuoted(value)}'`)
-    .join(" ");
-
-  return `$ProgressPreference = 'SilentlyContinue'\n& {\n${scriptContent.trim()}\n}${renderedArgs ? ` ${renderedArgs}` : ""}`;
-}
-
-function runPowerShellScript(scriptContent, namedArgs) {
+function runWindowsInputHelper(args) {
   return new Promise((resolve, reject) => {
-    const command = buildPowerShellInvocation(scriptContent, namedArgs);
-    const child = spawn(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Sta",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-EncodedCommand",
-        encodePowerShellCommand(command)
-      ],
-      {
-        stdio: ["ignore", "pipe", "pipe"]
-      }
-    );
+    const helperPath = resolveWindowsInputHelperPath();
+    const child = spawn(helperPath, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true
+    });
 
     let stdout = "";
     let stderr = "";
@@ -57,6 +41,41 @@ function runPowerShellScript(scriptContent, namedArgs) {
       stderr += chunk.toString();
     });
 
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(stderr.trim() || stdout.trim() || `Windows input helper exited with code ${code}`));
+    });
+  });
+}
+
+function runLegacyPowerShellFile(scriptName, args) {
+  return new Promise((resolve, reject) => {
+    const scriptPath = path.join(projectRoot, "scripts", scriptName);
+    const child = spawn("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Sta",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      scriptPath,
+      ...args
+    ], {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
     child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0) {
@@ -224,7 +243,7 @@ export async function injectText(text, mode, options = {}) {
   }
 
   if (options.dryRun) {
-    console.log("[inject] dry-run", { mode, text: trimmed });
+    console.log("[inject] dry-run", { mode, text: trimmed, targetHwnd: Number(options.targetHwnd) || 0 });
     return;
   }
 
@@ -237,14 +256,21 @@ export async function injectText(text, mode, options = {}) {
     throw new Error(`text injection is only implemented for Windows in this MVP, got ${process.platform}`);
   }
 
-  const scriptPath = path.join(projectRoot, "scripts", "inject-text.ps1");
-  const scriptContent = fs.readFileSync(scriptPath, "utf8");
   const textBase64 = Buffer.from(trimmed, "utf8").toString("base64");
-
-  await runPowerShellScript(scriptContent, {
-    TextBase64: textBase64,
-    Mode: mode
-  });
+  const targetHwnd = Number(options.targetHwnd) || 0;
+  const args = ["--inject-text-base64", textBase64, "--mode", mode];
+  if (targetHwnd) {
+    args.push("--target-window", `0x${targetHwnd.toString(16)}`);
+  }
+  if (hasWindowsInputHelper()) {
+    await runWindowsInputHelper(args);
+    return;
+  }
+  const legacyArgs = ["-TextBase64", textBase64, "-Mode", mode];
+  if (targetHwnd) {
+    legacyArgs.push("-TargetHwnd", `0x${targetHwnd.toString(16)}`);
+  }
+  await runLegacyPowerShellFile("inject-text.ps1", legacyArgs);
 }
 
 export async function submitTextInput(options = {}) {
@@ -262,12 +288,11 @@ export async function submitTextInput(options = {}) {
     throw new Error(`text submission is only implemented for Windows in this MVP, got ${process.platform}`);
   }
 
-  const scriptPath = path.join(projectRoot, "scripts", "inject-text.ps1");
-  const scriptContent = fs.readFileSync(scriptPath, "utf8");
-
-  await runPowerShellScript(scriptContent, {
-    Mode: "enter_only"
-  });
+  if (hasWindowsInputHelper()) {
+    await runWindowsInputHelper(["--mode", "enter_only"]);
+    return;
+  }
+  await runLegacyPowerShellFile("inject-text.ps1", ["-Mode", "enter_only"]);
 }
 
 export async function injectKey(key, options = {}) {
@@ -285,10 +310,9 @@ export async function injectKey(key, options = {}) {
     throw new Error(`key injection is only implemented for Windows, got ${process.platform}`);
   }
 
-  const scriptPath = path.join(projectRoot, "scripts", "inject-key.ps1");
-  const scriptContent = fs.readFileSync(scriptPath, "utf8");
-
-  await runPowerShellScript(scriptContent, {
-    Key: normalized
-  });
+  if (hasWindowsInputHelper()) {
+    await runWindowsInputHelper(["--inject-key", normalized]);
+    return;
+  }
+  await runLegacyPowerShellFile("inject-key.ps1", ["-Key", normalized]);
 }
