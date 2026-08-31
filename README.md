@@ -17,7 +17,7 @@
 ## 主要功能
 
 - **微信输入法模式**：遥控器和电脑 `F8` 麦克风都可以调用微信语音输入。
-- **内置语音识别**：支持火山引擎和 OpenAI，可先预览再确认输入。
+- **内置语音识别（默认）**：支持火山引擎和 OpenAI，可先预览再确认输入。
 - **遥控器按键自定义**：单击、双击、长按可映射到按键、组合键、应用或文字。
 - **多种发送目标**：输入当前文本框，或发送到 Codex / Claude 会话。
 - **可选 ESP32 设备**：继续支持 ESP32 电子墨水语音终端。
@@ -67,7 +67,7 @@ For first-time setup, select `CABLE Output (VB-Audio Virtual Cable)` as the micr
 ### Highlights
 
 - WeChat Input Method support for both the Xiaomi remote and the desktop `F8` microphone
-- Built-in OpenAI or Volcengine speech recognition with optional confirmation
+- Built-in OpenAI or Volcengine speech recognition by default, with optional confirmation
 - Custom click, double-click, and hold actions for remote buttons
 - Text injection plus Codex / Claude session targets
 - Optional ESP32 e-paper voice devices

@@ -252,8 +252,8 @@ test("WeChat remote mode can start without a cloud STT API key", () => {
   );
 });
 
-test("new installs default to WeChat while existing configs preserve built-in STT", () => {
-  assert.equal(resolveXiaomiRemoteVoiceModeDefault("", []), "wechat");
+test("new installs and unconfigured existing installs default to built-in STT", () => {
+  assert.equal(resolveXiaomiRemoteVoiceModeDefault("", []), "builtin_stt");
   assert.equal(resolveXiaomiRemoteVoiceModeDefault("", ["C:\\Users\\me\\voice.env"]), "builtin_stt");
   assert.equal(resolveXiaomiRemoteVoiceModeDefault("wechat", ["existing.env"]), "wechat");
   assert.equal(resolveXiaomiRemoteVoiceModeDefault("builtin_stt", []), "builtin_stt");

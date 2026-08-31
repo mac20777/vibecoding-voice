@@ -281,14 +281,12 @@ export function getConfigIssues(config) {
   return issues;
 }
 
-export function resolveXiaomiRemoteVoiceModeDefault(explicitValue, loadedConfigFiles = []) {
+export function resolveXiaomiRemoteVoiceModeDefault(explicitValue) {
   const configured = String(explicitValue || "").trim();
   if (configured) {
     return normalizeXiaomiRemoteVoiceMode(configured);
   }
-  // New installs get the zero-key WeChat path. Existing users keep the STT
-  // behavior they already configured until they explicitly switch modes.
-  return loadedConfigFiles.length === 0 ? "wechat" : "builtin_stt";
+  return "builtin_stt";
 }
 
 export function hasRequiredConfig(config) {

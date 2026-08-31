@@ -33,9 +33,9 @@ const I18N = {
     fTransModel: "模型", fTransTimeout: "超时 (ms)",
     fXiaomi: "启用小米蓝牙遥控器（需 USBPcap 驱动）",
     remoteVoiceModeLabel: "语音输入方式",
-    remoteVoiceModeBuiltin: "内置语音识别（火山 / OpenAI）",
-    remoteVoiceModeWechat: "微信语音输入（推荐，无需 API Key）",
-    remoteVoiceModeHint: "遥控器按住时先录音，松开后通过 VB-CABLE 回放给微信输入法；电脑 F8 麦克风也走同一条虚拟线路。微信输入法必须把麦克风选为 CABLE Output。",
+    remoteVoiceModeBuiltin: "内置语音识别（默认，火山 / OpenAI）",
+    remoteVoiceModeWechat: "微信语音输入（无需 API Key）",
+    remoteVoiceModeHint: "默认使用内置语音识别，可在这里切换到微信输入法。",
     wechatMicSetupTitle: "微信输入法麦克风",
     wechatMicSetupDesc: "请在微信输入法 → 语音输入 → 麦克风中选择「CABLE Output (VB-Audio Virtual Cable)」。遥控器录音会在松开后通过这条虚拟线路回放给微信识别。",
     wechatMicOpen: "打开微信输入法设置",
@@ -145,7 +145,7 @@ const I18N = {
     previewKeysHint: "选「设备确认后发送」时：说话后文字先出现在悬浮条，再按住语音键可追加；确认 = 上屏并发送，撤销 = 去掉最后一段，取消 = 整段丢弃。",
     previewConfirm: "确认发送", previewUndo: "撤销一段", previewDiscard: "整段取消",
     getApiKey: "获取 Key →", reopenWizard: "重新打开新手引导",
-    wizTitleWelcome: "欢迎使用", wizTitleStt: "语音识别服务", wizTitleTest: "试说一句话",
+    wizTitleWelcome: "欢迎使用", wizWelcome: "花一分钟完成基础配置：默认使用内置语音识别，也可以切换到微信输入法。", wizTitleStt: "语音识别服务", wizTitleTest: "试说一句话",
     wizTitleRemote: "遥控器（可选）", wizTitleDone: "完成",
     wizBack: "上一步", wizNext: "下一步", wizSkip: "跳过", wizFinish: "完成并保存",
     wizStartService: "启动服务", wizTestOk: "✓ 收到！语音识别工作正常",
@@ -218,9 +218,9 @@ const I18N = {
     fTransModel: "Model", fTransTimeout: "Timeout (ms)",
     fXiaomi: "Enable Xiaomi Bluetooth remote (needs USBPcap driver)",
     remoteVoiceModeLabel: "Voice input mode",
-    remoteVoiceModeBuiltin: "Built-in speech recognition (Volcengine / OpenAI)",
-    remoteVoiceModeWechat: "WeChat voice input (recommended, no API key)",
-    remoteVoiceModeHint: "The remote records while held, then replays through VB-CABLE to WeChat Input Method after release. The desktop F8 microphone uses the same virtual route. WeChat Input Method must use CABLE Output.",
+    remoteVoiceModeBuiltin: "Built-in speech recognition (default, Volcengine / OpenAI)",
+    remoteVoiceModeWechat: "WeChat voice input (no API key)",
+    remoteVoiceModeHint: "Built-in speech recognition is the default. You can switch to WeChat Input Method here.",
     wechatMicSetupTitle: "WeChat Input Method microphone",
     wechatMicSetupDesc: "In WeChat Input Method → Voice Input → Microphone, select “CABLE Output (VB-Audio Virtual Cable)”. Remote audio is replayed through this virtual route after release.",
     wechatMicOpen: "Open WeChat Input Method settings",
@@ -330,7 +330,7 @@ const I18N = {
     previewKeysHint: "With 'Confirm on device first': speech lands in the floating bar first; hold the voice key again to append. Confirm = type & send, Undo = drop the last segment, Discard = cancel everything.",
     previewConfirm: "Confirm & send", previewUndo: "Undo last", previewDiscard: "Discard all",
     getApiKey: "Get API key →", reopenWizard: "Reopen the setup guide",
-    wizTitleWelcome: "Welcome", wizTitleStt: "Speech recognition", wizTitleTest: "Say something",
+    wizTitleWelcome: "Welcome", wizWelcome: "Complete the basic setup in a minute. Built-in speech recognition is the default, and WeChat Input Method remains available.", wizTitleStt: "Speech recognition", wizTitleTest: "Say something",
     wizTitleRemote: "Remote (optional)", wizTitleDone: "Done",
     wizBack: "Back", wizNext: "Next", wizSkip: "Skip", wizFinish: "Finish & save",
     wizStartService: "Start service", wizTestOk: "✓ Got it — recognition works",
@@ -1940,7 +1940,7 @@ function openWizard() {
   wizPair.saveTriggered = false;
   wizPair.voiceTested = false;
   elements.wizSttProvider.value = elements.sttProvider.value || "volcengine";
-  elements.wizVoiceMode.value = elements.xiaomiRemoteVoiceMode.value || "wechat";
+  elements.wizVoiceMode.value = elements.xiaomiRemoteVoiceMode.value || "builtin_stt";
   elements.wizVolcApiKey.value = elements.volcengineApiKey.value || "";
   elements.wizVolcAppKey.value = elements.volcengineAppKey.value || "";
   elements.wizVolcAccessKey.value = elements.volcengineAccessKey.value || "";

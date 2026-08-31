@@ -222,10 +222,10 @@
               <div class="field remote-voice-mode-field">
                 <label class="field-label" for="xiaomi-remote-voice-mode" data-i18n="remoteVoiceModeLabel">语音键模式</label>
                 <select id="xiaomi-remote-voice-mode" name="xiaomiRemoteVoiceMode">
-                  <option value="builtin_stt" data-i18n="remoteVoiceModeBuiltin">内置语音识别（火山 / OpenAI）</option>
-                  <option value="wechat" data-i18n="remoteVoiceModeWechat">微信语音输入（推荐，无需 API Key）</option>
+                  <option value="builtin_stt" data-i18n="remoteVoiceModeBuiltin">内置语音识别（默认，火山 / OpenAI）</option>
+                  <option value="wechat" data-i18n="remoteVoiceModeWechat">微信语音输入（无需 API Key）</option>
                 </select>
-                <div class="hint" id="remote-voice-mode-hint" data-i18n="remoteVoiceModeHint">遥控器按住时先录音，松开后通过 VB-CABLE 回放给微信输入法；微信输入法必须把麦克风选为 CABLE Output。</div>
+                <div class="hint" id="remote-voice-mode-hint" data-i18n="remoteVoiceModeHint">默认使用内置语音识别，可在这里切换到微信输入法。</div>
                 <div class="wechat-mic-setup" id="wechat-mic-setup" hidden>
                   <div class="wechat-mic-setup-title" data-i18n="wechatMicSetupTitle">微信输入法麦克风</div>
                   <div class="wechat-mic-setup-desc" data-i18n="wechatMicSetupDesc">请在微信输入法 → 语音输入 → 麦克风中选择「CABLE Output (VB-Audio Virtual Cable)」。遥控器录音会在松开后通过这条虚拟线路回放给微信识别。</div>
@@ -721,15 +721,15 @@
 
         <div class="wizard-step" data-wstep="welcome">
           <div class="wizard-hero">🎙️</div>
-          <p class="wizard-text" data-i18n="wizWelcome">花一分钟完成基础配置：默认使用微信语音输入，不需要 API Key；也可以切换到火山或 OpenAI。</p>
+          <p class="wizard-text" data-i18n="wizWelcome">花一分钟完成基础配置：默认使用内置语音识别，也可以切换到微信输入法。</p>
         </div>
 
         <div class="wizard-step" data-wstep="stt" hidden>
           <div class="field">
             <label class="field-label" for="wiz-voice-mode" data-i18n="remoteVoiceModeLabel">语音输入方式</label>
             <select id="wiz-voice-mode">
-              <option value="wechat" data-i18n="remoteVoiceModeWechat">微信语音输入（推荐，无需 API Key）</option>
-              <option value="builtin_stt" data-i18n="remoteVoiceModeBuiltin">内置语音识别（火山 / OpenAI）</option>
+              <option value="builtin_stt" data-i18n="remoteVoiceModeBuiltin">内置语音识别（默认，火山 / OpenAI）</option>
+              <option value="wechat" data-i18n="remoteVoiceModeWechat">微信语音输入（无需 API Key）</option>
             </select>
           </div>
           <div class="hint" data-wiz-voice-mode="wechat" data-i18n="wizWechatModeNote">按住语音键时先录下遥控器声音；松开后通过 VB-CABLE 回放给微信输入法识别。首次使用请到「遥控器」页把微信输入法麦克风设置为 CABLE Output。</div>
