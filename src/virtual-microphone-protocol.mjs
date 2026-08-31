@@ -6,7 +6,8 @@ export const VIRTUAL_MIC_MESSAGE = Object.freeze({
   PCM16: 2,
   STOP: 3,
   CANCEL: 4,
-  EXIT: 5
+  EXIT: 5,
+  PREPARE: 6
 });
 
 export const XIAOMI_REMOTE_VOICE_MODES = Object.freeze({
@@ -36,4 +37,3 @@ export function encodeVirtualMicrophoneMessage(type, payload = Buffer.alloc(0)) 
   header.writeUInt32LE(body.length, 8);
   return body.length ? Buffer.concat([header, body]) : header;
 }
-

@@ -225,7 +225,19 @@
                   <option value="builtin_stt" data-i18n="remoteVoiceModeBuiltin">内置语音识别（火山 / OpenAI）</option>
                   <option value="wechat" data-i18n="remoteVoiceModeWechat">微信语音输入（推荐，无需 API Key）</option>
                 </select>
-                <div class="hint" id="remote-voice-mode-hint" data-i18n="remoteVoiceModeHint">按住语音键时，软件会临时把 Windows 默认麦克风切换到 VB-CABLE；松开并结束微信录音后自动恢复原设备。</div>
+                <div class="hint" id="remote-voice-mode-hint" data-i18n="remoteVoiceModeHint">遥控器按住时先录音，松开后通过 VB-CABLE 回放给微信输入法；微信输入法必须把麦克风选为 CABLE Output。</div>
+                <div class="wechat-mic-setup" id="wechat-mic-setup" hidden>
+                  <div class="wechat-mic-setup-title" data-i18n="wechatMicSetupTitle">微信输入法麦克风</div>
+                  <div class="wechat-mic-setup-desc" data-i18n="wechatMicSetupDesc">请在微信输入法 → 语音输入 → 麦克风中选择「CABLE Output (VB-Audio Virtual Cable)」。遥控器录音会在松开后通过这条虚拟线路回放给微信识别。</div>
+                  <div class="wechat-mic-setup-actions">
+                    <button id="open-wechat-input-settings" class="btn btn-ghost btn-small" type="button" data-i18n="wechatMicOpen">打开微信输入法设置</button>
+                    <label class="wechat-mic-confirm">
+                      <input id="wechat-virtual-mic-confirmed" type="checkbox" />
+                      <span data-i18n="wechatMicConfirmed">我已选择 CABLE Output</span>
+                    </label>
+                  </div>
+                  <div class="hint warning-text" id="wechat-mic-setup-result"></div>
+                </div>
               </div>
               <div class="remote-hid-warning" id="remote-hid-warning" hidden>
                 <span class="remote-hid-warning-text">
@@ -357,6 +369,7 @@
                     </div>
                   </div>
                   <div class="remote-note" id="voice-fixed-note" data-i18n="voiceFixedNote" hidden>语音键固定为「按住说话」，不参与映射。</div>
+                  <div class="remote-note warning-text" id="menu-mistrigger-note" data-i18n="menuMistriggerNote" hidden>菜单键容易误触：遥控器 HID 异常时它会被系统反复触发，建议保持「禁用」；开启后软件会对异常连发自动限流并尝试修复。</div>
                   <div class="remote-note" data-i18n="remoteNote"></div>
                 </div>
               </div>
@@ -476,13 +489,21 @@
                   <div class="field-group" data-provider-section="volcengine">
                     <div class="field">
                       <div class="field-head">
-                        <label class="field-label" for="volcengine-app-key">Volcengine App Key</label>
+                        <label class="field-label" for="volcengine-api-key">Volcengine API Key</label>
+                        <button type="button" class="key-link" data-open-url="https://console.volcengine.com/speech/new/experience/asr" data-i18n="getApiKey">获取 Key →</button>
+                      </div>
+                      <input id="volcengine-api-key" name="volcengineApiKey" type="password" autocomplete="off" />
+                      <div class="hint">新版控制台只需这一个 Key；旧版控制台才用下面的 App Key + Access Key</div>
+                    </div>
+                    <div class="field">
+                      <div class="field-head">
+                        <label class="field-label" for="volcengine-app-key">Volcengine App Key（旧版）</label>
                         <button type="button" class="key-link" data-open-url="https://console.volcengine.com/speech/app" data-i18n="getApiKey">获取 Key →</button>
                       </div>
                       <input id="volcengine-app-key" name="volcengineAppKey" type="password" autocomplete="off" />
                     </div>
                     <div class="field">
-                      <label class="field-label" for="volcengine-access-key">Volcengine Access Key</label>
+                      <label class="field-label" for="volcengine-access-key">Volcengine Access Key（旧版）</label>
                       <input id="volcengine-access-key" name="volcengineAccessKey" type="password" autocomplete="off" />
                     </div>
                   </div>
@@ -568,7 +589,7 @@
                   </div>
                   <div class="field">
                     <label class="field-label" for="voice-translation-model" data-i18n="fTransModel">模型</label>
-                    <input id="voice-translation-model" name="voiceTranslationModel" type="text" placeholder="deepseek-chat" />
+                    <input id="voice-translation-model" name="voiceTranslationModel" type="text" placeholder="deepseek-v4-flash" />
                   </div>
                   <div class="field">
                     <label class="field-label" for="voice-translation-base-url">Base URL</label>
@@ -711,7 +732,7 @@
               <option value="builtin_stt" data-i18n="remoteVoiceModeBuiltin">内置语音识别（火山 / OpenAI）</option>
             </select>
           </div>
-          <div class="hint" data-wiz-voice-mode="wechat" data-i18n="wizWechatModeNote">按住语音键时，软件会自动临时切换 Windows 默认麦克风并调用微信语音输入；松开后恢复原设备。</div>
+          <div class="hint" data-wiz-voice-mode="wechat" data-i18n="wizWechatModeNote">按住语音键时先录下遥控器声音；松开后通过 VB-CABLE 回放给微信输入法识别。首次使用请到「遥控器」页把微信输入法麦克风设置为 CABLE Output。</div>
           <div data-wiz-voice-mode="builtin_stt" hidden>
             <div class="field">
               <label class="field-label" for="wiz-stt-provider" data-i18n="fStt">语音识别服务</label>
@@ -723,16 +744,20 @@
             <div data-wiz-provider="volcengine">
               <div class="field">
                 <div class="field-head">
-                  <label class="field-label" for="wiz-volc-app-key">Volcengine App Key</label>
-                  <button type="button" class="key-link" data-open-url="https://console.volcengine.com/speech/app" data-i18n="getApiKey">获取 Key →</button>
+                  <label class="field-label" for="wiz-volc-api-key">Volcengine API Key</label>
+                  <button type="button" class="key-link" data-open-url="https://console.volcengine.com/speech/new/experience/asr" data-i18n="getApiKey">获取 Key →</button>
                 </div>
+                <input id="wiz-volc-api-key" type="password" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label class="field-label" for="wiz-volc-app-key">Volcengine App Key（旧版）</label>
                 <input id="wiz-volc-app-key" type="password" autocomplete="off" />
               </div>
               <div class="field">
-                <label class="field-label" for="wiz-volc-access-key">Volcengine Access Key</label>
+                <label class="field-label" for="wiz-volc-access-key">Volcengine Access Key（旧版）</label>
                 <input id="wiz-volc-access-key" type="password" autocomplete="off" />
               </div>
-              <div class="hint" data-i18n="wizSttVolcNote">打开火山引擎控制台 → 语音识别 → 创建应用，把 App Key 和 Access Key 复制到这里。</div>
+              <div class="hint" data-i18n="wizSttVolcNote">打开火山引擎新版控制台 → 语音识别，创建一个 API Key 复制到这里；旧版控制台才需要 App Key + Access Key。</div>
             </div>
             <div data-wiz-provider="openai" hidden>
               <div class="field">

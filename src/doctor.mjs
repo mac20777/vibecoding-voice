@@ -253,19 +253,19 @@ function resolveSttLabel(config) {
   if (config.mockTranscript) {
     return { label: "mock (MOCK_TRANSCRIPT set)", valid: true };
   }
-  const provider = config.sttProvider || (config.openaiApiKey ? "openai" : config.volcengineAppKey ? "volcengine" : "");
+  const provider = config.sttProvider || (config.openaiApiKey ? "openai" : (config.volcengineApiKey || config.volcengineAppKey) ? "volcengine" : "");
   if (provider === "openai") {
     return config.openaiApiKey
       ? { label: `openai · ${config.openaiModel}`, valid: true }
       : { label: "openai — OPENAI_API_KEY missing", valid: false };
   }
   if (provider === "volcengine") {
-    const keysOk = config.volcengineAppKey && config.volcengineAccessKey;
+    const keysOk = config.volcengineApiKey || (config.volcengineAppKey && config.volcengineAccessKey);
     return keysOk
       ? { label: `volcengine · ${config.volcengineLanguage}`, valid: true }
-      : { label: "volcengine — VOLCENGINE_APP_KEY or VOLCENGINE_ACCESS_KEY missing", valid: false };
+      : { label: "volcengine — VOLCENGINE_API_KEY missing (or legacy VOLCENGINE_APP_KEY + VOLCENGINE_ACCESS_KEY)", valid: false };
   }
-  return { label: "none — set OPENAI_API_KEY or VOLCENGINE_APP_KEY + VOLCENGINE_ACCESS_KEY", valid: false };
+  return { label: "none — set OPENAI_API_KEY or VOLCENGINE_API_KEY", valid: false };
 }
 
 function resolveTodoIntentLabel(config) {

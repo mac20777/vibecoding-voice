@@ -48,14 +48,6 @@
     font-size: 20px; line-height: 28px; cursor: pointer;
   }
   .cancel:hover { background: rgba(255, 138, 138, 0.22); color: #fff; }
-  .wechat-capture {
-    position: fixed;
-    left: 10px; top: 10px;
-    width: 2px; height: 2px;
-    opacity: 0;
-    border: 0; padding: 0;
-    resize: none;
-  }
   .hidden { display: none; }
 </style>
 </head>
@@ -69,7 +61,6 @@
     </div>
     <button class="cancel hidden" id="cancel" type="button" aria-label="取消">×</button>
   </div>
-  <textarea id="wechat-capture" class="wechat-capture" aria-hidden="true"></textarea>
   <script>
     const T = {
       zh: {
@@ -79,7 +70,6 @@
         timeout: "识别超时，已自动取消",
         failed: "识别失败，已取消",
         waiting: "待确认",
-        wechatProcessing: "微信识别中…",
         confirmHint: "按确认键发送 · 按返回键撤销",
         sent: "已发送 ✓",
         cancelled: "已取消",
@@ -95,7 +85,6 @@
         timeout: "Recognition timed out and was cancelled",
         failed: "Recognition failed and was cancelled",
         waiting: "Confirm",
-        wechatProcessing: "Waiting for WeChat…",
         confirmHint: "Press OK to send · Back to cancel",
         sent: "Sent ✓",
         cancelled: "Cancelled",
@@ -111,7 +100,6 @@
     const textEl = document.getElementById("text");
     const hintEl = document.getElementById("hint");
     const cancelEl = document.getElementById("cancel");
-    const wechatCaptureEl = document.getElementById("wechat-capture");
 
     function render(statusKey, dotClass, text = "", hint = "", cancellable = false) {
       dot.className = `dot ${dotClass}`;
@@ -124,60 +112,6 @@
     }
 
     cancelEl.addEventListener("click", () => window.vibeOverlay.cancel("overlay_click"));
-
-    let wechatCapture = null;
-    let wechatCommitTimer = null;
-    let wechatTimeoutTimer = null;
-    let wechatComposing = false;
-
-    function clearWechatCaptureTimers() {
-      clearTimeout(wechatCommitTimer);
-      clearTimeout(wechatTimeoutTimer);
-      wechatCommitTimer = null;
-      wechatTimeoutTimer = null;
-    }
-
-    function finishWechatCapture(reason = "settled") {
-      if (!wechatCapture) {
-        return;
-      }
-      const session = wechatCapture;
-      const text = wechatCaptureEl.value.trim();
-      wechatCapture = null;
-      clearWechatCaptureTimers();
-      wechatCaptureEl.blur();
-      window.vibeOverlay.wechatCaptureResult({
-        sessionId: session.sessionId,
-        source: session.source,
-        text,
-        reason
-      });
-    }
-
-    function scheduleWechatCaptureCommit() {
-      if (!wechatCapture?.stopped || wechatComposing || !wechatCaptureEl.value.trim()) {
-        return;
-      }
-      clearTimeout(wechatCommitTimer);
-      wechatCommitTimer = setTimeout(() => finishWechatCapture("settled"), 850);
-    }
-
-    wechatCaptureEl.addEventListener("compositionstart", () => {
-      wechatComposing = true;
-      clearTimeout(wechatCommitTimer);
-    });
-    wechatCaptureEl.addEventListener("compositionend", () => {
-      wechatComposing = false;
-      scheduleWechatCaptureCommit();
-    });
-    wechatCaptureEl.addEventListener("input", () => {
-      if (!wechatCapture) {
-        return;
-      }
-      const text = wechatCaptureEl.value.trim();
-      render(wechatCapture.labels.wechatProcessing, "busy", text, wechatCapture.labels.cancelHint, true);
-      scheduleWechatCaptureCommit();
-    });
 
     let powerCountdown = null;
     function clearPowerCountdown() {
@@ -193,42 +127,6 @@
       cancelEl.setAttribute("aria-label", lang === "zh" ? "取消" : "Cancel");
       cancelEl.title = lang === "zh" ? "取消语音识别" : "Cancel voice recognition";
       clearPowerCountdown();
-      if (payload.type === "wechat_capture_prepare") {
-        clearWechatCaptureTimers();
-        wechatCapture = {
-          sessionId: String(payload.sessionId || ""),
-          source: String(payload.source || ""),
-          stopped: false,
-          labels: tt
-        };
-        wechatComposing = false;
-        wechatCaptureEl.value = "";
-        render(tt.listening, "recording", "", tt.cancelHint, true);
-        requestAnimationFrame(() => {
-          wechatCaptureEl.focus({ preventScroll: true });
-          window.vibeOverlay.wechatCaptureReady(wechatCapture?.sessionId || "");
-        });
-        return;
-      }
-      if (payload.type === "wechat_capture_stop") {
-        if (!wechatCapture || wechatCapture.sessionId !== String(payload.sessionId || "")) {
-          return;
-        }
-        wechatCapture.stopped = true;
-        render(tt.wechatProcessing, "busy", wechatCaptureEl.value.trim(), tt.cancelHint, true);
-        scheduleWechatCaptureCommit();
-        wechatTimeoutTimer = setTimeout(() => finishWechatCapture("timeout"), 8_000);
-        return;
-      }
-      if (payload.type === "wechat_capture_cancel") {
-        if (!wechatCapture || wechatCapture.sessionId === String(payload.sessionId || "")) {
-          wechatCapture = null;
-          clearWechatCaptureTimers();
-          wechatCaptureEl.value = "";
-          wechatCaptureEl.blur();
-        }
-        return;
-      }
       if (payload.type === "transcript_final") {
         if (payload.requiresAction) {
           render(tt.waiting, "busy", payload.text || "", payload.confirmHint || tt.confirmHint, true);

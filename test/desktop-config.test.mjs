@@ -24,6 +24,7 @@ test("normalizeDesktopSettings applies safe defaults", () => {
     localMicUndoKey: "F10",
     localMicTranslationToggleKey: "F7",
     localMicDeviceId: "",
+    wechatVirtualMicConfirmed: false,
     uiLanguage: "zh",
     hasUsedVoice: false
   });
@@ -37,7 +38,8 @@ test("normalizeDesktopSettings applies safe defaults", () => {
       localMicSendKey: "F11",
       localMicUndoKey: "Ctrl+Backspace",
       localMicTranslationToggleKey: "Ctrl+Alt+E",
-      localMicDeviceId: "usb-mic-1"
+      localMicDeviceId: "usb-mic-1",
+      wechatVirtualMicConfirmed: true
     }),
     {
       autoLaunch: true,
@@ -48,6 +50,7 @@ test("normalizeDesktopSettings applies safe defaults", () => {
       localMicUndoKey: "Ctrl+Backspace",
       localMicTranslationToggleKey: "Ctrl+Alt+E",
       localMicDeviceId: "usb-mic-1",
+      wechatVirtualMicConfirmed: true,
       recordTranscripts: true,
       overlayX: null,
       overlayY: null,
@@ -64,6 +67,7 @@ test("partial desktop settings updates preserve the selected F8 microphone", () 
       autoLaunch: true,
       localMicDeviceId: "usb-mic-1",
       localMicHoldKey: "F8",
+      wechatVirtualMicConfirmed: true,
       uiLanguage: "zh",
       hasUsedVoice: true
     },
@@ -76,6 +80,7 @@ test("partial desktop settings updates preserve the selected F8 microphone", () 
   assert.equal(merged.autoLaunch, true);
   assert.equal(merged.closeToTray, true);
   assert.equal(merged.hasUsedVoice, true);
+  assert.equal(merged.wechatVirtualMicConfirmed, true);
 });
 
 test("buildDesktopFormState exposes effective config values for the desktop UI", () => {
@@ -85,13 +90,14 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
       sttProvider: "openai",
       openaiApiKey: "sk-test",
       openaiModel: "gpt-4o-mini-transcribe",
+      volcengineApiKey: "",
       volcengineAppKey: "",
       volcengineAccessKey: "",
       transcriptDeliveryMode: "immediate",
       textInjectionMode: "type_only",
       voiceTranslationEnabled: true,
       voiceTranslationApiKey: "translation-key",
-      voiceTranslationModel: "deepseek-chat",
+      voiceTranslationModel: "deepseek-v4-flash",
       voiceTranslationBaseUrl: "https://api.deepseek.com",
       voiceTranslationTimeoutMs: 12000,
       voiceTranslationPrompt: "Translate to idiomatic English.",
@@ -148,6 +154,7 @@ test("buildDesktopFormState exposes effective config values for the desktop UI",
     localMicUndoKey: "F10",
     localMicTranslationToggleKey: "F7",
     localMicDeviceId: "",
+    wechatVirtualMicConfirmed: false,
     uiLanguage: "zh",
     hasUsedVoice: false
   });
@@ -159,13 +166,14 @@ test("buildUserConfigUpdates normalizes desktop form payload into env values", (
     sttProvider: "volcengine",
     openaiApiKey: "sk-keep",
     openaiModel: "whisper-1",
+    volcengineApiKey: "api-key",
     volcengineAppKey: "app-key",
     volcengineAccessKey: "access-key",
     transcriptDeliveryMode: "immediate",
     textInjectionMode: "type_only",
     voiceTranslationEnabled: true,
     voiceTranslationApiKey: "translation-key",
-    voiceTranslationModel: "deepseek-chat",
+    voiceTranslationModel: "deepseek-v4-flash",
     voiceTranslationBaseUrl: "https://api.deepseek.com",
     voiceTranslationTimeoutMs: "12000",
     voiceTranslationPrompt: "Translate to idiomatic English.",
@@ -183,6 +191,7 @@ test("buildUserConfigUpdates normalizes desktop form payload into env values", (
     STT_PROVIDER: "volcengine",
     OPENAI_API_KEY: "sk-keep",
     OPENAI_TRANSCRIBE_MODEL: "whisper-1",
+    VOLCENGINE_API_KEY: "api-key",
     VOLCENGINE_APP_KEY: "app-key",
     VOLCENGINE_ACCESS_KEY: "access-key",
     TRANSCRIPT_DELIVERY_MODE: "immediate",
@@ -190,7 +199,7 @@ test("buildUserConfigUpdates normalizes desktop form payload into env values", (
     VOICE_TRANSLATION_ENABLED: "1",
     VOICE_TRANSLATION_PROVIDER: "deepseek",
     VOICE_TRANSLATION_API_KEY: "translation-key",
-    VOICE_TRANSLATION_MODEL: "deepseek-chat",
+    VOICE_TRANSLATION_MODEL: "deepseek-v4-flash",
     VOICE_TRANSLATION_BASE_URL: "https://api.deepseek.com",
     VOICE_TRANSLATION_TIMEOUT_MS: "12000",
     VOICE_TRANSLATION_PROMPT: "Translate to idiomatic English.",

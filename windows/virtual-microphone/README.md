@@ -4,15 +4,20 @@ The current Windows product path uses the production-signed VB-CABLE endpoints:
 
 1. `vibecoding-virtual-mic-publisher.exe` receives framed PCM16LE, 16 kHz,
    mono audio from the Xiaomi remote process.
-2. On push-to-talk start, the publisher snapshots the current Windows capture
-   defaults and temporarily routes the console, multimedia, and communications
-   roles to `CABLE Output (VB-Audio Virtual Cable)`.
-3. It renders the remote stream through shared-mode WASAPI to
-   `CABLE Input (VB-Audio Virtual Cable)`, then invokes WeChat's voice shortcut.
-4. After the shortcut is released and the audio queue drains, the prior capture
-   defaults are restored. A per-user route-state file provides recovery after an
-   unexpected helper or application exit, and restoration skips roles the user
-   changed manually while recording.
+2. On push-to-talk start, a `PREPARE` message snapshots the current Windows
+   capture defaults and temporarily routes the console, multimedia, and
+   communications roles to `CABLE Output (VB-Audio Virtual Cable)` while the
+   user is still speaking.
+3. After key release, the publisher taps WeChat Input Method's `Ctrl+Win+Shift`
+   start shortcut and reports `shortcut_pressed`; only then is the buffered
+   remote stream rendered through shared-mode WASAPI to
+   `CABLE Input (VB-Audio Virtual Cable)`.
+4. After the audio queue drains, the publisher taps the same shortcut to stop
+   recognition and restores the prior capture defaults. The publisher reports
+   `session_idle` only after this finishes, so a later push-to-talk cycle cannot
+   overlap the previous one. A per-user route-state file provides recovery after
+   an unexpected helper or application exit, and restoration skips roles the
+   user changed manually.
 
 Using WASAPI for the user-to-driver boundary avoids a private device-control
 protocol and lets the Windows audio engine perform the 16 kHz mono conversion.

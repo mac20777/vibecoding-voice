@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -31,9 +32,13 @@ namespace VibeCodingVoice.InputHelper
         private const int MenuHotkeyId = 5;
 
         private static readonly List<int> RegisteredHotkeyIds = new List<int>();
+        private static readonly List<PendingHotkey> PendingHotkeys = new List<PendingHotkey>();
         private static MonitorOptions monitorOptions;
         private static int activeRecordKey = -1;
         private static bool escapeWasDown;
+        private static int ownerPid = -1;
+        private static int lastOwnerCheckTick;
+        private static int lastHotkeyRetryTick;
 
         [STAThread]
         private static int Main(string[] args)
@@ -44,12 +49,6 @@ namespace VibeCodingVoice.InputHelper
                 {
                     Console.WriteLine("{\"ok\":true,\"helper\":\"VibeCodingVoiceInputHelper\"}");
                     return 0;
-                }
-
-                string focusTarget = GetOption(args, "--focus-window");
-                if (!String.IsNullOrWhiteSpace(focusTarget))
-                {
-                    return FocusWindow(focusTarget);
                 }
 
                 string textBase64 = GetOption(args, "--inject-text-base64");
@@ -69,11 +68,11 @@ namespace VibeCodingVoice.InputHelper
                 if (HasFlag(args, "--monitor"))
                 {
                     monitorOptions = MonitorOptions.Parse(args);
-                    return RunMonitor();
+                    return RunMonitor(args);
                 }
 
                 Console.Error.WriteLine(
-                    "usage: --monitor | --focus-window <hwnd> | --inject-text-base64 <text> | --inject-key <key> | --self-test"
+                    "usage: --monitor | --inject-text-base64 <text> | --inject-key <key> | --self-test"
                 );
                 return 2;
             }
@@ -84,17 +83,21 @@ namespace VibeCodingVoice.InputHelper
             }
         }
 
-        private static int RunMonitor()
+        private static int RunMonitor(string[] args)
         {
+            Int32.TryParse(GetOption(args, "--owner-pid"), out ownerPid);
             HashSet<string> registeredCombinations = new HashSet<string>(StringComparer.Ordinal);
             RegisterConfiguredHotkey(RecordHotkeyId, monitorOptions.Record, registeredCombinations);
             RegisterConfiguredHotkey(SendHotkeyId, monitorOptions.Send, registeredCombinations);
             RegisterConfiguredHotkey(UndoHotkeyId, monitorOptions.Undo, registeredCombinations);
             RegisterConfiguredHotkey(TranslateHotkeyId, monitorOptions.Translate, registeredCombinations);
-            if (monitorOptions.SuppressMenu &&
-                RegisterHotKey(IntPtr.Zero, MenuHotkeyId, ModNoRepeat, VkApps))
+            if (monitorOptions.SuppressMenu)
             {
-                RegisteredHotkeyIds.Add(MenuHotkeyId);
+                RegisterConfiguredHotkey(
+                    MenuHotkeyId,
+                    new Hotkey { VirtualKey = VkApps, Modifiers = 0 },
+                    registeredCombinations
+                );
             }
 
             UIntPtr timerId = SetTimer(IntPtr.Zero, UIntPtr.Zero, 15, IntPtr.Zero);
@@ -146,15 +149,73 @@ namespace VibeCodingVoice.InputHelper
             {
                 return;
             }
-            if (!RegisterHotKey(IntPtr.Zero, id, modifiers, hotkey.VirtualKey))
+            if (RegisterHotKey(IntPtr.Zero, id, modifiers, hotkey.VirtualKey))
             {
-                UnregisterConfiguredHotkeys();
-                throw new Win32Exception(
-                    Marshal.GetLastWin32Error(),
-                    "Could not register global hotkey " + hotkey.VirtualKey.ToString(CultureInfo.InvariantCulture)
-                );
+                RegisteredHotkeyIds.Add(id);
+                return;
             }
-            RegisteredHotkeyIds.Add(id);
+            // Another process (often a leftover helper from a crashed run) holds
+            // this key. Keep the other hotkeys working and retry in the timer
+            // loop instead of taking the whole monitor down.
+            int error = Marshal.GetLastWin32Error();
+            PendingHotkeys.Add(new PendingHotkey { Id = id, Hotkey = hotkey, LastError = error });
+            Console.Error.WriteLine(
+                "hotkey_failed id=" + id.ToString(CultureInfo.InvariantCulture) +
+                " vk=" + hotkey.VirtualKey.ToString(CultureInfo.InvariantCulture) +
+                " error=" + error.ToString(CultureInfo.InvariantCulture)
+            );
+            Console.Error.Flush();
+        }
+
+        private static void RetryPendingHotkeys()
+        {
+            for (int index = PendingHotkeys.Count - 1; index >= 0; index -= 1)
+            {
+                PendingHotkey pending = PendingHotkeys[index];
+                uint modifiers = ToRegisterHotkeyModifiers(pending.Hotkey.Modifiers) | ModNoRepeat;
+                if (RegisterHotKey(IntPtr.Zero, pending.Id, modifiers, pending.Hotkey.VirtualKey))
+                {
+                    RegisteredHotkeyIds.Add(pending.Id);
+                    PendingHotkeys.RemoveAt(index);
+                    Console.Error.WriteLine(
+                        "hotkey_registered id=" + pending.Id.ToString(CultureInfo.InvariantCulture) +
+                        " vk=" + pending.Hotkey.VirtualKey.ToString(CultureInfo.InvariantCulture)
+                    );
+                    Console.Error.Flush();
+                    continue;
+                }
+                int error = Marshal.GetLastWin32Error();
+                if (error != pending.LastError)
+                {
+                    pending.LastError = error;
+                    Console.Error.WriteLine(
+                        "hotkey_failed id=" + pending.Id.ToString(CultureInfo.InvariantCulture) +
+                        " vk=" + pending.Hotkey.VirtualKey.ToString(CultureInfo.InvariantCulture) +
+                        " error=" + error.ToString(CultureInfo.InvariantCulture)
+                    );
+                    Console.Error.Flush();
+                }
+            }
+        }
+
+        private static bool IsOwnerAlive()
+        {
+            try
+            {
+                using (Process owner = Process.GetProcessById(ownerPid))
+                {
+                    return !owner.HasExited;
+                }
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            catch
+            {
+                // Access-denied and friends: assume the owner is still around.
+                return true;
+            }
         }
 
         private static uint ToRegisterHotkeyModifiers(int modifiers)
@@ -217,6 +278,23 @@ namespace VibeCodingVoice.InputHelper
                 Emit("{\"type\":\"cancel_active_dictation\",\"origin\":\"escape\"}");
             }
             escapeWasDown = escapeDown;
+
+            int now = Environment.TickCount;
+            if (ownerPid > 0 && unchecked(now - lastOwnerCheckTick) >= 2000)
+            {
+                lastOwnerCheckTick = now;
+                if (!IsOwnerAlive())
+                {
+                    // The desktop app died without cleaning us up; keeping the
+                    // hotkeys registered would block every future instance.
+                    Environment.Exit(0);
+                }
+            }
+            if (PendingHotkeys.Count > 0 && unchecked(now - lastHotkeyRetryTick) >= 5000)
+            {
+                lastHotkeyRetryTick = now;
+                RetryPendingHotkeys();
+            }
         }
 
         private static void UnregisterConfiguredHotkeys()
@@ -234,25 +312,7 @@ namespace VibeCodingVoice.InputHelper
             Console.Out.Flush();
         }
 
-        private static int FocusWindow(string value)
-        {
-            IntPtr target = ParseWindowHandle(value);
-            if (target == IntPtr.Zero || !IsWindow(target))
-            {
-                throw new ArgumentException("focus target is not a valid window");
-            }
-
-            FocusResult result = FocusWindowCore(target);
-            Console.WriteLine(
-                "{\"ok\":" + (result.Ok ? "true" : "false") +
-                ",\"foreground\":" + result.Foreground.ToInt64().ToString(CultureInfo.InvariantCulture) +
-                ",\"previous\":" + result.Previous.ToInt64().ToString(CultureInfo.InvariantCulture) +
-                ",\"target\":" + target.ToInt64().ToString(CultureInfo.InvariantCulture) + "}"
-            );
-            return result.Ok ? 0 : 1;
-        }
-
-        private static FocusResult FocusWindowCore(IntPtr target)
+        private static void FocusWindowCore(IntPtr target)
         {
             IntPtr previous = GetForegroundWindow();
             IntPtr style = GetWindowLongPtr(target, GwlExstyle);
@@ -288,8 +348,6 @@ namespace VibeCodingVoice.InputHelper
             }
 
             Thread.Sleep(60);
-            IntPtr actual = GetForegroundWindow();
-            return new FocusResult { Ok = actual == target, Foreground = actual, Previous = previous };
         }
 
         private static IntPtr ParseWindowHandle(string value)
@@ -481,6 +539,13 @@ namespace VibeCodingVoice.InputHelper
             return null;
         }
 
+        private sealed class PendingHotkey
+        {
+            internal int Id;
+            internal Hotkey Hotkey;
+            internal int LastError;
+        }
+
         private sealed class MonitorOptions
         {
             internal Hotkey Record;
@@ -527,13 +592,6 @@ namespace VibeCodingVoice.InputHelper
             internal uint time;
             internal int pointX;
             internal int pointY;
-        }
-
-        private struct FocusResult
-        {
-            internal bool Ok;
-            internal IntPtr Foreground;
-            internal IntPtr Previous;
         }
 
         [DllImport("user32.dll", SetLastError = true)]

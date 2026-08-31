@@ -67,3 +67,35 @@ test("Volcengine fetch receives the hard-timeout abort signal", async (t) => {
   );
   assert.equal(observedAbort, true);
 });
+
+test("Volcengine sends X-Api-Key for the new console single key", async (t) => {
+  const originalFetch = globalThis.fetch;
+  let observedHeaders = null;
+  globalThis.fetch = async (_url, options = {}) => {
+    observedHeaders = options.headers;
+    return new Response(JSON.stringify({ result: { text: "你好" } }), {
+      status: 200,
+      headers: { "X-Api-Status-Code": "20000000", "X-Api-Message": "OK" }
+    });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const text = await transcribePcm16Mono({
+    pcmBuffer: PCM,
+    config: {
+      sttProvider: "volcengine",
+      sttTimeoutMs: 1_000,
+      saveDebugWav: false,
+      mockTranscript: "",
+      volcengineApiKey: "new-api-key",
+      volcengineResourceId: "volc.bigasr.auc_turbo",
+      volcengineLanguage: "zh-CN"
+    }
+  });
+  assert.equal(text, "你好");
+  assert.equal(observedHeaders["X-Api-Key"], "new-api-key");
+  assert.equal(observedHeaders["X-Api-App-Key"], undefined);
+  assert.equal(observedHeaders["X-Api-Access-Key"], undefined);
+});

@@ -239,7 +239,7 @@ export function detectConfiguredSttProvider(config) {
     return "openai";
   }
 
-  if (config.volcengineAppKey || config.volcengineAccessKey) {
+  if (config.volcengineApiKey || config.volcengineAppKey || config.volcengineAccessKey) {
     return "volcengine";
   }
 
@@ -255,18 +255,19 @@ export function getConfigIssues(config) {
     const provider = detectConfiguredSttProvider(config);
     if (!provider) {
       issues.push(
-        "No STT provider is configured. Set OPENAI_API_KEY or VOLCENGINE_APP_KEY + VOLCENGINE_ACCESS_KEY."
+        "No STT provider is configured. Set OPENAI_API_KEY or VOLCENGINE_API_KEY."
       );
     } else if (provider === "openai") {
       if (!config.openaiApiKey) {
         issues.push("OPENAI_API_KEY is not set.");
       }
     } else if (provider === "volcengine") {
-      if (!config.volcengineAppKey) {
-        issues.push("VOLCENGINE_APP_KEY is not set.");
-      }
-      if (!config.volcengineAccessKey) {
-        issues.push("VOLCENGINE_ACCESS_KEY is not set.");
+      const hasApiKey = Boolean(config.volcengineApiKey);
+      const hasLegacyPair = Boolean(config.volcengineAppKey && config.volcengineAccessKey);
+      if (!hasApiKey && !hasLegacyPair) {
+        issues.push(
+          "VOLCENGINE_API_KEY is not set (new console), or set both VOLCENGINE_APP_KEY and VOLCENGINE_ACCESS_KEY (legacy console)."
+        );
       }
     } else {
       issues.push(`Unsupported STT_PROVIDER: ${config.sttProvider}`);
@@ -394,7 +395,7 @@ export function loadConfig(options = {}) {
     ),
     todoIntentProvider: normalizeTodoIntentProvider(process.env.TODO_INTENT_PROVIDER, todoIntentApiKey),
     todoIntentApiKey,
-    todoIntentModel: process.env.TODO_INTENT_MODEL || "deepseek-chat",
+    todoIntentModel: process.env.TODO_INTENT_MODEL || "deepseek-v4-flash",
     todoIntentBaseUrl: process.env.TODO_INTENT_BASE_URL || "https://api.deepseek.com",
     todoIntentTimeoutMs: Number(process.env.TODO_INTENT_TIMEOUT_MS || "8000"),
     todoFollowupTimeoutMs: Number(process.env.TODO_FOLLOWUP_TIMEOUT_MS || "30000"),
@@ -402,7 +403,7 @@ export function loadConfig(options = {}) {
     voiceTranslationEnabled: process.env.VOICE_TRANSLATION_ENABLED === "1",
     voiceTranslationProvider: process.env.VOICE_TRANSLATION_PROVIDER || "deepseek",
     voiceTranslationApiKey,
-    voiceTranslationModel: process.env.VOICE_TRANSLATION_MODEL || "deepseek-chat",
+    voiceTranslationModel: process.env.VOICE_TRANSLATION_MODEL || "deepseek-v4-flash",
     voiceTranslationBaseUrl: process.env.VOICE_TRANSLATION_BASE_URL || "https://api.deepseek.com",
     voiceTranslationTimeoutMs: Number(process.env.VOICE_TRANSLATION_TIMEOUT_MS || "12000"),
     voiceTranslationPrompt: process.env.VOICE_TRANSLATION_PROMPT || DEFAULT_VOICE_TRANSLATION_PROMPT,
@@ -428,6 +429,7 @@ export function loadConfig(options = {}) {
     openaiApiKey: process.env.OPENAI_API_KEY || "",
     openaiModel: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1",
     openaiLanguage: process.env.OPENAI_TRANSCRIBE_LANGUAGE || "",
+    volcengineApiKey: process.env.VOLCENGINE_API_KEY || "",
     volcengineAppKey: process.env.VOLCENGINE_APP_KEY || "",
     volcengineAccessKey: process.env.VOLCENGINE_ACCESS_KEY || "",
     volcengineResourceId: process.env.VOLCENGINE_RESOURCE_ID || "volc.bigasr.auc_turbo",

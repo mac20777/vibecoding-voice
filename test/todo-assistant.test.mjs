@@ -51,7 +51,7 @@ test("TodoAssistant uses DeepSeek fallback for natural create phrasing", async (
     assert.equal(url, "https://api.deepseek.com/chat/completions");
     assert.equal(options.method, "POST");
     const body = JSON.parse(options.body);
-    assert.equal(body.model, "deepseek-chat");
+    assert.equal(body.model, "deepseek-v4-flash");
     assert.match(body.messages[1].content, /帮我记一下明天买牛奶/);
     return new Response(JSON.stringify({
       choices: [
@@ -71,7 +71,7 @@ test("TodoAssistant uses DeepSeek fallback for natural create phrasing", async (
   const assistant = createTodoAssistant({
     todoIntentProvider: "deepseek",
     todoIntentApiKey: "test-key",
-    todoIntentModel: "deepseek-chat",
+    todoIntentModel: "deepseek-v4-flash",
     todoIntentBaseUrl: "https://api.deepseek.com",
     todoIntentTimeoutMs: 1000
   });

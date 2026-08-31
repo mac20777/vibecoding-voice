@@ -19,6 +19,7 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 `vibecoding-voice` now works even without the ESP32 board. The Windows desktop app can use a normal PC microphone or USB microphone as a second voice input device, then sends the audio through the same STT, translation, confirmation, and Inject / Codex / Claude pipeline.
 
 - **Global push-to-talk**: hold `F8` anywhere on Windows to record, release to transcribe. With confirmation enabled (the default), the transcript previews in the floating overlay first — press `F9` to insert it or `F10` to discard; with immediate delivery it is inserted right away.
+- **WeChat voice input**: WeChat types directly into the focused input without opening the floating overlay or moving focus to an intermediate capture window. For the Xiaomi remote, the audio route is prepared while the key is held; releasing the key triggers WeChat, and the next press waits until the previous shortcut and route restoration have fully completed.
 - **Desktop send shortcut**: press `F9` to submit the active text field, or to send pending text when confirmation is enabled; press `F10` to undo pending text.
 - **English-output shortcut**: press `F7` to toggle Chinese speech -> English-only output; press it again to return to normal transcript output.
 - **Configurable keys**: change record / send / undo / English-output shortcuts from the desktop app's Speech tab.
@@ -122,7 +123,7 @@ Both boards use ESP32-S3 with onboard MEMS mic and push-button.
 - Windows (for text injection; the server itself runs on any OS)
 - Codex CLI or Claude Code CLI on your `PATH` (only for CLI session modes)
 - An STT provider key:
-  - Volcengine: `VOLCENGINE_APP_KEY` + `VOLCENGINE_ACCESS_KEY`
+  - Volcengine: `VOLCENGINE_API_KEY` (new console; legacy console: `VOLCENGINE_APP_KEY` + `VOLCENGINE_ACCESS_KEY`)
   - OpenAI: `OPENAI_API_KEY`
 
 #### Quick Start
@@ -198,8 +199,8 @@ Minimum config for Codex + Volcengine:
 
 ```env
 STT_PROVIDER=volcengine
-VOLCENGINE_APP_KEY=your-app-key
-VOLCENGINE_ACCESS_KEY=your-access-key
+VOLCENGINE_API_KEY=your-api-key
+# Legacy console: VOLCENGINE_APP_KEY + VOLCENGINE_ACCESS_KEY also work
 TRANSCRIPT_DELIVERY_MODE=confirm_on_device
 LAN_SHARED_SECRET=replace-with-a-long-random-secret
 ```
@@ -209,7 +210,7 @@ Optional voice translation can be enabled from the desktop app's Translation tab
 ```env
 VOICE_TRANSLATION_ENABLED=1
 VOICE_TRANSLATION_API_KEY=your-deepseek-api-key
-VOICE_TRANSLATION_MODEL=deepseek-chat
+VOICE_TRANSLATION_MODEL=deepseek-v4-flash
 VOICE_TRANSLATION_BASE_URL=https://api.deepseek.com
 VOICE_TRANSLATION_PROMPT=Translate the user's Chinese voice transcript into the selected target language. Return only the translated text.
 VOICE_TRANSLATION_TARGET_LANGUAGE=english
@@ -427,8 +428,9 @@ Screen footer shows `BOOT Add · UP Send · DN Undo` when a transcript is pendin
 |----------|---------|-------------|
 | `STT_PROVIDER` | auto-detect | `volcengine` or `openai` |
 | `STT_TIMEOUT_MS` | `15000` | Hard recognition deadline; aborts a stuck request and closes the overlay |
-| `VOLCENGINE_APP_KEY` | — | Volcengine app key |
-| `VOLCENGINE_ACCESS_KEY` | — | Volcengine access key |
+| `VOLCENGINE_API_KEY` | — | Volcengine API key (new console, single key) |
+| `VOLCENGINE_APP_KEY` | — | Legacy console app key |
+| `VOLCENGINE_ACCESS_KEY` | — | Legacy console access key |
 | `VOLCENGINE_RESOURCE_ID` | `volc.bigasr.auc_turbo` | ASR resource ID |
 | `VOLCENGINE_LANGUAGE` | `zh-CN` | Recognition language |
 | `OPENAI_API_KEY` | — | OpenAI API key |
@@ -460,7 +462,7 @@ Screen footer shows `BOOT Add · UP Send · DN Undo` when a transcript is pendin
 |----------|---------|-------------|
 | `TODO_INTENT_PROVIDER` | `rules` | `rules` or `deepseek` |
 | `TODO_INTENT_API_KEY` | — | DeepSeek API key for Todo semantic parsing |
-| `TODO_INTENT_MODEL` | `deepseek-chat` | DeepSeek chat model |
+| `TODO_INTENT_MODEL` | `deepseek-v4-flash` | DeepSeek chat model |
 | `TODO_INTENT_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible DeepSeek base URL |
 | `TODO_INTENT_TIMEOUT_MS` | `8000` | Todo intent request timeout |
 | `TODO_FOLLOWUP_TIMEOUT_MS` | `30000` | Auto-cancel timeout for incomplete Todo follow-ups |
@@ -471,7 +473,7 @@ Screen footer shows `BOOT Add · UP Send · DN Undo` when a transcript is pendin
 |----------|---------|-------------|
 | `VOICE_TRANSLATION_ENABLED` | `0` | Translate Live page voice transcripts before confirmation/send |
 | `VOICE_TRANSLATION_API_KEY` | — | DeepSeek API key; falls back to `DEEPSEEK_API_KEY` or `TODO_INTENT_API_KEY` |
-| `VOICE_TRANSLATION_MODEL` | `deepseek-chat` | DeepSeek chat model |
+| `VOICE_TRANSLATION_MODEL` | `deepseek-v4-flash` | DeepSeek chat model |
 | `VOICE_TRANSLATION_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible DeepSeek base URL |
 | `VOICE_TRANSLATION_TIMEOUT_MS` | `12000` | Translation request timeout |
 | `VOICE_TRANSLATION_PROMPT` | built-in | Prompt used to translate Chinese speech into the selected target language |
@@ -546,6 +548,7 @@ node scripts/console.mjs
 现在即使没有 ESP32 板子，也可以直接使用 `vibecoding-voice`。Windows 桌面版可以把普通电脑麦克风或 USB 麦克风作为第二种语音输入设备，录到的音频会进入同一套语音识别、翻译、确认和 Inject / Codex / Claude 发送链路。
 
 - **后台全局按住说话**：在 Windows 任意窗口按住 `F8` 录音，松开后自动转写。确认模式（默认）下转写先在悬浮窗预览，按 `F9` 上屏、`F10` 撤销；立即模式下松开即直接输入到当前文本框。
+- **微信语音输入**：识别结果由微信输入法直接写入当前输入框，不打开应用悬浮窗，也不会把焦点切换到中间接收窗口。首次使用需要在“微信输入法 → 语音输入 → 麦克风”中选择 `CABLE Output (VB-Audio Virtual Cable)`，并在应用的“遥控器”页确认。小米遥控器按住期间录音并预热音频路由，松开后应用触发微信输入法并通过 VB-CABLE 回放刚才的遥控器录音；上一轮识别结束和麦克风恢复完成后才接受下一轮。
 - **桌面发送快捷键**：按 `F9` 提交当前文本框；开启确认模式时，`F9` 发送待确认文本，`F10` 撤销。
 - **英文输出快捷键**：按 `F7` 切换到“中文说话，只输出英文”；再次按 `F7` 回到普通转写输出。
 - **快捷键可配置**：录音 / 发送 / 撤销 / 英文输出快捷键都可以在桌面端“识别”页修改。
@@ -649,7 +652,7 @@ node scripts/console.mjs
 - Windows（文本注入功能需要；服务本身可在任何平台运行）
 - Codex CLI 或 Claude Code CLI 已在 `PATH` 中（使用 CLI 会话模式时需要）
 - 语音识别密钥（二选一）：
-  - 火山引擎：`VOLCENGINE_APP_KEY` + `VOLCENGINE_ACCESS_KEY`
+  - 火山引擎：`VOLCENGINE_API_KEY`（新版控制台；旧版控制台用 `VOLCENGINE_APP_KEY` + `VOLCENGINE_ACCESS_KEY`）
   - OpenAI：`OPENAI_API_KEY`
 
 #### 快速开始
@@ -724,8 +727,8 @@ vibe config
 
 ```env
 STT_PROVIDER=volcengine
-VOLCENGINE_APP_KEY=你的-app-key
-VOLCENGINE_ACCESS_KEY=你的-access-key
+VOLCENGINE_API_KEY=你的-api-key
+# 旧版控制台也可以填 VOLCENGINE_APP_KEY + VOLCENGINE_ACCESS_KEY
 TRANSCRIPT_DELIVERY_MODE=confirm_on_device
 LAN_SHARED_SECRET=替换为一个足够长的随机密钥
 ```
@@ -735,7 +738,7 @@ LAN_SHARED_SECRET=替换为一个足够长的随机密钥
 ```env
 VOICE_TRANSLATION_ENABLED=1
 VOICE_TRANSLATION_API_KEY=你的-deepseek-api-key
-VOICE_TRANSLATION_MODEL=deepseek-chat
+VOICE_TRANSLATION_MODEL=deepseek-v4-flash
 VOICE_TRANSLATION_BASE_URL=https://api.deepseek.com
 VOICE_TRANSLATION_PROMPT=Translate the user's Chinese voice transcript into the selected target language. Return only the translated text.
 VOICE_TRANSLATION_TARGET_LANGUAGE=english
@@ -950,8 +953,9 @@ LAN_SHARED_SECRET=你的密钥
 |------|--------|------|
 | `STT_PROVIDER` | 自动检测 | `volcengine` 或 `openai` |
 | `STT_TIMEOUT_MS` | `15000` | 识别硬超时；中止卡住的请求并自动收起悬浮窗 |
-| `VOLCENGINE_APP_KEY` | — | 火山引擎 App Key |
-| `VOLCENGINE_ACCESS_KEY` | — | 火山引擎 Access Key |
+| `VOLCENGINE_API_KEY` | — | 火山引擎 API Key（新版控制台，单个 Key） |
+| `VOLCENGINE_APP_KEY` | — | 旧版控制台 App Key |
+| `VOLCENGINE_ACCESS_KEY` | — | 旧版控制台 Access Key |
 | `VOLCENGINE_RESOURCE_ID` | `volc.bigasr.auc_turbo` | ASR 资源 ID |
 | `VOLCENGINE_LANGUAGE` | `zh-CN` | 识别语言 |
 | `OPENAI_API_KEY` | — | OpenAI API 密钥 |
@@ -983,7 +987,7 @@ LAN_SHARED_SECRET=你的密钥
 |------|--------|------|
 | `TODO_INTENT_PROVIDER` | `rules` | `rules` 或 `deepseek` |
 | `TODO_INTENT_API_KEY` | — | Todo 语义解析使用的 DeepSeek API Key |
-| `TODO_INTENT_MODEL` | `deepseek-chat` | DeepSeek chat 模型 |
+| `TODO_INTENT_MODEL` | `deepseek-v4-flash` | DeepSeek chat 模型 |
 | `TODO_INTENT_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible DeepSeek base URL |
 | `TODO_INTENT_TIMEOUT_MS` | `8000` | Todo 意图解析超时时间 |
 | `TODO_FOLLOWUP_TIMEOUT_MS` | `30000` | 不完整 Todo 追问的自动取消时间 |
@@ -994,7 +998,7 @@ LAN_SHARED_SECRET=你的密钥
 |------|--------|------|
 | `VOICE_TRANSLATION_ENABLED` | `0` | 在 Live 页面发送前，把语音转写结果先翻译成目标语言 |
 | `VOICE_TRANSLATION_API_KEY` | — | DeepSeek API Key；未设置时会回退到 `DEEPSEEK_API_KEY` 或 `TODO_INTENT_API_KEY` |
-| `VOICE_TRANSLATION_MODEL` | `deepseek-chat` | DeepSeek chat 模型 |
+| `VOICE_TRANSLATION_MODEL` | `deepseek-v4-flash` | DeepSeek chat 模型 |
 | `VOICE_TRANSLATION_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible DeepSeek base URL |
 | `VOICE_TRANSLATION_TIMEOUT_MS` | `12000` | 翻译请求超时时间 |
 | `VOICE_TRANSLATION_PROMPT` | 内置提示词 | 控制“中文语音转目标语言”的翻译风格 |

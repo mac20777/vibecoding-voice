@@ -47,6 +47,13 @@ process.stdin.on("data", (chunk) => {
     }
     const payload = buffer.subarray(HEADER_BYTES, HEADER_BYTES + payloadBytes);
     record({ type, payloadHex: payload.toString("hex") });
+    if (type === 6) {
+      process.stdout.write(JSON.stringify({ type: "route_prepared" }) + "\n");
+    } else if (type === 1) {
+      process.stdout.write(JSON.stringify({ type: "shortcut_pressed", shortcut: "Ctrl+Win+Shift" }) + "\n");
+    } else if (type === 3 || type === 4) {
+      process.stdout.write(JSON.stringify({ type: "session_idle", reason: type === 3 ? "drain" : "cancel" }) + "\n");
+    }
     buffer = buffer.subarray(HEADER_BYTES + payloadBytes);
   }
 });

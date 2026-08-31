@@ -15,6 +15,7 @@ export const DEFAULT_DESKTOP_SETTINGS = Object.freeze({
   localMicUndoKey: "F10",
   localMicTranslationToggleKey: "F7",
   localMicDeviceId: "",
+  wechatVirtualMicConfirmed: false,
   uiLanguage: "zh",
   hasUsedVoice: false,
   hasOnboarded: false
@@ -40,6 +41,7 @@ export function normalizeDesktopSettings(value = {}) {
       DEFAULT_DESKTOP_SETTINGS.localMicTranslationToggleKey
     ),
     localMicDeviceId: normalizeLocalMicDeviceId(value.localMicDeviceId),
+    wechatVirtualMicConfirmed: value.wechatVirtualMicConfirmed === true,
     uiLanguage: value.uiLanguage === "en" ? "en" : "zh",
     hasUsedVoice: value.hasUsedVoice === true,
     hasOnboarded: value.hasOnboarded === true

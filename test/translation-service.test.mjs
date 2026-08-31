@@ -14,7 +14,7 @@ test("VoiceTranslationService sends Chinese transcript to DeepSeek-compatible ch
     assert.equal(options.method, "POST");
     assert.equal(options.headers.Authorization, "Bearer test-key");
     const body = JSON.parse(options.body);
-    assert.equal(body.model, "deepseek-chat");
+    assert.equal(body.model, "deepseek-v4-flash");
     assert.equal(body.messages[0].role, "system");
     assert.match(body.messages[0].content, /idiomatic English/);
     assert.deepEqual(body.messages[1], {
@@ -36,7 +36,7 @@ test("VoiceTranslationService sends Chinese transcript to DeepSeek-compatible ch
   const service = createVoiceTranslationService({
     voiceTranslationEnabled: true,
     voiceTranslationApiKey: "test-key",
-    voiceTranslationModel: "deepseek-chat",
+    voiceTranslationModel: "deepseek-v4-flash",
     voiceTranslationBaseUrl: "https://api.deepseek.com",
     voiceTranslationTimeoutMs: 1000
   });

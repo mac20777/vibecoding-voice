@@ -146,7 +146,7 @@ export class VoiceTranslationService {
         config.deepseekApiKey ||
         config.todoIntentApiKey
     );
-    this.model = collapseWhitespace(config.voiceTranslationModel) || "deepseek-chat";
+    this.model = collapseWhitespace(config.voiceTranslationModel) || "deepseek-v4-flash";
     this.baseUrl = normalizeBaseUrl(config.voiceTranslationBaseUrl || "https://api.deepseek.com");
     this.timeoutMs = Number.isFinite(config.voiceTranslationTimeoutMs)
       ? config.voiceTranslationTimeoutMs

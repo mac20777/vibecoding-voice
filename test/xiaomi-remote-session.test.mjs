@@ -209,6 +209,48 @@ test("streaming stop waits for a slow publisher start so control messages stay o
   assert.deepEqual(events, ["start", "pcm", "stop"]);
 });
 
+test("a second streaming press waits until the previous native session is fully idle", async (t) => {
+  let releaseStop;
+  const stopGate = new Promise((resolve) => {
+    releaseStop = resolve;
+  });
+  const events = [];
+  let starts = 0;
+  const controller = new XiaomiRemoteSessionController({
+    inactivityMs: 250,
+    sendJson: () => {},
+    streamAudio: {
+      start: async () => events.push(`start:${++starts}`),
+      decodeFrame: async () => Buffer.from([1, 2]),
+      write: async () => events.push("pcm"),
+      stop: async () => {
+        events.push("stop-begin");
+        await stopGate;
+        events.push("stop-end");
+      },
+      cancel: async () => events.push("cancel")
+    },
+    log: () => {}
+  });
+  t.after(async () => {
+    releaseStop();
+    await controller.dispose();
+  });
+
+  controller.pushLine(CONTROL_START);
+  controller.pushLine(audioLine(0x38));
+  controller.pushLine(CONTROL_STOP);
+  controller.pushLine(CONTROL_START);
+  controller.pushLine(audioLine(0xc8));
+  await sleep(30);
+
+  assert.deepEqual(events, ["start:1", "pcm", "stop-begin"]);
+
+  releaseStop();
+  await sleep(30);
+  assert.deepEqual(events, ["start:1", "pcm", "stop-begin", "stop-end", "start:2", "pcm"]);
+});
+
 test("capture reset finishes the old stream cancellation before a new stream starts", async (t) => {
   let releaseCancel;
   const cancelGate = new Promise((resolve) => {
@@ -254,7 +296,7 @@ test("capture reset finishes the old stream cancellation before a new stream sta
   ]);
 });
 
-test("alternate-handle remote starts the overlay path and sends decoded audio", async (t) => {
+test("alternate-handle remote starts the streaming path and sends decoded audio", async (t) => {
   const { controller, sent, audio, decoded } = createController();
   t.after(() => controller.dispose());
 

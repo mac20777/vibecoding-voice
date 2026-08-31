@@ -10,12 +10,24 @@ import {
   normalizeXiaomiRemoteVoiceMode
 } from "../src/virtual-microphone-protocol.mjs";
 import {
+  BufferedWechatVirtualMicrophoneSession,
   buildVirtualMicrophonePublisherArgs,
   classifyVirtualMicrophoneEndpoint,
   resolveVirtualMicrophonePublisherPath,
   resolveVirtualMicrophoneRouteStatePath,
   selectVirtualMicrophonePair
 } from "../src/windows-virtual-microphone.mjs";
+
+function createFakePublisher(events) {
+  return {
+    ensureReady: async () => events.push("ready"),
+    prepare: async () => events.push("prepare"),
+    start: async () => events.push("start"),
+    write: async (pcm) => events.push(`pcm:${Buffer.from(pcm).toString("hex")}`),
+    stop: async () => events.push("stop"),
+    cancel: async () => events.push("cancel")
+  };
+}
 
 test("virtual microphone protocol frames control and PCM messages", () => {
   const payload = Buffer.from([1, 2, 3, 4]);
@@ -27,6 +39,10 @@ test("virtual microphone protocol frames control and PCM messages", () => {
   assert.equal(frame.readUInt16LE(6), 0);
   assert.equal(frame.readUInt32LE(8), payload.length);
   assert.deepEqual(frame.subarray(VIRTUAL_MIC_HEADER_BYTES), payload);
+
+  const prepareFrame = encodeVirtualMicrophoneMessage(VIRTUAL_MIC_MESSAGE.PREPARE);
+  assert.equal(prepareFrame.readUInt16LE(4), 6);
+  assert.equal(prepareFrame.readUInt32LE(8), 0);
 });
 
 test("remote voice mode preserves the built-in path unless WeChat is explicit", () => {
@@ -93,4 +109,78 @@ test("endpoint selection keeps each render/capture pair on the same provider", (
   assert.equal(pair.provider, "vb_cable");
   assert.equal(pair.renderEndpoint.name, "CABLE Input (VB-Audio Virtual Cable)");
   assert.equal(pair.captureEndpoint.name, "CABLE Output (VB-Audio Virtual Cable)");
+});
+
+test("buffered WeChat playback prepares on press and waits for release before the shortcut", async () => {
+  const events = [];
+  const delays = [];
+  const session = new BufferedWechatVirtualMicrophoneSession({
+    publisher: createFakePublisher(events),
+    keyReleaseSettleMs: 40,
+    replayLeadMs: 10_000,
+    sleep: async (ms) => delays.push(ms)
+  });
+
+  await session.start();
+  await session.write(Buffer.from([1, 2, 3, 4]));
+  assert.deepEqual(
+    events,
+    ["ready", "prepare"],
+    "the route should be ready but the WeChat start toggle must wait for PTT release"
+  );
+
+  await session.stop();
+  assert.deepEqual(delays, [40]);
+  assert.deepEqual(events, ["ready", "prepare", "start", "pcm:01020304", "stop"]);
+});
+
+test("buffered WeChat playback is cancelled without starting recognition", async () => {
+  const events = [];
+  const session = new BufferedWechatVirtualMicrophoneSession({
+    publisher: createFakePublisher(events),
+    keyReleaseSettleMs: 0
+  });
+
+  await session.start();
+  await session.write(Buffer.from([5, 6]));
+  await session.cancel();
+
+  assert.deepEqual(events, ["ready", "prepare", "cancel"]);
+});
+
+test("buffered WeChat playback does not finish until the native session is idle", async () => {
+  const events = [];
+  let releaseStop;
+  const stopGate = new Promise((resolve) => {
+    releaseStop = resolve;
+  });
+  const publisher = createFakePublisher(events);
+  publisher.stop = async () => {
+    events.push("stop-begin");
+    await stopGate;
+    events.push("stop-end");
+  };
+  const session = new BufferedWechatVirtualMicrophoneSession({
+    publisher,
+    keyReleaseSettleMs: 0,
+    replayLeadMs: 10_000
+  });
+
+  await session.start();
+  await session.write(Buffer.from([7, 8]));
+  let finished = false;
+  const stopping = session.stop().then(() => {
+    finished = true;
+  });
+  for (let attempt = 0; attempt < 20 && !events.includes("stop-begin"); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+
+  assert.equal(finished, false);
+  assert.deepEqual(events, ["ready", "prepare", "start", "pcm:0708", "stop-begin"]);
+
+  releaseStop();
+  await stopping;
+  assert.equal(finished, true);
+  assert.deepEqual(events.at(-1), "stop-end");
 });

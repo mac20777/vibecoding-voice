@@ -125,7 +125,7 @@ function resolveProvider(config) {
   if (config.openaiApiKey) {
     return "openai";
   }
-  if (config.volcengineAppKey && config.volcengineAccessKey) {
+  if (config.volcengineApiKey || (config.volcengineAppKey && config.volcengineAccessKey)) {
     return "volcengine";
   }
   return "";
@@ -162,8 +162,9 @@ async function transcribeWithOpenAI(wavBuffer, config, signal) {
 }
 
 async function transcribeWithVolcengine(wavBuffer, config, signal) {
-  if (!config.volcengineAppKey || !config.volcengineAccessKey) {
-    throw new Error("VOLCENGINE_APP_KEY or VOLCENGINE_ACCESS_KEY is not set");
+  const useApiKey = Boolean(config.volcengineApiKey);
+  if (!useApiKey && !(config.volcengineAppKey && config.volcengineAccessKey)) {
+    throw new Error("VOLCENGINE_API_KEY (new console) or VOLCENGINE_APP_KEY + VOLCENGINE_ACCESS_KEY (legacy console) is not set");
   }
 
   const requestId = randomUUID();
@@ -171,15 +172,19 @@ async function transcribeWithVolcengine(wavBuffer, config, signal) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Api-App-Key": config.volcengineAppKey,
-      "X-Api-Access-Key": config.volcengineAccessKey,
+      ...(useApiKey
+        ? { "X-Api-Key": config.volcengineApiKey }
+        : {
+            "X-Api-App-Key": config.volcengineAppKey,
+            "X-Api-Access-Key": config.volcengineAccessKey
+          }),
       "X-Api-Resource-Id": config.volcengineResourceId,
       "X-Api-Request-Id": requestId,
       "X-Api-Sequence": "-1"
     },
     body: JSON.stringify({
       user: {
-        uid: config.volcengineAppKey
+        uid: config.volcengineAppKey || "vibecoding-voice"
       },
       audio: {
         data: wavBuffer.toString("base64"),

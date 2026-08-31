@@ -121,6 +121,18 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 24px 28px 32px; }
 .page-title { font-family: var(--font-display); font-size: 21px; font-weight: 700; margin-bottom: 4px; }
 .remote-voice-mode-field { margin: 16px 0 4px; max-width: 520px; }
 .warning-text { color: var(--warning); }
+.wechat-mic-setup {
+  margin-top: 12px; padding: 12px 14px; border-radius: var(--radius-md);
+  background: rgba(255, 210, 125, 0.08); outline: 1px solid rgba(255, 210, 125, 0.24);
+}
+.wechat-mic-setup.confirmed {
+  background: rgba(125, 255, 168, 0.06); outline-color: rgba(125, 255, 168, 0.22);
+}
+.wechat-mic-setup-title { font-size: 13px; font-weight: 700; }
+.wechat-mic-setup-desc { margin-top: 4px; color: var(--on-surface-variant); font-size: 12px; line-height: 1.55; }
+.wechat-mic-setup-actions { margin-top: 10px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.wechat-mic-confirm { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; }
+.wechat-mic-confirm input { accent-color: var(--success); }
 .page-sub { color: var(--on-surface-variant); font-size: 13px; margin-bottom: 20px; }
 
 .card {
@@ -165,6 +177,24 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 24px 28px 32px; }
 .btn-danger { background: var(--surface-highest); color: var(--danger); outline: 1px solid rgba(255, 138, 138, 0.35); }
 .btn:hover:not(:disabled) { filter: brightness(1.12); }
 .btn-small { padding: 6px 12px; font-size: 12px; }
+
+/* segmented toggle (wechat delivery mode) */
+.segmented {
+  display: flex; gap: 4px; padding: 4px;
+  background: var(--surface-high); border-radius: var(--radius-md);
+  max-width: 520px;
+}
+.segment {
+  flex: 1; border: none; border-radius: calc(var(--radius-md) - 3px);
+  background: transparent; color: var(--on-surface-variant);
+  padding: 8px 10px; font-size: 12.5px; font-weight: 600;
+  transition: background 0.15s, color 0.15s;
+}
+.segment:hover:not(.segment-active) { color: var(--on-surface); background: var(--surface-highest); }
+.segment-active {
+  background: linear-gradient(135deg, var(--primary), var(--primary-container));
+  color: var(--on-primary-fixed);
+}
 
 /* notices */
 .notice-stack { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }

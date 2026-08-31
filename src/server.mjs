@@ -43,6 +43,16 @@ import { WindowsVirtualMicrophonePublisher } from "./windows-virtual-microphone.
 
 const config = loadConfig();
 
+// When forked as the desktop app's bridge child (VIBE_DESKTOP=1), the IPC
+// channel closes as soon as the parent process dies or crashes. Exit instead
+// of lingering as an orphan that keeps holding the voice port — an orphaned
+// bridge makes every later restart report "port already in use".
+if (process.env.VIBE_DESKTOP === "1") {
+  process.on("disconnect", () => {
+    process.exit(0);
+  });
+}
+
 if (process.argv.includes("--doctor")) {
   await runDoctor(config);
 }
@@ -118,8 +128,8 @@ function printBanner() {
     ? "mock"
     : config.sttProvider ||
       (config.openaiApiKey ? `openai · ${config.openaiModel}` : "") ||
-      (config.volcengineAppKey ? `volcengine · ${config.volcengineLanguage}` : "") ||
-      "\x1b[33mnone — set OPENAI_API_KEY or VOLCENGINE_APP_KEY\x1b[0m";
+      ((config.volcengineApiKey || config.volcengineAppKey) ? `volcengine · ${config.volcengineLanguage}` : "") ||
+      "\x1b[33mnone — set OPENAI_API_KEY or VOLCENGINE_API_KEY\x1b[0m";
 
   const targetLabel =
     config.sendTarget + (config.sendTargetAuto ? " \x1b[2m[auto]\x1b[0m" : "");
@@ -1208,7 +1218,8 @@ async function dispatchPrompt(prompt, options = {}) {
   }
 
   await injectText(prompt, options.textInjectionMode || config.textInjectionMode, {
-    dryRun: config.dryRunTextInjection
+    dryRun: config.dryRunTextInjection,
+    targetHwnd: options.targetHwnd || 0
   });
 }
 
@@ -1348,12 +1359,18 @@ function appendRemotePreviewSegment(ws, {
   sendTranscript,
   transcript,
   translationResult,
-  latencyMs
+  latencyMs,
+  targetHwnd = 0
 }) {
   // Segments accumulate: hold the voice key again to append, the undo
   // gesture pops the last segment, confirm sends the joined text.
   if (!remotePreview || remotePreview.ws !== ws) {
-    remotePreview = { ws, segments: [], textInjectionMode };
+    remotePreview = { ws, segments: [], textInjectionMode, targetHwnd };
+  }
+  if (targetHwnd) {
+    // Segments may be dictated into different windows; inject into the
+    // window that was focused when the latest segment was captured.
+    remotePreview.targetHwnd = targetHwnd;
   }
   remotePreview.segments.push(sendTranscript);
   const previewText = joinPendingSegments(remotePreview.segments);
@@ -1373,44 +1390,6 @@ function appendRemotePreviewSegment(ws, {
     status: "awaiting_action",
     text: previewText
   });
-}
-
-// WeChat is only the recognition engine: its transcript always waits in the
-// overlay preview (remote_preview) until the send key (F9 / remote OK)
-// confirms, regardless of the TRANSCRIPT_DELIVERY_MODE setting.
-async function handleWechatTranscript(ws, message) {
-  const source = String(message.source || "").trim();
-  if (source !== "desktop_mic" && source !== "xiaomi_remote") {
-    log("wechat_transcript rejected: unknown source", source);
-    return;
-  }
-  const transcript = String(message.text || "").trim();
-  if (!transcript) {
-    sendDictationJson(ws, { type: "status", status: "transcript_empty" });
-    return;
-  }
-  const { textInjectionMode } = resolveSegmentOptions({ source });
-  log("wechat_transcript", { source, chars: transcript.length });
-  try {
-    const translationResult = await translateVoiceTranscript(ws, transcript);
-    const sendTranscript = applyArmedPromptTemplate(formatVoiceSendText({
-      originalText: transcript,
-      translatedText: translationResult.text,
-      translations: translationResult.translations,
-      transform: translationResult.transform
-    }));
-    appendRemotePreviewSegment(ws, {
-      textInjectionMode,
-      sendTranscript,
-      transcript,
-      translationResult,
-      latencyMs: 0
-    });
-  } catch (error) {
-    const text = error instanceof Error ? error.message : String(error);
-    log("wechat_transcript failed", text);
-    sendDictationJson(ws, { type: "status", status: "transcription_error", text });
-  }
 }
 
 async function confirmRemotePreview(origin) {
@@ -1437,7 +1416,8 @@ async function confirmRemotePreview(origin) {
     return true;
   }
   await dispatchPrompt(text, {
-    textInjectionMode: preview.textInjectionMode || config.textInjectionMode
+    textInjectionMode: preview.textInjectionMode || config.textInjectionMode,
+    targetHwnd: preview.targetHwnd || 0
   });
   sendDictationJson(ws, { type: "status", status: "typed", text });
   return true;
@@ -1534,7 +1514,23 @@ function cancelSystemAction(origin) {
   return true;
 }
 
+// Phantom presses from the remote's flaky HID child can slip through as
+// isolated events below the menu-guard storm threshold. Consequential buttons
+// get a cooldown so a phantom burst cannot fire them repeatedly.
+const remoteActionFiredAt = new Map();
+const REMOTE_ACTION_RATE_LIMIT_MS = Object.freeze({ menu: 1_000, power: 2_000 });
+
 function executeRemoteAction(button, gesture, action) {
+  const rateLimitMs = REMOTE_ACTION_RATE_LIMIT_MS[button] || 0;
+  if (rateLimitMs > 0) {
+    const now = Date.now();
+    const key = `${button}.${gesture}`;
+    if (now - (remoteActionFiredAt.get(key) || 0) < rateLimitMs) {
+      log("remote_button rate-limited", `${button}.${gesture}`);
+      return;
+    }
+    remoteActionFiredAt.set(key, now);
+  }
   const dryRun = config.dryRunTextInjection;
   log("remote_button", `${button}.${gesture}`, "->", serializeAction(action));
   switch (action.type) {
@@ -1890,13 +1886,6 @@ wss.on("connection", (ws, req) => {
           if (!cancelClientInFlightDictation(ws, state, "ptt_cancel")) {
             sendDictationJson(ws, { type: "status", status: "cancelled", reason: "ptt_cancel" });
           }
-          break;
-        case "wechat_transcript":
-          if (!state.authenticated) {
-            closeWithAuthError(ws, state, "auth_required");
-            break;
-          }
-          await handleWechatTranscript(ws, message);
           break;
         case "cancel_active_dictation":
           if (!state.authenticated) {

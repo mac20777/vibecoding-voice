@@ -75,7 +75,7 @@ function printWizardIntro(config) {
     config.textInjectionMode === "type_only" ? "type_only" : "type_and_enter";
   const todoIntent =
     config.todoIntentProvider === "deepseek"
-      ? `deepseek · ${config.todoIntentModel || "deepseek-chat"}`
+      ? `deepseek · ${config.todoIntentModel || "deepseek-v4-flash"}`
       : "rules";
   const overridingFiles = (config.loadedConfigFiles || []).filter((filePath) => filePath !== config.userConfigPath);
 
@@ -178,7 +178,7 @@ async function askProvider(rl, currentProvider) {
 
   while (true) {
     output.write("Choose your STT provider:\n");
-    output.write("  1. Volcengine (VOLCENGINE_APP_KEY + VOLCENGINE_ACCESS_KEY)\n");
+    output.write("  1. Volcengine (VOLCENGINE_API_KEY; legacy console: VOLCENGINE_APP_KEY + VOLCENGINE_ACCESS_KEY)\n");
     output.write("  2. OpenAI (OPENAI_API_KEY)\n");
     const answer = String(await rl.question(`Selection [${defaultOption}]: `)).trim();
     const selection = answer || defaultOption;
@@ -265,12 +265,23 @@ export async function runConfigWizard() {
     };
 
     if (provider === "volcengine") {
-      updates.VOLCENGINE_APP_KEY = await askSecret(rl, mutedOutput, "VOLCENGINE_APP_KEY", {
-        defaultValue: currentConfig.volcengineAppKey
+      updates.VOLCENGINE_API_KEY = await askSecret(rl, mutedOutput, "VOLCENGINE_API_KEY (new console, single key; Enter = use legacy keys)", {
+        defaultValue: currentConfig.volcengineApiKey,
+        optional: true,
+        allowClear: true
       });
-      updates.VOLCENGINE_ACCESS_KEY = await askSecret(rl, mutedOutput, "VOLCENGINE_ACCESS_KEY", {
-        defaultValue: currentConfig.volcengineAccessKey
-      });
+      if (updates.VOLCENGINE_API_KEY) {
+        updates.VOLCENGINE_APP_KEY = null;
+        updates.VOLCENGINE_ACCESS_KEY = null;
+      } else {
+        updates.VOLCENGINE_API_KEY = null;
+        updates.VOLCENGINE_APP_KEY = await askSecret(rl, mutedOutput, "VOLCENGINE_APP_KEY (legacy console)", {
+          defaultValue: currentConfig.volcengineAppKey
+        });
+        updates.VOLCENGINE_ACCESS_KEY = await askSecret(rl, mutedOutput, "VOLCENGINE_ACCESS_KEY (legacy console)", {
+          defaultValue: currentConfig.volcengineAccessKey
+        });
+      }
       updates.VOLCENGINE_RESOURCE_ID = await askText(rl, "VOLCENGINE_RESOURCE_ID", {
         defaultValue: currentConfig.volcengineResourceId || "volc.bigasr.auc_turbo"
       });
@@ -300,7 +311,7 @@ export async function runConfigWizard() {
         defaultValue: currentConfig.todoIntentApiKey
       });
       updates.TODO_INTENT_MODEL = await askText(rl, "TODO_INTENT_MODEL", {
-        defaultValue: currentConfig.todoIntentModel || "deepseek-chat"
+        defaultValue: currentConfig.todoIntentModel || "deepseek-v4-flash"
       });
       updates.TODO_INTENT_BASE_URL = await askText(rl, "TODO_INTENT_BASE_URL", {
         defaultValue: currentConfig.todoIntentBaseUrl || "https://api.deepseek.com"
@@ -321,8 +332,11 @@ export async function runConfigWizard() {
     output.write("\nSummary\n");
     output.write(`  STT_PROVIDER=${provider}\n`);
     if (provider === "volcengine") {
-      output.write(`  VOLCENGINE_APP_KEY=${redactValue(updates.VOLCENGINE_APP_KEY)}\n`);
-      output.write(`  VOLCENGINE_ACCESS_KEY=${redactValue(updates.VOLCENGINE_ACCESS_KEY)}\n`);
+      output.write(`  VOLCENGINE_API_KEY=${redactValue(updates.VOLCENGINE_API_KEY)}\n`);
+      if (updates.VOLCENGINE_APP_KEY) {
+        output.write(`  VOLCENGINE_APP_KEY=${redactValue(updates.VOLCENGINE_APP_KEY)}\n`);
+        output.write(`  VOLCENGINE_ACCESS_KEY=${redactValue(updates.VOLCENGINE_ACCESS_KEY)}\n`);
+      }
       output.write(`  VOLCENGINE_RESOURCE_ID=${updates.VOLCENGINE_RESOURCE_ID}\n`);
       output.write(`  VOLCENGINE_LANGUAGE=${updates.VOLCENGINE_LANGUAGE}\n`);
     } else {

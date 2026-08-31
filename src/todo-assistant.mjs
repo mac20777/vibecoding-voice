@@ -334,7 +334,7 @@ export class TodoAssistant {
   constructor(config) {
     this.provider = normalizeProvider(config.todoIntentProvider || "rules");
     this.apiKey = collapseWhitespace(config.todoIntentApiKey || config.deepseekApiKey);
-    this.model = collapseWhitespace(config.todoIntentModel) || "deepseek-chat";
+    this.model = collapseWhitespace(config.todoIntentModel) || "deepseek-v4-flash";
     this.baseUrl = normalizeBaseUrl(config.todoIntentBaseUrl || "https://api.deepseek.com");
     this.timeoutMs = Number.isFinite(config.todoIntentTimeoutMs) ? config.todoIntentTimeoutMs : 8000;
   }

@@ -35,7 +35,13 @@ const I18N = {
     remoteVoiceModeLabel: "语音输入方式",
     remoteVoiceModeBuiltin: "内置语音识别（火山 / OpenAI）",
     remoteVoiceModeWechat: "微信语音输入（推荐，无需 API Key）",
-    remoteVoiceModeHint: "对遥控器和电脑 F8 麦克风同时生效：按住说话时，软件临时把 Windows 默认麦克风切到 VB-CABLE，把音频送进微信语音输入；松开后自动恢复原设备。需先安装 VB-CABLE 并保持微信打开。",
+    remoteVoiceModeHint: "遥控器按住时先录音，松开后通过 VB-CABLE 回放给微信输入法；电脑 F8 麦克风也走同一条虚拟线路。微信输入法必须把麦克风选为 CABLE Output。",
+    wechatMicSetupTitle: "微信输入法麦克风",
+    wechatMicSetupDesc: "请在微信输入法 → 语音输入 → 麦克风中选择「CABLE Output (VB-Audio Virtual Cable)」。遥控器录音会在松开后通过这条虚拟线路回放给微信识别。",
+    wechatMicOpen: "打开微信输入法设置",
+    wechatMicConfirmed: "我已选择 CABLE Output",
+    wechatMicOpening: "正在打开微信输入法设置…",
+    wechatMicOpenFailed: "没有找到微信输入法设置，请先安装或启动微信输入法。",
     remoteNote: "点击遥控器上的按键，再点右侧动作完成映射。语音键固定为「按住说话」，不可改。菜单键默认禁用，避免 Windows 原生菜单事件被重复执行；你仍可把它改成其他动作。",
     advCli: "CLI 行为", fCodexSkip: "Codex：跳过 Git 仓库检查", fClaudeSkip: "Claude：减少权限确认",
     advWorkspace: "工作目录", fCodexCwd: "Codex 工作目录", fClaudeCwd: "Claude 工作目录", browse: "浏览…",
@@ -54,12 +60,13 @@ const I18N = {
     micIdle: "待命", micRecording: "录音中", micTranscribing: "识别中", micAwaiting: "待确认",
     micError: "异常", micConnecting: "准备中", micCapturing: "录入中",
     micHintIdle: "{scope} · 按住 {hold} 输入，{toggle} 英文输出",
-    micHintIdleWechat: "{scope} · 按住 {hold} 对微信说话",
+    micHintIdleWechat: "{scope} · 按住 {hold} 录音，松开后交给微信输入法",
     micHintWechatNotReady: "未检测到 VB-CABLE 虚拟声卡；请安装 VB-CABLE 并重启电脑后再试",
-    micWechatRecording: "微信语音输入中",
-    micHintWechatRecording: "对着麦克风说话，松开 {key} 后微信开始识别（请保持微信打开）",
-    micWechatFinishing: "等待微信识别…",
-    micHintWechatFinishing: "识别结果由微信直接填入它的输入框",
+    micHintWechatSetupRequired: "请先到“遥控器”页，把微信输入法麦克风设置为 CABLE Output",
+    micWechatRecording: "正在录音",
+    micHintWechatRecording: "继续说话；松开 {key} 后通过 CABLE Output 交给微信输入法",
+    micWechatFinishing: "正在回放给微信输入法…",
+    micHintWechatFinishing: "微信输入法正在从虚拟麦克风识别遥控器录音",
     micHintRecording: "松开 {key} 结束",
     micHintTranscribing: "正在提交给语音识别服务",
     micRecognitionTimeout: "语音识别超时，已自动取消",
@@ -72,12 +79,14 @@ const I18N = {
     micHintRemoteTranscribing: "正在识别遥控器的语音…",
     micHintRemoteAwaiting: "待确认 — 按遥控器确认键发送",
     scopeGlobal: "后台可用", scopeWindow: "窗口内可用",
+    micHintHotkeysBlocked: "全局热键 {keys} 被其他程序占用，正在自动重试；可先点界面按钮，或退出占用它的软件",
     actIdle: "待命", actRecording: "REC", actStt: "STT", actConfirm: "待确认",
     sendWithKey: "发送 {key}", undoWithKey: "撤销 {key}",
     checkStt: "语音识别服务", checkSttOk: "{provider} · 已配置密钥", checkSttMiss: "{provider} 还没填密钥",
     checkSttFix: "去填写 →",
     checkWechat: "微信语音输入",
-    checkWechatReady: "VB-CABLE 已就绪；按住语音键时会自动临时切换麦克风，不需要 API Key",
+    checkWechatReady: "VB-CABLE 和微信输入法麦克风已配置；使用前请在文本框里切到微信输入法",
+    checkWechatMicPending: "VB-CABLE 已安装；还需把微信输入法麦克风设置为 CABLE Output",
     checkWechatMissing: "尚未检测到 VB-CABLE，请先安装官方虚拟声卡后再使用微信模式",
     checkTarget: "发送目标",
     targetDescInject: "文字直接打进当前窗口", targetDescCodex: "发送到 Codex CLI 会话", targetDescClaude: "发送到 Claude Code 会话",
@@ -131,6 +140,7 @@ const I18N = {
     deleteTemplate: "删除",
     promptArmed: "模板「{name}」已就位 — 按住语音键说话",
     voiceFixedNote: "语音键固定为「按住说话」，不参与映射。",
+    menuMistriggerNote: "菜单键容易误触：遥控器 HID 异常时它会被系统反复触发，建议保持「禁用」；开启后软件会对异常连发自动限流并尝试修复。",
     previewKeysTitle: "悬浮条预览键位",
     previewKeysHint: "选「设备确认后发送」时：说话后文字先出现在悬浮条，再按住语音键可追加；确认 = 上屏并发送，撤销 = 去掉最后一段，取消 = 整段丢弃。",
     previewConfirm: "确认发送", previewUndo: "撤销一段", previewDiscard: "整段取消",
@@ -140,7 +150,7 @@ const I18N = {
     wizBack: "上一步", wizNext: "下一步", wizSkip: "跳过", wizFinish: "完成并保存",
     wizStartService: "启动服务", wizTestOk: "✓ 收到！语音识别工作正常",
     wizSttNeedKey: "请先把 Key 填上（点右侧「获取 Key」去控制台复制）",
-    wizWechatModeNote: "按住语音键时，软件会自动临时切换 Windows 默认麦克风并调用微信语音输入；松开后恢复原设备。",
+    wizWechatModeNote: "遥控器按住时先录音，松开后通过 VB-CABLE 回放给微信输入法。首次使用请到“遥控器”页，把微信输入法麦克风设置为 CABLE Output。",
     wizOptVolc: "Volcengine（推荐中文）",
     overlayPreviewHint: "{confirm} 发送 · {undo} 撤销一段 · {discard} 整段取消",
     overlayPreviewHintLocal: "{send} 发送 · {undo} 撤销",
@@ -210,7 +220,13 @@ const I18N = {
     remoteVoiceModeLabel: "Voice input mode",
     remoteVoiceModeBuiltin: "Built-in speech recognition (Volcengine / OpenAI)",
     remoteVoiceModeWechat: "WeChat voice input (recommended, no API key)",
-    remoteVoiceModeHint: "Applies to both the remote and the computer's F8 microphone: while held, the app temporarily switches the Windows default microphone to VB-CABLE and feeds the audio into WeChat voice input, restoring the previous device on release. VB-CABLE must be installed and WeChat kept open.",
+    remoteVoiceModeHint: "The remote records while held, then replays through VB-CABLE to WeChat Input Method after release. The desktop F8 microphone uses the same virtual route. WeChat Input Method must use CABLE Output.",
+    wechatMicSetupTitle: "WeChat Input Method microphone",
+    wechatMicSetupDesc: "In WeChat Input Method → Voice Input → Microphone, select “CABLE Output (VB-Audio Virtual Cable)”. Remote audio is replayed through this virtual route after release.",
+    wechatMicOpen: "Open WeChat Input Method settings",
+    wechatMicConfirmed: "I selected CABLE Output",
+    wechatMicOpening: "Opening WeChat Input Method settings…",
+    wechatMicOpenFailed: "WeChat Input Method settings were not found. Install or start WeChat Input Method first.",
     remoteNote: "Click a button on the remote, then pick an action on the right. The voice key is fixed to push-to-talk. Menu defaults to disabled to avoid duplicating Windows' native Menu event; you can still map it to another action.",
     advCli: "CLI behavior", fCodexSkip: "Codex: skip Git repo check", fClaudeSkip: "Claude: reduce permission prompts",
     advWorkspace: "Workspaces", fCodexCwd: "Codex workspace", fClaudeCwd: "Claude workspace", browse: "Browse…",
@@ -229,12 +245,13 @@ const I18N = {
     micIdle: "Idle", micRecording: "Recording", micTranscribing: "Transcribing", micAwaiting: "Confirm",
     micError: "Error", micConnecting: "Preparing", micCapturing: "Capturing",
     micHintIdle: "{scope} · hold {hold} to dictate, {toggle} for English output",
-    micHintIdleWechat: "{scope} · hold {hold} to talk to WeChat",
+    micHintIdleWechat: "{scope} · hold {hold} to record, then WeChat Input Method transcribes after release",
     micHintWechatNotReady: "VB-CABLE not detected; install VB-CABLE and restart Windows first",
-    micWechatRecording: "WeChat voice input active",
-    micHintWechatRecording: "Keep talking; release {key} and WeChat transcribes (keep WeChat open)",
-    micWechatFinishing: "Waiting for WeChat…",
-    micHintWechatFinishing: "WeChat types the recognized text into its own input box",
+    micHintWechatSetupRequired: "Open the Remote page and set WeChat Input Method's microphone to CABLE Output first",
+    micWechatRecording: "Recording",
+    micHintWechatRecording: "Keep talking; after releasing {key}, CABLE Output sends the recording to WeChat Input Method",
+    micWechatFinishing: "Replaying to WeChat Input Method…",
+    micHintWechatFinishing: "WeChat Input Method is transcribing the remote recording from the virtual microphone",
     micHintRecording: "Release {key} to finish",
     micHintTranscribing: "Submitting to the speech service",
     micRecognitionTimeout: "Recognition timed out and was cancelled",
@@ -247,12 +264,14 @@ const I18N = {
     micHintRemoteTranscribing: "Transcribing the remote's audio…",
     micHintRemoteAwaiting: "Waiting — press the remote OK key to send",
     scopeGlobal: "works in background", scopeWindow: "works in this window",
+    micHintHotkeysBlocked: "Global hotkey(s) {keys} are held by another app; retrying automatically — use the on-screen buttons meanwhile",
     actIdle: "Idle", actRecording: "REC", actStt: "STT", actConfirm: "Confirm",
     sendWithKey: "Send {key}", undoWithKey: "Undo {key}",
     checkStt: "Speech recognition", checkSttOk: "{provider} · key configured", checkSttMiss: "{provider} has no API key yet",
     checkSttFix: "Fill it in →",
     checkWechat: "WeChat voice input",
-    checkWechatReady: "VB-CABLE is ready. The microphone switches automatically while the voice button is held; no API key is needed",
+    checkWechatReady: "VB-CABLE and the WeChat Input Method microphone are configured. Select WeChat Input Method in a text field before dictating",
+    checkWechatMicPending: "VB-CABLE is installed. Set WeChat Input Method's microphone to CABLE Output",
     checkWechatMissing: "VB-CABLE was not detected. Install the official virtual audio device before using WeChat mode",
     checkTarget: "Send target",
     targetDescInject: "Types into the focused window", targetDescCodex: "Sends to a Codex CLI session", targetDescClaude: "Sends to a Claude Code session",
@@ -306,6 +325,7 @@ const I18N = {
     deleteTemplate: "Delete",
     promptArmed: "Template \"{name}\" armed — hold the voice key and speak",
     voiceFixedNote: "The voice key is fixed to push-to-talk and cannot be remapped.",
+    menuMistriggerNote: "The menu key misfires easily: a faulty remote HID state makes Windows fire it on its own. Keep it disabled; when mapped, abnormal repeats are rate-limited and auto-repaired.",
     previewKeysTitle: "Overlay preview keys",
     previewKeysHint: "With 'Confirm on device first': speech lands in the floating bar first; hold the voice key again to append. Confirm = type & send, Undo = drop the last segment, Discard = cancel everything.",
     previewConfirm: "Confirm & send", previewUndo: "Undo last", previewDiscard: "Discard all",
@@ -315,7 +335,7 @@ const I18N = {
     wizBack: "Back", wizNext: "Next", wizSkip: "Skip", wizFinish: "Finish & save",
     wizStartService: "Start service", wizTestOk: "✓ Got it — recognition works",
     wizSttNeedKey: "Paste your API key first (use the Get Key link to open the console)",
-    wizWechatModeNote: "Holding the voice button temporarily switches the Windows default microphone and invokes WeChat voice input. The previous device is restored afterward.",
+    wizWechatModeNote: "The remote records while held, then replays through VB-CABLE to WeChat Input Method after release. On the Remote page, set the WeChat Input Method microphone to CABLE Output once.",
     wizOptVolc: "Volcengine (best for Chinese)",
     overlayPreviewHint: "{confirm} send · {undo} undo last · {discard} discard all",
     overlayPreviewHintLocal: "{send} send · {undo} undo",
@@ -419,6 +439,7 @@ const elements = {
   voiceTranslationSendMode: document.querySelector("#voice-translation-send-mode"),
   openaiApiKey: document.querySelector("#openai-api-key"),
   openaiModel: document.querySelector("#openai-model"),
+  volcengineApiKey: document.querySelector("#volcengine-api-key"),
   volcengineAppKey: document.querySelector("#volcengine-app-key"),
   volcengineAccessKey: document.querySelector("#volcengine-access-key"),
   lanSharedSecret: document.querySelector("#lan-shared-secret"),
@@ -432,6 +453,10 @@ const elements = {
   claudeDangerouslySkipPermissions: document.querySelector("#claude-dangerously-skip-permissions"),
   xiaomiRemoteEnabled: document.querySelector("#xiaomi-remote-enabled"),
   xiaomiRemoteVoiceMode: document.querySelector("#xiaomi-remote-voice-mode"),
+  wechatMicSetup: document.querySelector("#wechat-mic-setup"),
+  wechatVirtualMicConfirmed: document.querySelector("#wechat-virtual-mic-confirmed"),
+  openWechatInputSettings: document.querySelector("#open-wechat-input-settings"),
+  wechatMicSetupResult: document.querySelector("#wechat-mic-setup-result"),
   userConfigPath: document.querySelector("#user-config-path"),
   desktopSettingsPath: document.querySelector("#desktop-settings-path"),
   cliLogTail: document.querySelector("#cli-log-tail"),
@@ -483,6 +508,7 @@ const elements = {
   gestureTabs: document.querySelector("#gesture-tabs"),
   actionEditor: document.querySelector("#action-editor"),
   voiceFixedNote: document.querySelector("#voice-fixed-note"),
+  menuMistriggerNote: document.querySelector("#menu-mistrigger-note"),
   actionType: document.querySelector("#action-type"),
   afKey: document.querySelector("#af-key"),
   afCombo: document.querySelector("#af-combo"),
@@ -520,6 +546,7 @@ const elements = {
   wizardSkip: document.querySelector("#wizard-skip"),
   wizSttProvider: document.querySelector("#wiz-stt-provider"),
   wizVoiceMode: document.querySelector("#wiz-voice-mode"),
+  wizVolcApiKey: document.querySelector("#wiz-volc-api-key"),
   wizVolcAppKey: document.querySelector("#wiz-volc-app-key"),
   wizVolcAccessKey: document.querySelector("#wiz-volc-access-key"),
   wizOpenaiKey: document.querySelector("#wiz-openai-key"),
@@ -613,13 +640,13 @@ const localMic = {
   recording: false,
   starting: false,
   stopping: false,
-  wechatCapturePending: false,
   stopAfterStart: false,
   cancelAfterStart: false,
   awaitingAction: false,
   sessionActive: false,
   capturingHotkey: null,
   globalHotkeysReady: false,
+  globalHotkeysFailedKeys: [],
   activeHotkeyCode: null,
   level: 0,
   db: null,
@@ -1281,9 +1308,19 @@ function localMicStatusText() {
   if (remoteVoiceStatus === "awaiting") {
     return { state: t("micAwaiting"), hint: t("micHintRemoteAwaiting") };
   }
+  if (localMic.globalHotkeysFailedKeys.length > 0) {
+    return {
+      state: t("micIdle"),
+      hint: t("micHintHotkeysBlocked", { keys: localMic.globalHotkeysFailedKeys.join(", ") }),
+      warning: true
+    };
+  }
   if (isWechatVoiceMode()) {
     if (appState.virtualMicrophone && appState.virtualMicrophone.ready === false) {
       return { state: t("micIdle"), hint: t("micHintWechatNotReady"), warning: true };
+    }
+    if (elements.wechatVirtualMicConfirmed?.checked !== true) {
+      return { state: t("micIdle"), hint: t("micHintWechatSetupRequired"), warning: true };
     }
     return {
       state: t("micIdle"),
@@ -1512,7 +1549,6 @@ async function startLocalMicRecording() {
   }
 
   let sentStart = false;
-  let preparedWechatCapture = false;
   localMic.starting = true;
   localMic.stopAfterStart = false;
   localMic.cancelAfterStart = false;
@@ -1542,9 +1578,7 @@ async function startLocalMicRecording() {
 
     processor.onaudioprocess = handleLocalMicAudio;
     if (isWechatVoiceMode()) {
-      await window.vibeApp.prepareWechatCapture("desktop_mic");
-      preparedWechatCapture = true;
-      localMic.wechatCapturePending = true;
+      await window.vibeApp.ensureWechatReady();
     }
     sendBridgeJson({
       type: "ptt_start",
@@ -1568,10 +1602,6 @@ async function startLocalMicRecording() {
       void stopLocalMicRecording();
     }
   } catch (error) {
-    if (preparedWechatCapture) {
-      void window.vibeApp.cancelWechatCapture("desktop_mic");
-      localMic.wechatCapturePending = false;
-    }
     if (sentStart) {
       try {
         sendBridgeJson({ type: "ptt_stop", source: "desktop_mic" });
@@ -1645,14 +1675,12 @@ async function cancelActiveDictation(origin = "desktop") {
     cleanupLocalAudio();
   }
   try {
-    void window.vibeApp.cancelWechatCapture("");
     sendBridgeJson({ type: "cancel_active_dictation", origin });
   } catch {
     // The overlay still closes locally; the server also has its own 15-second
     // hard deadline if the control socket is unavailable.
   }
   localMic.awaitingAction = false;
-  localMic.wechatCapturePending = false;
   localMic.sessionActive = false;
   overlayCancellable = false;
   remoteVoiceStatus = "idle";
@@ -1693,7 +1721,7 @@ function sendOrSubmitLocalMic() {
     void sendLocalMicAction("action_send");
     return;
   }
-  if (localMic.sessionActive || localMic.wechatCapturePending) {
+  if (localMic.sessionActive) {
     return;
   }
 
@@ -1715,17 +1743,13 @@ function finishLocalMicSessionFromBridge(message) {
   if (message.type === "status") {
     if (message.status === "wechat_sent") {
       localMic.awaitingAction = false;
-      localMic.sessionActive = true;
-      localMic.wechatCapturePending = true;
-      setLocalMicStatus("wechat_finishing");
-      void window.vibeApp.finishWechatCapture("desktop_mic");
+      localMic.sessionActive = false;
+      setLocalMicStatus("idle");
       return;
     }
     if (message.status === "wechat_error") {
-      void window.vibeApp.cancelWechatCapture("desktop_mic");
       localMic.awaitingAction = false;
       localMic.sessionActive = false;
-      localMic.wechatCapturePending = false;
       setLocalMicStatus("error", String(message.text || ""));
       return;
     }
@@ -1917,6 +1941,7 @@ function openWizard() {
   wizPair.voiceTested = false;
   elements.wizSttProvider.value = elements.sttProvider.value || "volcengine";
   elements.wizVoiceMode.value = elements.xiaomiRemoteVoiceMode.value || "wechat";
+  elements.wizVolcApiKey.value = elements.volcengineApiKey.value || "";
   elements.wizVolcAppKey.value = elements.volcengineAppKey.value || "";
   elements.wizVolcAccessKey.value = elements.volcengineAccessKey.value || "";
   elements.wizOpenaiKey.value = elements.openaiApiKey.value || "";
@@ -1962,10 +1987,11 @@ async function wizardNextStep() {
       return;
     }
     const provider = elements.wizSttProvider.value;
+    const apiKey = elements.wizVolcApiKey.value.trim();
     const appKey = elements.wizVolcAppKey.value.trim();
     const accessKey = elements.wizVolcAccessKey.value.trim();
     const openaiKey = elements.wizOpenaiKey.value.trim();
-    const valid = provider === "volcengine" ? Boolean(appKey && accessKey) : Boolean(openaiKey);
+    const valid = provider === "volcengine" ? Boolean(apiKey || (appKey && accessKey)) : Boolean(openaiKey);
     if (!valid) {
       elements.wizSttError.textContent = t("wizSttNeedKey");
       elements.wizSttError.hidden = false;
@@ -1975,6 +2001,7 @@ async function wizardNextStep() {
     // Copy into the real form and save so the service restarts with the keys.
     elements.sttProvider.value = provider;
     elements.xiaomiRemoteVoiceMode.value = "builtin_stt";
+    elements.volcengineApiKey.value = apiKey;
     elements.volcengineAppKey.value = appKey;
     elements.volcengineAccessKey.value = accessKey;
     elements.openaiApiKey.value = openaiKey;
@@ -2061,12 +2088,21 @@ function updateFormAffordances() {
   updateTranslationVisibility();
   const wechatMode = elements.xiaomiRemoteVoiceMode.value === "wechat";
   const virtualMicReady = appState.virtualMicrophone?.ready === true;
+  const wechatMicConfirmed = elements.wechatVirtualMicConfirmed?.checked === true;
+  if (elements.wechatMicSetup) {
+    elements.wechatMicSetup.hidden = !wechatMode;
+    elements.wechatMicSetup.classList.toggle("confirmed", wechatMicConfirmed);
+  }
   const hint = document.querySelector("#remote-voice-mode-hint");
   if (hint) {
     hint.textContent = wechatMode
-      ? (virtualMicReady ? t("checkWechatReady") : t("checkWechatMissing"))
+      ? (!virtualMicReady
+          ? t("checkWechatMissing")
+          : wechatMicConfirmed
+            ? t("checkWechatReady")
+            : t("checkWechatMicPending"))
       : t("fSttHint");
-    hint.classList.toggle("warning-text", wechatMode && !virtualMicReady);
+    hint.classList.toggle("warning-text", wechatMode && (!virtualMicReady || !wechatMicConfirmed));
   }
   renderAbout();
   renderBanner();
@@ -2153,6 +2189,7 @@ function collectFormPayload() {
       voiceTranslationSendMode: elements.voiceTranslationSendMode.value,
       openaiApiKey: elements.openaiApiKey.value,
       openaiModel: elements.openaiModel.value,
+      volcengineApiKey: elements.volcengineApiKey.value,
       volcengineAppKey: elements.volcengineAppKey.value,
       volcengineAccessKey: elements.volcengineAccessKey.value,
       lanSharedSecret: elements.lanSharedSecret.value,
@@ -2178,7 +2215,8 @@ function collectFormPayload() {
       localMicSendKey: localMic.sendKey,
       localMicUndoKey: localMic.undoKey,
       localMicTranslationToggleKey: localMic.translationToggleKey,
-      localMicDeviceId: localMic.deviceId
+      localMicDeviceId: localMic.deviceId,
+      wechatVirtualMicConfirmed: elements.wechatVirtualMicConfirmed?.checked === true
     }
   };
 }
@@ -2198,6 +2236,7 @@ function fillForm(form, desktopSettingsPath) {
   elements.voiceTranslationSendMode.value = form.voiceTranslationSendMode || "target";
   elements.openaiApiKey.value = form.openaiApiKey || "";
   elements.openaiModel.value = form.openaiModel || "";
+  elements.volcengineApiKey.value = form.volcengineApiKey || "";
   elements.volcengineAppKey.value = form.volcengineAppKey || "";
   elements.volcengineAccessKey.value = form.volcengineAccessKey || "";
   elements.lanSharedSecret.value = form.lanSharedSecret || "";
@@ -2207,6 +2246,7 @@ function fillForm(form, desktopSettingsPath) {
   elements.launchToTray.checked = Boolean(form.desktopSettings?.launchToTray);
   elements.closeToTray.checked = Boolean(form.desktopSettings?.closeToTray);
   elements.recordTranscripts.checked = form.desktopSettings?.recordTranscripts !== false;
+  elements.wechatVirtualMicConfirmed.checked = form.desktopSettings?.wechatVirtualMicConfirmed === true;
   recordTranscriptsEnabled = elements.recordTranscripts.checked;
   hasOnboarded = form.desktopSettings?.hasOnboarded === true;
   setLocalMicHotkeys(form.desktopSettings);
@@ -2568,12 +2608,14 @@ function renderChecklist() {
   const form = appState.bootstrap?.form;
   const sttOk = elements.sttProvider.value === "openai"
     ? Boolean(elements.openaiApiKey.value)
-    : Boolean(elements.volcengineAppKey.value && elements.volcengineAccessKey.value);
+    : Boolean(elements.volcengineApiKey.value || (elements.volcengineAppKey.value && elements.volcengineAccessKey.value));
   const remoteOn = elements.xiaomiRemoteEnabled.checked || form?.xiaomiRemoteEnabled === true;
   // The voice mode switch is global: wechat mode covers the F8 desktop mic
   // too, so the checklist treats it as the backend even with the remote off.
   const wechatMode = elements.xiaomiRemoteVoiceMode.value === "wechat";
   const virtualMicReady = appState.virtualMicrophone?.ready === true;
+  const wechatMicConfirmed = elements.wechatVirtualMicConfirmed?.checked === true;
+  const wechatReady = virtualMicReady && wechatMicConfirmed;
   const autoLaunchOn = elements.autoLaunch.checked;
   const mode = elements.sendTarget.value;
   const targetDesc = mode === "codex_exec"
@@ -2585,10 +2627,14 @@ function renderChecklist() {
   const items = [
     wechatMode
       ? {
-          icon: virtualMicReady ? "ok" : "miss",
+          icon: wechatReady ? "ok" : "miss",
           title: t("checkWechat"),
-          desc: virtualMicReady ? t("checkWechatReady") : t("checkWechatMissing"),
-          fix: virtualMicReady ? null : { label: t("checkRemoteFix"), page: "remote" }
+          desc: !virtualMicReady
+            ? t("checkWechatMissing")
+            : wechatMicConfirmed
+              ? t("checkWechatReady")
+              : t("checkWechatMicPending"),
+          fix: wechatReady ? null : { label: t("checkRemoteFix"), page: "remote" }
         }
       : {
           icon: sttOk ? "ok" : "miss",
@@ -2662,7 +2708,7 @@ function renderChecklist() {
     elements.checklist.appendChild(row);
   }
 
-  const voiceBackendReady = wechatMode ? virtualMicReady : sttOk;
+  const voiceBackendReady = wechatMode ? wechatReady : sttOk;
   const allGood = voiceBackendReady && hasUsedVoice && remoteOn && autoLaunchOn;
   elements.checklistCard.classList.toggle("hidden", allGood);
 }
@@ -2684,7 +2730,11 @@ function renderAbout() {
     ? t("providerDetailOpenai", { model: elements.openaiModel.value || "whisper-1" })
     : t("providerDetailVolc");
   elements.aboutProviderSub.textContent = wechatMode
-    ? (appState.virtualMicrophone?.ready ? t("checkWechatReady") : t("checkWechatMissing"))
+    ? (!appState.virtualMicrophone?.ready
+        ? t("checkWechatMissing")
+        : elements.wechatVirtualMicConfirmed?.checked
+          ? t("checkWechatReady")
+          : t("checkWechatMicPending"))
     : elements.voiceTranslationEnabled.checked
       ? `${providerDetail} · ${t("translationOn", {
           lang: translationTargetLabel(elements.voiceTranslationTargetLanguage.value),
@@ -2730,6 +2780,7 @@ function renderRemoteEditor() {
   elements.gestureTabs.hidden = isVoice;
   elements.actionEditor.hidden = isVoice;
   elements.voiceFixedNote.hidden = !isVoice;
+  elements.menuMistriggerNote.hidden = selectedRemoteButton !== "menu";
   if (isVoice) {
     return;
   }
@@ -3042,11 +3093,22 @@ function handleRemoteVoiceEvent(message) {
 const OVERLAY_FORWARD_STATUSES = new Set([
   "recording", "transcribing", "translating", "awaiting_action",
   "typed", "cancelled", "empty_segment", "transcript_empty",
-  "transcription_timeout", "transcription_error", "wechat_sent", "wechat_error",
+  "transcription_timeout", "transcription_error",
   "power_confirm", "power_executing"
 ]);
+const GLOBAL_CONFIRMATION_OVERLAY_STATUSES = new Set(["power_confirm", "power_executing"]);
 function forwardOverlayEvent(message) {
   if (typeof window.vibeApp.overlayEvent !== "function") {
+    return;
+  }
+  // WeChat owns the complete dictation UI: it keeps focus in the target input
+  // and types there directly. Power confirmations are unrelated to dictation
+  // and remain visible while WeChat voice mode is active.
+  if (
+    isWechatVoiceMode() &&
+    !(message.type === "status" && GLOBAL_CONFIRMATION_OVERLAY_STATUSES.has(message.status))
+  ) {
+    overlayCancellable = false;
     return;
   }
   if (message.type === "transcript_final") {
@@ -3061,16 +3123,6 @@ function forwardOverlayEvent(message) {
     return;
   }
   if (message.type === "status" && OVERLAY_FORWARD_STATUSES.has(message.status)) {
-    if (message.status === "wechat_sent" && isWechatVoiceMode()) {
-      overlayCancellable = true;
-      window.vibeApp.overlayEvent({
-        type: "status",
-        status: "transcribing",
-        text: "",
-        lang
-      });
-      return;
-    }
     overlayCancellable = [
       "recording", "transcribing", "translating", "awaiting_action", "power_confirm"
     ].includes(message.status);
@@ -3085,52 +3137,6 @@ function forwardOverlayEvent(message) {
       lang
     });
   }
-}
-
-async function handleWechatCaptureResult(payload = {}) {
-  const source = String(payload.source || "").trim();
-  const text = String(payload.text || "").trim();
-  localMic.wechatCapturePending = false;
-  if (!text) {
-    if (source === "desktop_mic") {
-      localMic.awaitingAction = false;
-      localMic.sessionActive = false;
-      setLocalMicStatus("idle");
-    } else if (source === "xiaomi_remote") {
-      remoteVoiceStatus = "idle";
-    }
-    overlayCancellable = false;
-    window.vibeApp.overlayEvent({ type: "status", status: "transcript_empty", lang });
-    renderLocalMic();
-    renderBanner();
-    return;
-  }
-
-  try {
-    await ensureBridgeSocketReady();
-    sendBridgeJson({ type: "wechat_transcript", source, text });
-    if (source === "desktop_mic") {
-      localMic.sessionActive = true;
-      setLocalMicStatus("transcribing");
-    } else if (source === "xiaomi_remote") {
-      remoteVoiceStatus = "transcribing";
-    }
-  } catch (error) {
-    if (source === "desktop_mic") {
-      localMic.sessionActive = false;
-      setLocalMicStatus("error", error instanceof Error ? error.message : String(error));
-    } else {
-      remoteVoiceStatus = "idle";
-    }
-    window.vibeApp.overlayEvent({
-      type: "status",
-      status: "wechat_error",
-      text: error instanceof Error ? error.message : String(error),
-      lang
-    });
-  }
-  renderLocalMic();
-  renderBanner();
 }
 
 function handleBridgeMessage(message) {
@@ -3287,6 +3293,9 @@ async function refreshBootstrap() {
   hasUsedVoice = bootstrap.form?.desktopSettings?.hasUsedVoice === true;
   if (bootstrap.globalHotkeys) {
     localMic.globalHotkeysReady = Boolean(bootstrap.globalHotkeys.ready);
+    localMic.globalHotkeysFailedKeys = Array.isArray(bootstrap.globalHotkeys.failedKeys)
+      ? bootstrap.globalHotkeys.failedKeys
+      : [];
     setLocalMicHotkeys(bootstrap.globalHotkeys.settings || bootstrap.form.desktopSettings);
   }
   fillForm(bootstrap.form, bootstrap.desktopSettingsPath);
@@ -3310,6 +3319,9 @@ async function chooseDirectory(targetInput) {
 function handleGlobalHotkey(payload = {}) {
   if (payload.type === "status") {
     localMic.globalHotkeysReady = Boolean(payload.ready);
+    if (Array.isArray(payload.failedKeys)) {
+      localMic.globalHotkeysFailedKeys = payload.failedKeys;
+    }
     if (payload.settings) {
       setLocalMicHotkeys(payload.settings);
     }
@@ -3317,7 +3329,20 @@ function handleGlobalHotkey(payload = {}) {
     return;
   }
   if (payload.type === "record_start") {
-    if (hasCancellableDictation() && !localMic.recording && !localMic.starting) {
+    if (localMic.recording || localMic.starting) {
+      return;
+    }
+    if (localMic.awaitingAction) {
+      // A preview is waiting for confirmation: holding the key again appends
+      // another segment to it instead of cancelling it.
+      void startLocalMicRecording();
+      return;
+    }
+    if (localMic.status === "wechat_finishing") {
+      // The previous WeChat segment is still being finalized.
+      return;
+    }
+    if (hasCancellableDictation()) {
       void cancelActiveDictation("f8");
       return;
     }
@@ -3363,6 +3388,9 @@ async function persistLocalMicHotkeys(patch = {}) {
   appState.service = bootstrap.service;
   if (bootstrap.globalHotkeys) {
     localMic.globalHotkeysReady = Boolean(bootstrap.globalHotkeys.ready);
+    localMic.globalHotkeysFailedKeys = Array.isArray(bootstrap.globalHotkeys.failedKeys)
+      ? bootstrap.globalHotkeys.failedKeys
+      : [];
   }
   renderService();
   renderLocalMic();
@@ -3421,6 +3449,37 @@ elements.xiaomiRemoteVoiceMode.addEventListener("change", () => {
   renderChecklist();
   renderLocalMic();
 });
+elements.openWechatInputSettings?.addEventListener("click", async () => {
+  elements.openWechatInputSettings.disabled = true;
+  elements.wechatMicSetupResult.textContent = t("wechatMicOpening");
+  try {
+    const opened = await window.vibeApp.openWechatInputSettings?.();
+    elements.wechatMicSetupResult.textContent = opened ? "" : t("wechatMicOpenFailed");
+  } catch {
+    elements.wechatMicSetupResult.textContent = t("wechatMicOpenFailed");
+  } finally {
+    elements.openWechatInputSettings.disabled = false;
+  }
+});
+elements.wechatVirtualMicConfirmed?.addEventListener("change", async () => {
+  const confirmed = elements.wechatVirtualMicConfirmed.checked;
+  updateFormAffordances();
+  renderChecklist();
+  renderLocalMic();
+  try {
+    const bootstrap = await window.vibeApp.updateDesktopSettings({
+      wechatVirtualMicConfirmed: confirmed
+    });
+    appState.bootstrap = bootstrap;
+    appState.service = bootstrap.service;
+  } catch {
+    elements.wechatVirtualMicConfirmed.checked = !confirmed;
+    updateFormAffordances();
+    renderChecklist();
+    renderLocalMic();
+  }
+});
+elements.volcengineApiKey.addEventListener("input", renderChecklist);
 elements.volcengineAppKey.addEventListener("input", renderChecklist);
 elements.volcengineAccessKey.addEventListener("input", renderChecklist);
 elements.openaiApiKey.addEventListener("input", renderChecklist);
@@ -3892,7 +3951,6 @@ window.vibeApp.onState((payload) => {
 });
 
 window.vibeApp.onGlobalHotkey(handleGlobalHotkey);
-window.vibeApp.onWechatCaptureResult(handleWechatCaptureResult);
 
 if (elements.actionKey) {
   for (const key of REMOTE_KEY_OPTIONS) {

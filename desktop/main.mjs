@@ -1,8 +1,9 @@
 import fs from "node:fs";
-import { fork, spawn } from "node:child_process";
+import { execFile, fork, spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
+import { promisify } from "node:util";
 
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, screen, session, shell, Tray } from "electron";
 import { WebSocket } from "ws";
@@ -51,6 +52,8 @@ let xiaomiRemoteRestartDelayMs = 5_000;
 let globalHotkeyChild = null;
 let globalHotkeyRestartTimer = null;
 let globalHotkeysReady = false;
+let globalHotkeyStartToken = 0;
+const globalHotkeyFailed = new Map();
 let bridgeStopRequested = false;
 let isQuitting = false;
 let initialLaunchHidden = false;
@@ -315,10 +318,23 @@ function emitGlobalHotkey(payload) {
   }
 }
 
+function describeFailedHotkeys() {
+  const settings = selectDesktopHotkeySettings();
+  const labels = new Map([
+    [1, settings.localMicHoldKey],
+    [2, settings.localMicSendKey],
+    [3, settings.localMicUndoKey],
+    [4, settings.localMicTranslationToggleKey],
+    [5, "Menu"]
+  ]);
+  return [...globalHotkeyFailed.keys()].map((id) => labels.get(id) || `hotkey ${id}`);
+}
+
 function emitGlobalHotkeyStatus() {
   emitGlobalHotkey({
     type: "status",
     ready: globalHotkeysReady,
+    failedKeys: describeFailedHotkeys(),
     settings: selectDesktopHotkeySettings()
   });
 }
@@ -357,7 +373,7 @@ function windowsInputHelperPath() {
 function buildHotkeyHelperArgs() {
   const settings = loadDesktopSettings();
   const effectiveConfig = loadEffectiveConfig();
-  const args = ["--monitor"];
+  const args = ["--monitor", "--owner-pid", String(process.pid)];
   appendHotkeyHelperArgs(args, "record", settings.localMicHoldKey);
   appendHotkeyHelperArgs(args, "send", settings.localMicSendKey);
   appendHotkeyHelperArgs(args, "undo", settings.localMicUndoKey);
@@ -381,19 +397,57 @@ function handleGlobalHotkeyEvent(event) {
   }
 }
 
-function startGlobalHotkeyMonitor() {
-  if (process.platform !== "win32" || globalHotkeyChild || isQuitting) {
-    emitGlobalHotkeyStatus();
-    return;
+// Kills input helpers orphaned by a crashed or force-killed app instance. A
+// leftover helper keeps its global hotkeys registered, and RegisterHotKey is
+// system-wide exclusive — every registration in the next instance then fails
+// and F8/F9/F10 stay dead until the machine reboots. The single-instance lock
+// means any helper from our own exe path that is not our current child is
+// stale by definition.
+async function killStaleInputHelpers(helperPath) {
+  if (process.platform !== "win32") {
+    return 0;
   }
+  const keepPid = globalHotkeyChild?.pid ?? 0;
+  const script = `
+$target = '${String(helperPath).replace(/'/g, "''")}'
+Get-CimInstance Win32_Process -Filter "Name='VibeCodingVoiceInputHelper.exe'" -ErrorAction SilentlyContinue |
+  Where-Object { $_.ExecutablePath -ieq $target -and $_.ProcessId -ne ${keepPid} } |
+  ForEach-Object { $_.ProcessId }
+`;
+  try {
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { timeout: 5_000, windowsHide: true }
+    );
+    const pids = stdout
+      .split(/\r?\n/)
+      .map((line) => Number(line.trim()))
+      .filter((pid) => pid > 0);
+    for (const pid of pids) {
+      await killProcessTree(pid);
+    }
+    return pids.length;
+  } catch {
+    return 0;
+  }
+}
 
-  const helperPath = windowsInputHelperPath();
-  if (!fs.existsSync(helperPath)) {
-    globalHotkeysReady = false;
-    appendProcessLog("hotkey", `Windows input helper is missing: ${helperPath}`);
+function trackGlobalHotkeyLine(line) {
+  const failed = /^hotkey_failed id=(\d+) vk=(\d+) error=(\d+)/.exec(line);
+  if (failed) {
+    globalHotkeyFailed.set(Number(failed[1]), Number(failed[2]));
     emitGlobalHotkeyStatus();
     return;
   }
+  const registered = /^hotkey_registered id=(\d+)/.exec(line);
+  if (registered) {
+    globalHotkeyFailed.delete(Number(registered[1]));
+    emitGlobalHotkeyStatus();
+  }
+}
+
+function spawnGlobalHotkeyHelper(helperPath) {
   const child = spawn(helperPath, buildHotkeyHelperArgs(), {
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"]
@@ -401,11 +455,12 @@ function startGlobalHotkeyMonitor() {
 
   globalHotkeyChild = child;
   globalHotkeysReady = false;
+  globalHotkeyFailed.clear();
 
   const reader = readline.createInterface({ input: child.stdout });
   reader.on("line", (line) => {
     try {
-      handleGlobalKeyboardEvent(JSON.parse(line));
+      handleGlobalHotkeyEvent(JSON.parse(line));
     } catch {
       // ignore malformed keyboard hook output
     }
@@ -419,6 +474,7 @@ function startGlobalHotkeyMonitor() {
       emitGlobalHotkeyStatus();
       return;
     }
+    trackGlobalHotkeyLine(line.trim());
     appendProcessLog("hotkey", line);
   });
 
@@ -445,7 +501,34 @@ function startGlobalHotkeyMonitor() {
   });
 }
 
+function startGlobalHotkeyMonitor() {
+  if (process.platform !== "win32" || globalHotkeyChild || isQuitting) {
+    emitGlobalHotkeyStatus();
+    return;
+  }
+
+  const helperPath = windowsInputHelperPath();
+  if (!fs.existsSync(helperPath)) {
+    globalHotkeysReady = false;
+    appendProcessLog("hotkey", `Windows input helper is missing: ${helperPath}`);
+    emitGlobalHotkeyStatus();
+    return;
+  }
+
+  const token = ++globalHotkeyStartToken;
+  void killStaleInputHelpers(helperPath).then((killed) => {
+    if (killed > 0) {
+      appendProcessLog("hotkey", `killed ${killed} stale input helper process(es)`);
+    }
+    if (token !== globalHotkeyStartToken || globalHotkeyChild || isQuitting) {
+      return;
+    }
+    spawnGlobalHotkeyHelper(helperPath);
+  });
+}
+
 function stopGlobalHotkeyMonitor() {
+  globalHotkeyStartToken += 1;
   if (globalHotkeyRestartTimer) {
     clearTimeout(globalHotkeyRestartTimer);
     globalHotkeyRestartTimer = null;
@@ -455,6 +538,7 @@ function stopGlobalHotkeyMonitor() {
     globalHotkeyChild = null;
   }
   globalHotkeysReady = false;
+  globalHotkeyFailed.clear();
 }
 
 function restartGlobalHotkeyMonitor() {
@@ -826,6 +910,65 @@ async function syncAutoLaunch(settings = loadDesktopSettings()) {
   });
 }
 
+const execFileAsync = promisify(execFile);
+
+async function killProcessTree(pid) {
+  if (!pid) {
+    return;
+  }
+  if (process.platform === "win32") {
+    await execFileAsync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+      timeout: 5_000,
+      windowsHide: true
+    }).catch(() => {});
+    return;
+  }
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // already gone
+  }
+}
+
+// Finds a bridge child orphaned by a previous crash/force-quit that is still
+// holding the voice port. Only returns a pid when the listener is verifiably
+// ours: its command line points at this app's server entry AND its parent
+// process is already gone — a deliberately started server (npm start) has a
+// live parent and is left alone.
+async function findOrphanedBridgePid(port) {
+  if (process.platform !== "win32") {
+    return 0;
+  }
+  const script = `
+$conn = Get-NetTCPConnection -LocalPort ${Number(port)} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $conn) { exit 0 }
+$proc = Get-CimInstance Win32_Process -Filter "ProcessId=$($conn.OwningProcess)" -ErrorAction SilentlyContinue
+if (-not $proc) { exit 0 }
+$parentAlive = $false
+if ($proc.ParentProcessId) {
+  $parentAlive = [bool](Get-Process -Id $proc.ParentProcessId -ErrorAction SilentlyContinue)
+}
+[pscustomobject]@{ pid = $proc.ProcessId; commandLine = $proc.CommandLine; parentAlive = $parentAlive } | ConvertTo-Json -Compress
+`;
+  try {
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { timeout: 5_000, windowsHide: true }
+    );
+    const info = JSON.parse(stdout.trim() || "{}");
+    const pid = Number(info.pid) || 0;
+    if (!pid || info.parentAlive) {
+      return 0;
+    }
+    const commandLine = String(info.commandLine || "").toLowerCase().replace(/\//g, "\\");
+    const entry = bridgeEntryPath().toLowerCase().replace(/\//g, "\\");
+    return commandLine.includes(entry) ? pid : 0;
+  } catch {
+    return 0;
+  }
+}
+
 async function stopBridgeProcess() {
   if (xiaomiRemoteChild) {
     const child = xiaomiRemoteChild;
@@ -872,7 +1015,13 @@ async function stopBridgeProcess() {
 
     child.once("exit", finish);
     child.kill();
-    setTimeout(finish, 2_000);
+    setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      writeDesktopLog("bridge child did not exit in time, force killing", { pid: child.pid ?? null });
+      void killProcessTree(child.pid).finally(finish);
+    }, 2_000);
   });
 }
 
@@ -930,23 +1079,22 @@ function startXiaomiRemoteProcess(config) {
     if (xiaomiRemoteChild !== child) {
       return;
     }
-    if (message?.type === "xiaomi_remote_wechat_capture_prepare") {
+    if (message?.type === "xiaomi_remote_wechat_ready_check") {
       const requestId = String(message.requestId || "");
-      void prepareWechatCapture("xiaomi_remote")
-        .then((result) => {
+      void ensureWechatReady()
+        .then(() => {
           if (xiaomiRemoteChild === child && child.connected) {
             child.send({
-              type: "xiaomi_remote_wechat_capture_prepared",
+              type: "xiaomi_remote_wechat_ready_result",
               requestId,
-              ok: true,
-              sessionId: result.sessionId
+              ok: true
             });
           }
         })
         .catch((error) => {
           if (xiaomiRemoteChild === child && child.connected) {
             child.send({
-              type: "xiaomi_remote_wechat_capture_prepared",
+              type: "xiaomi_remote_wechat_ready_result",
               requestId,
               ok: false,
               error: error?.message || String(error)
@@ -982,11 +1130,6 @@ function startXiaomiRemoteProcess(config) {
           updatedAt: Date.now()
         };
     writeDesktopLog("xiaomi remote capture status", latestRemoteCaptureStatus || { state: "ready" });
-    if (message.state === "wechat_stop") {
-      finishWechatCapture("xiaomi_remote");
-    } else if (message.state === "wechat_cancel") {
-      cancelWechatCapture("xiaomi_remote");
-    }
     if (message.state === "adapter_changed") {
       void refreshRemoteInfoOnce("adapter-changed");
       void refreshRemoteHidHealth("adapter-changed");
@@ -1065,8 +1208,30 @@ async function startBridgeProcess({ revealOnError = true } = {}) {
     return;
   }
 
+  let portBusy = false;
   try {
     await connectToLocalBridge(config.port, 500);
+    portBusy = true;
+  } catch {
+    // nothing listening locally, safe to start
+  }
+
+  if (portBusy) {
+    // A bridge orphaned by a previous crash/force-quit keeps holding the port
+    // and answers hello like a healthy one. Recover by killing it ourselves.
+    const orphanPid = await findOrphanedBridgePid(config.port);
+    if (orphanPid) {
+      writeDesktopLog("killing orphaned bridge holding the port", { pid: orphanPid, port: config.port });
+      await killProcessTree(orphanPid);
+      try {
+        await connectToLocalBridge(config.port, 500);
+      } catch {
+        portBusy = false;
+      }
+    }
+  }
+
+  if (portBusy) {
     setServiceState({
       status: "error",
       message: `Port ${config.port} is already in use by another local bridge.`,
@@ -1080,8 +1245,6 @@ async function startBridgeProcess({ revealOnError = true } = {}) {
     }
     startXiaomiRemoteProcess(config);
     return;
-  } catch {
-    // nothing listening locally, safe to start
   }
 
   serviceState.logs = [];
@@ -1361,6 +1524,7 @@ async function buildBootstrap() {
     desktopSettingsPath: getDesktopSettingsPath(),
     globalHotkeys: {
       ready: globalHotkeysReady,
+      failedKeys: describeFailedHotkeys(),
       settings: selectDesktopHotkeySettings(desktopSettings)
     },
     service: snapshotServiceState(),
@@ -1618,9 +1782,6 @@ let overlayWindow = null;
 let overlayHideTimer = null;
 let overlayRecognitionTimer = null;
 let overlayMoveTimer = null;
-let overlayLoadPromise = null;
-let activeWechatCapture = null;
-let wechatCaptureSequence = 0;
 const OVERLAY_WIDTH = 480;
 const OVERLAY_HEIGHT = 148;
 const OVERLAY_RECOGNITION_FAILSAFE_MS = 20_000;
@@ -1638,7 +1799,6 @@ function clearOverlayTimers() {
 
 function requestOverlayCancel(origin) {
   clearOverlayTimers();
-  cancelWechatCapture();
   overlayWindow?.hide();
   emitGlobalHotkey({ type: "cancel_active_dictation", origin });
 }
@@ -1687,7 +1847,9 @@ function ensureOverlayWindow() {
       preload: path.join(app.getAppPath(), "desktop", "overlay-preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      // Keep status timers and power-confirm countdowns live while occluded.
+      backgroundThrottling: false
     }
   });
   overlayWindow.setAlwaysOnTop(true, "screen-saver");
@@ -1705,170 +1867,145 @@ function ensureOverlayWindow() {
     clearOverlayTimers();
     overlayWindow = null;
   });
-  overlayLoadPromise = overlayWindow.loadFile(path.join(app.getAppPath(), "desktop", "overlay.html"));
+  void overlayWindow.loadFile(path.join(app.getAppPath(), "desktop", "overlay.html"));
   return overlayWindow;
 }
 
-async function waitForOverlayLoad(win) {
-  if (overlayLoadPromise) {
-    await overlayLoadPromise;
-    overlayLoadPromise = null;
-  } else if (win.webContents.isLoadingMainFrame()) {
-    await new Promise((resolve) => win.webContents.once("did-finish-load", resolve));
+// WeChat Input Method owns the global voice shortcut. The Weixin/WeChat chat
+// client is unrelated and must not be used as the readiness signal.
+let wechatInputMethodRunningCache = { at: 0, running: true };
+
+async function isWechatInputMethodRunning({ force = false } = {}) {
+  if (process.platform !== "win32") {
+    return true;
+  }
+  const now = Date.now();
+  // Trust a fresh positive answer to keep PTT latency at zero; re-check a
+  // negative quickly so a just-activated input method is picked up right away.
+  const ttl = wechatInputMethodRunningCache.running ? 10_000 : 1_500;
+  if (!force && now - wechatInputMethodRunningCache.at < ttl) {
+    return wechatInputMethodRunningCache.running;
+  }
+  try {
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", "[bool]@(Get-Process -Name wetype_server -ErrorAction SilentlyContinue)"],
+      { timeout: 3_000, windowsHide: true }
+    );
+    wechatInputMethodRunningCache = { at: now, running: /true/i.test(stdout) };
+  } catch (error) {
+    // Detection failing must not block dictation — keep the previous answer.
+    writeDesktopLog("wechat input method process check failed", error?.message || String(error));
+  }
+  return wechatInputMethodRunningCache.running;
+}
+
+async function tryWakeWechatInputMethod() {
+  if (process.platform !== "win32") {
+    return false;
+  }
+  try {
+    // ctfmon is Windows' text-services host. Waking it is safe and gives an
+    // installed WeType profile a chance to start its per-user server without
+    // launching the unrelated WeChat chat client.
+    const child = spawn("ctfmon.exe", [], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true
+    });
+    child.unref();
+    wechatInputMethodRunningCache = { at: 0, running: false };
+    await wait(1_200);
+    return isWechatInputMethodRunning({ force: true });
+  } catch (error) {
+    writeDesktopLog("wechat input method wake failed", error?.message || String(error));
+    return false;
   }
 }
 
-function releaseWechatCaptureFocus({ keepOverlay = true } = {}) {
-  const win = overlayWindow;
-  if (!win || win.isDestroyed()) {
+async function findWechatInputMethodSettingsExecutable() {
+  if (process.platform !== "win32") {
+    return "";
+  }
+  const script = `
+$running = Get-Process -Name wetype_update -ErrorAction SilentlyContinue |
+  Where-Object { $_.Path } |
+  Select-Object -First 1 -ExpandProperty Path
+if ($running) { Write-Output $running; exit 0 }
+$roots = @(
+  (Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'Tencent\\WeType'),
+  (Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Tencent\\WeType')
+) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+$candidate = $roots |
+  ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter wetype_update.exe -File -Recurse -ErrorAction SilentlyContinue } |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1 -ExpandProperty FullName
+if ($candidate) { Write-Output $candidate }
+`;
+  try {
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { timeout: 5_000, windowsHide: true }
+    );
+    return String(stdout || "").trim().split(/\r?\n/)[0] || "";
+  } catch (error) {
+    writeDesktopLog("wechat input method settings lookup failed", error?.message || String(error));
+    return "";
+  }
+}
+
+async function openWechatInputMethodSettings() {
+  const executablePath = await findWechatInputMethodSettingsExecutable();
+  if (!executablePath) {
+    return false;
+  }
+  try {
+    const child = spawn(executablePath, [], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false
+    });
+    child.unref();
+    return true;
+  } catch (error) {
+    writeDesktopLog("wechat input method settings open failed", error?.message || String(error));
+    return false;
+  }
+}
+
+async function ensureWechatReady() {
+  if (!loadDesktopSettings().wechatVirtualMicConfirmed) {
+    throw new Error(
+      "请先在软件的“遥控器”页面打开微信输入法设置，把麦克风选为 CABLE Output，并勾选“我已选择”。"
+    );
+  }
+  if (await isWechatInputMethodRunning()) {
     return;
   }
-  // Hiding the focused capture window lets Windows reactivate the window that
-  // was focused before recording. Re-show it without activation so the user
-  // can preview the captured transcript without typing into the target early.
-  win.setFocusable(false);
-  win.hide();
-  if (keepOverlay) {
-    setTimeout(() => {
-      if (overlayWindow === win && !win.isDestroyed()) {
-        win.showInactive();
-      }
-    }, 40);
+  const woke = await tryWakeWechatInputMethod();
+  writeDesktopLog("wechat input method not running", { woke });
+  if (woke) {
+    return;
   }
-}
-
-function cancelWechatCapture(source = "") {
-  const session = activeWechatCapture;
-  if (!session || (source && session.source !== source)) {
-    return false;
-  }
-  activeWechatCapture = null;
-  session.rejectReady?.(new Error("微信语音接收已取消。"));
-  session.rejectReady = null;
-  overlayWindow?.webContents.send("overlay:event", {
-    type: "wechat_capture_cancel",
-    sessionId: session.sessionId,
-    source: session.source,
-    lang: loadDesktopSettings().uiLanguage || "zh"
-  });
-  releaseWechatCaptureFocus({ keepOverlay: false });
-  return true;
-}
-
-async function prepareWechatCapture(source) {
-  const normalizedSource = String(source || "").trim();
-  if (!normalizedSource) {
-    throw new Error("缺少微信语音接收来源。 ");
-  }
-  if (activeWechatCapture) {
-    cancelWechatCapture();
-  }
-
-  const win = ensureOverlayWindow();
-  await waitForOverlayLoad(win);
-  const sessionId = `${Date.now()}-${++wechatCaptureSequence}`;
-  let resolveReady;
-  let rejectReady;
-  const ready = new Promise((resolve, reject) => {
-    resolveReady = resolve;
-    rejectReady = reject;
-  });
-  activeWechatCapture = {
-    sessionId,
-    source: normalizedSource,
-    resolveReady,
-    rejectReady
-  };
-
-  win.setFocusable(true);
-  win.show();
-  win.focus();
-  win.webContents.send("overlay:event", {
-    type: "wechat_capture_prepare",
-    sessionId,
-    source: normalizedSource,
-    lang: loadDesktopSettings().uiLanguage || "zh"
-  });
-
-  const timeout = setTimeout(() => {
-    if (activeWechatCapture?.sessionId === sessionId) {
-      activeWechatCapture.rejectReady?.(new Error("微信语音接收框未能获得输入焦点。"));
-      activeWechatCapture.rejectReady = null;
-    }
-  }, 2_000);
-  try {
-    await ready;
-    win.focus();
-    return { sessionId };
-  } catch (error) {
-    cancelWechatCapture(normalizedSource);
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function finishWechatCapture(source = "") {
-  const session = activeWechatCapture;
-  if (!session || (source && session.source !== source)) {
-    return false;
-  }
-  overlayWindow?.webContents.send("overlay:event", {
-    type: "wechat_capture_stop",
-    sessionId: session.sessionId,
-    source: session.source,
-    lang: loadDesktopSettings().uiLanguage || "zh"
-  });
-  return true;
+  throw new Error(
+    "微信输入法语音服务没有运行。请先在一个文本输入框里切换到微信输入法，再按住遥控器说话。"
+  );
 }
 
 const OVERLAY_SHOW_STATUSES = new Set(["recording", "transcribing", "translating", "awaiting_action", "power_confirm", "power_executing"]);
 const OVERLAY_HIDE_STATUSES = new Set([
   "typed", "cancelled", "empty_segment", "transcript_empty",
-  "transcription_timeout", "transcription_error", "wechat_sent", "wechat_error"
+  "transcription_timeout", "transcription_error"
 ]);
 
 ipcMain.on("overlay:cancel", (_event, origin = "overlay_click") => {
   requestOverlayCancel(String(origin || "overlay_click"));
 });
 
-ipcMain.on("overlay:wechat-capture-ready", (event, sessionId) => {
-  const session = activeWechatCapture;
-  if (!session || event.sender !== overlayWindow?.webContents || session.sessionId !== String(sessionId || "")) {
-    return;
-  }
-  session.resolveReady?.();
-  session.resolveReady = null;
-  session.rejectReady = null;
-});
+ipcMain.handle("desktop:ensure-wechat-ready", () => ensureWechatReady());
 
-ipcMain.on("overlay:wechat-capture-result", (event, payload = {}) => {
-  const session = activeWechatCapture;
-  if (
-    !session ||
-    event.sender !== overlayWindow?.webContents ||
-    session.sessionId !== String(payload.sessionId || "")
-  ) {
-    return;
-  }
-  activeWechatCapture = null;
-  releaseWechatCaptureFocus({ keepOverlay: true });
-  const result = {
-    sessionId: session.sessionId,
-    source: session.source,
-    text: String(payload.text || ""),
-    reason: String(payload.reason || "")
-  };
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (win !== overlayWindow && !win.isDestroyed()) {
-      win.webContents.send("desktop:wechat-capture-result", result);
-    }
-  }
-});
-
-ipcMain.handle("desktop:prepare-wechat-capture", (_event, source) => prepareWechatCapture(source));
-ipcMain.handle("desktop:finish-wechat-capture", (_event, source) => finishWechatCapture(source));
-ipcMain.handle("desktop:cancel-wechat-capture", (_event, source) => cancelWechatCapture(source));
+ipcMain.handle("desktop:open-wechat-input-settings", () => openWechatInputMethodSettings());
 
 ipcMain.on("overlay:event", (_event, payload = {}) => {
   const win = ensureOverlayWindow();
@@ -1891,7 +2028,7 @@ ipcMain.on("overlay:event", (_event, payload = {}) => {
     return;
   }
   if (OVERLAY_HIDE_STATUSES.has(payload.status)) {
-    const delayMs = ["transcription_timeout", "transcription_error", "wechat_error"].includes(payload.status)
+    const delayMs = ["transcription_timeout", "transcription_error"].includes(payload.status)
       ? 2200
       : payload.status === "typed"
         ? 1400
@@ -1944,6 +2081,7 @@ createMainWindow();
 createTray();
 ensureOverlayWindow();
 startGlobalHotkeyMonitor();
+void isWechatInputMethodRunning();
 void startBridgeProcess({ revealOnError: !initialLaunchHidden });
 void refreshRemoteInfoOnce("startup");
 void refreshRemoteHidHealth("startup");

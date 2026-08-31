@@ -569,7 +569,7 @@ test("server translates live voice transcript before device confirmation", async
       VOICE_TRANSLATION_ENABLED: "1",
       VOICE_TRANSLATION_API_KEY: "translation-key",
       VOICE_TRANSLATION_BASE_URL: `http://127.0.0.1:${translationPort}`,
-      VOICE_TRANSLATION_MODEL: "deepseek-chat"
+      VOICE_TRANSLATION_MODEL: "deepseek-v4-flash"
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -667,7 +667,7 @@ test("server can send bilingual Chinese and English translation text", async (t)
       VOICE_TRANSLATION_SEND_BILINGUAL: "1",
       VOICE_TRANSLATION_API_KEY: "translation-key",
       VOICE_TRANSLATION_BASE_URL: `http://127.0.0.1:${translationPort}`,
-      VOICE_TRANSLATION_MODEL: "deepseek-chat"
+      VOICE_TRANSLATION_MODEL: "deepseek-v4-flash"
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -767,7 +767,7 @@ test("server can send Chinese, English, Korean, and Japanese together", async (t
       VOICE_TRANSLATION_SEND_MODE: "all",
       VOICE_TRANSLATION_API_KEY: "translation-key",
       VOICE_TRANSLATION_BASE_URL: `http://127.0.0.1:${translationPort}`,
-      VOICE_TRANSLATION_MODEL: "deepseek-chat"
+      VOICE_TRANSLATION_MODEL: "deepseek-v4-flash"
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -847,7 +847,7 @@ test("server falls back to original transcript when voice translation fails", as
       VOICE_TRANSLATION_ENABLED: "1",
       VOICE_TRANSLATION_API_KEY: "translation-key",
       VOICE_TRANSLATION_BASE_URL: `http://127.0.0.1:${translationPort}`,
-      VOICE_TRANSLATION_MODEL: "deepseek-chat"
+      VOICE_TRANSLATION_MODEL: "deepseek-v4-flash"
     },
     stdio: ["ignore", "pipe", "pipe"]
   });

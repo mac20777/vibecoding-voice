@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { execFile } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -221,6 +222,142 @@ function waitForEvent(emitter, eventName, timeoutMs, errorMessage) {
   });
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * WeChat ignores its voice shortcut while an unrelated physical key is still
+ * held. That matters for push-to-talk after replacing the old low-level
+ * keyboard hook with RegisterHotKey: Windows still exposes the physical
+ * F8/Menu key state even though the hotkey message is consumed.
+ *
+ * Prepare the audio route while push-to-talk is held, then tap WeChat Input
+ * Method's Ctrl+Win+Shift start shortcut and replay the buffered PCM after key
+ * release. The native publisher taps the same shortcut again after the audio
+ * drains and acknowledges the final route restoration, so consecutive presses
+ * cannot overlap. A small paced prebuffer keeps WASAPI fed without overflowing
+ * the native publisher's bounded queue.
+ */
+export class BufferedWechatVirtualMicrophoneSession {
+  constructor({
+    publisher,
+    keyReleaseSettleMs = 40,
+    replayChunkMs = 100,
+    replayLeadMs = 300,
+    sleep = wait,
+    now = () => Date.now(),
+    log
+  } = {}) {
+    if (!publisher ||
+        typeof publisher.ensureReady !== "function" ||
+        typeof publisher.prepare !== "function" ||
+        typeof publisher.start !== "function" ||
+        typeof publisher.write !== "function" ||
+        typeof publisher.stop !== "function" ||
+        typeof publisher.cancel !== "function") {
+      throw new Error("a virtual microphone publisher is required");
+    }
+    this.publisher = publisher;
+    this.keyReleaseSettleMs = Math.max(0, Number(keyReleaseSettleMs) || 0);
+    this.replayChunkBytes = Math.max(2, Math.round((Number(replayChunkMs) || 100) * 32 / 2) * 2);
+    this.replayLeadMs = Math.max(0, Number(replayLeadMs) || 0);
+    this.sleep = sleep;
+    this.now = now;
+    this.log = typeof log === "function" ? log : () => {};
+    this.sequence = 0;
+    this.active = null;
+  }
+
+  async start() {
+    const sequence = ++this.sequence;
+    this.active = { sequence, chunks: [], bytes: 0 };
+    try {
+      // Warm the publisher and switch the default capture route now, but do
+      // not trigger WeChat until the physical push-to-talk key is released.
+      await this.publisher.ensureReady();
+      await this.publisher.prepare();
+    } catch (error) {
+      if (this.active?.sequence === sequence) {
+        this.active = null;
+      }
+      throw error;
+    }
+  }
+
+  async write(pcm) {
+    const session = this.active;
+    if (!session) {
+      return;
+    }
+    const bytes = Buffer.isBuffer(pcm)
+      ? Buffer.from(pcm)
+      : Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+    if (!bytes.length) {
+      return;
+    }
+    session.chunks.push(bytes);
+    session.bytes += bytes.length;
+  }
+
+  async stop() {
+    const session = this.active;
+    if (!session) {
+      return;
+    }
+    this.active = null;
+    const sequence = session.sequence;
+    const pcm = Buffer.concat(session.chunks, session.bytes);
+    if (!pcm.length) {
+      await this.publisher.cancel();
+      return;
+    }
+
+    await this.sleep(this.keyReleaseSettleMs);
+    if (sequence !== this.sequence) {
+      return;
+    }
+
+    const durationMs = pcm.length / 32;
+    this.log("wechat buffered playback starting", {
+      pcmBytes: pcm.length,
+      durationSeconds: Number((durationMs / 1_000).toFixed(3))
+    });
+    await this.publisher.start();
+    try {
+      const replayStartedAt = this.now();
+      let sentAudioMs = 0;
+      for (let offset = 0; offset < pcm.length; offset += this.replayChunkBytes) {
+        if (sequence !== this.sequence) {
+          return;
+        }
+        const chunk = pcm.subarray(offset, Math.min(offset + this.replayChunkBytes, pcm.length));
+        await this.publisher.write(chunk);
+        sentAudioMs += chunk.length / 32;
+        const targetElapsedMs = sentAudioMs - this.replayLeadMs;
+        const actualElapsedMs = this.now() - replayStartedAt;
+        if (targetElapsedMs > actualElapsedMs) {
+          await this.sleep(targetElapsedMs - actualElapsedMs);
+        }
+      }
+      if (sequence !== this.sequence) {
+        return;
+      }
+      await this.publisher.stop();
+      this.log("wechat buffered playback completed", { pcmBytes: pcm.length });
+    } catch (error) {
+      await this.publisher.cancel().catch(() => {});
+      throw error;
+    }
+  }
+
+  async cancel() {
+    this.sequence += 1;
+    this.active = null;
+    await this.publisher.cancel();
+  }
+}
+
 export class WindowsVirtualMicrophonePublisher {
   constructor({
     executablePath,
@@ -239,6 +376,11 @@ export class WindowsVirtualMicrophonePublisher {
     this.child = null;
     this.readyPromise = null;
     this.stdoutBuffer = "";
+    this.lifecycleState = "idle";
+    this.events = new EventEmitter();
+    // A permanent listener prevents EventEmitter's special error event from
+    // becoming an uncaught exception when no protocol operation is waiting.
+    this.events.on("error", () => {});
   }
 
   async ensureReady() {
@@ -301,6 +443,7 @@ export class WindowsVirtualMicrophonePublisher {
           }
           try {
             const message = JSON.parse(line);
+            this.events.emit(message.type, message);
             if (message.type === "ready") {
               finish(resolve, message);
             } else {
@@ -316,7 +459,10 @@ export class WindowsVirtualMicrophonePublisher {
         if (this.child === child) {
           this.child = null;
         }
-        finish(reject, new Error(`虚拟麦克风音频桥已退出（代码 ${code ?? "unknown"}）。`));
+        this.lifecycleState = "idle";
+        const error = new Error(`虚拟麦克风音频桥已退出（代码 ${code ?? "unknown"}）。`);
+        this.events.emit("error", error);
+        finish(reject, error);
       });
     });
     child.stderr.setEncoding("utf8");
@@ -325,9 +471,41 @@ export class WindowsVirtualMicrophonePublisher {
     return this.readyPromise;
   }
 
+  async prepare() {
+    await this.ensureReady();
+    if (!this.wechatShortcut || this.lifecycleState === "prepared") {
+      return;
+    }
+    if (this.lifecycleState === "active") {
+      throw new Error("上一轮微信语音输入尚未结束。");
+    }
+    const prepared = this.#waitForPublisherMessage(
+      "route_prepared",
+      3_000,
+      "微信语音输入的麦克风路由预热超时。"
+    );
+    await this.#write(VIRTUAL_MIC_MESSAGE.PREPARE);
+    await prepared;
+    this.lifecycleState = "prepared";
+  }
+
   async start() {
     await this.ensureReady();
+    if (this.wechatShortcut && this.lifecycleState === "active") {
+      throw new Error("上一轮微信语音输入尚未结束。");
+    }
+    const shortcutPressed = this.wechatShortcut
+      ? this.#waitForPublisherMessage(
+          "shortcut_pressed",
+          3_000,
+          "微信语音输入快捷键触发超时。"
+        )
+      : null;
     await this.#write(VIRTUAL_MIC_MESSAGE.START);
+    if (shortcutPressed) {
+      await shortcutPressed;
+      this.lifecycleState = "active";
+    }
   }
 
   async write(pcm) {
@@ -341,19 +519,42 @@ export class WindowsVirtualMicrophonePublisher {
   }
 
   async stop() {
+    const sessionIdle = this.wechatShortcut && this.lifecycleState === "active"
+      ? this.#waitForPublisherMessage(
+          "session_idle",
+          5_000,
+          "微信语音输入结束和麦克风恢复超时。"
+        )
+      : null;
     await this.#write(VIRTUAL_MIC_MESSAGE.STOP);
+    if (sessionIdle) {
+      await sessionIdle;
+      this.lifecycleState = "idle";
+    }
   }
 
   async cancel() {
     if (!this.child || this.child.exitCode != null) {
       return;
     }
+    const sessionIdle = this.wechatShortcut && this.lifecycleState !== "idle"
+      ? this.#waitForPublisherMessage(
+          "session_idle",
+          5_000,
+          "取消微信语音输入并恢复麦克风超时。"
+        )
+      : null;
     await this.#write(VIRTUAL_MIC_MESSAGE.CANCEL);
+    if (sessionIdle) {
+      await sessionIdle;
+      this.lifecycleState = "idle";
+    }
   }
 
   async dispose() {
     const child = this.child;
     this.child = null;
+    this.lifecycleState = "idle";
     if (!child || child.exitCode != null) {
       return;
     }
@@ -379,5 +580,10 @@ export class WindowsVirtualMicrophonePublisher {
     return new Promise((resolve, reject) => {
       child.stdin.write(frame, (error) => (error ? reject(error) : resolve()));
     });
+  }
+
+  #waitForPublisherMessage(type, timeoutMs, errorMessage) {
+    return waitForEvent(this.events, type, timeoutMs, errorMessage)
+      .then(([message]) => message);
   }
 }

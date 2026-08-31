@@ -14,7 +14,10 @@ import {
   XIAOMI_REMOTE_VOICE_MODES,
   normalizeXiaomiRemoteVoiceMode
 } from "../src/virtual-microphone-protocol.mjs";
-import { WindowsVirtualMicrophonePublisher } from "../src/windows-virtual-microphone.mjs";
+import {
+  BufferedWechatVirtualMicrophoneSession,
+  WindowsVirtualMicrophonePublisher
+} from "../src/windows-virtual-microphone.mjs";
 import {
   decodeMsbcFrames,
   resolveXiaomiRemoteRuntime,
@@ -27,8 +30,8 @@ const isDoctor = process.argv.includes("--doctor");
 const isFixHid = process.argv.includes("--fix-hid");
 const once = process.argv.includes("--once");
 const config = loadConfig();
-let wechatCaptureRequestSequence = 0;
-const pendingWechatCaptureRequests = new Map();
+let wechatReadyRequestSequence = 0;
+const pendingWechatReadyRequests = new Map();
 
 function log(message, details = "") {
   const suffix = details ? ` ${typeof details === "string" ? details : JSON.stringify(details)}` : "";
@@ -51,43 +54,43 @@ function sendDesktopCaptureStatus(state, metadata = {}) {
 }
 
 process.on("message", (message) => {
-  if (message?.type !== "xiaomi_remote_wechat_capture_prepared") {
+  if (message?.type !== "xiaomi_remote_wechat_ready_result") {
     return;
   }
   const requestId = String(message.requestId || "");
-  const pending = pendingWechatCaptureRequests.get(requestId);
+  const pending = pendingWechatReadyRequests.get(requestId);
   if (!pending) {
     return;
   }
-  pendingWechatCaptureRequests.delete(requestId);
+  pendingWechatReadyRequests.delete(requestId);
   clearTimeout(pending.timer);
   if (message.ok === true) {
     pending.resolve(message);
   } else {
-    pending.reject(new Error(String(message.error || "微信语音接收框准备失败。")));
+    pending.reject(new Error(String(message.error || "微信没有准备好。")));
   }
 });
 
-function prepareDesktopWechatCapture() {
+function ensureDesktopWechatReady() {
   if (process.env.VIBE_DESKTOP !== "1" || typeof process.send !== "function") {
     return Promise.resolve(null);
   }
-  const requestId = `${process.pid}-${Date.now()}-${++wechatCaptureRequestSequence}`;
+  const requestId = `${process.pid}-${Date.now()}-${++wechatReadyRequestSequence}`;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      pendingWechatCaptureRequests.delete(requestId);
-      reject(new Error("等待桌面微信语音接收框超时。"));
+      pendingWechatReadyRequests.delete(requestId);
+      reject(new Error("等待桌面确认微信状态超时。"));
     }, 3_000);
     timer.unref?.();
-    pendingWechatCaptureRequests.set(requestId, { resolve, reject, timer });
+    pendingWechatReadyRequests.set(requestId, { resolve, reject, timer });
     try {
       process.send({
-        type: "xiaomi_remote_wechat_capture_prepare",
+        type: "xiaomi_remote_wechat_ready_check",
         requestId
       });
     } catch (error) {
       clearTimeout(timer);
-      pendingWechatCaptureRequests.delete(requestId);
+      pendingWechatReadyRequests.delete(requestId);
       reject(error);
     }
   });
@@ -267,10 +270,17 @@ async function main() {
   const virtualMicrophone = voiceMode === XIAOMI_REMOTE_VOICE_MODES.WECHAT
     ? new WindowsVirtualMicrophonePublisher({ log, wechatShortcut: true })
     : null;
+  const bufferedWechatMicrophone = virtualMicrophone
+    ? new BufferedWechatVirtualMicrophoneSession({ publisher: virtualMicrophone, log })
+    : null;
   let streamDecoder = null;
   let shuttingDown = false;
   let adapterRecoveryAwaitingInput = false;
   let menuRepairInFlight = false;
+  // While a phantom menu storm is being repaired, menu events are dropped at
+  // the source. Cleared early when the repair succeeds; extended on failure
+  // because the fault likely persists.
+  let menuSwallowUntil = 0;
 
   async function repairRepeatingMenuKey(details) {
     if (menuRepairInFlight || shuttingDown) {
@@ -293,11 +303,13 @@ async function main() {
         throw new Error("Windows did not report a healthy remote HID child after restart.");
       }
       log("menu key anomaly cleared", { exitCode: result.exitCode });
+      menuSwallowUntil = 0;
       sendDesktopMenuGuardStatus("recovered", { details });
       setTimeout(() => sendDesktopMenuGuardStatus("ready"), 5_000).unref?.();
     } catch (error) {
       const message = error?.message || String(error);
       log("menu key anomaly repair failed", message);
+      menuSwallowUntil = Date.now() + 60_000;
       sendDesktopMenuGuardStatus("failed", { error: message, details });
     } finally {
       menuRepairInFlight = false;
@@ -306,6 +318,7 @@ async function main() {
 
   const menuGuard = new XiaomiRemoteMenuGuard({
     onTrip: (details) => {
+      menuSwallowUntil = Date.now() + 15_000;
       void repairRepeatingMenuKey(details);
     }
   });
@@ -328,9 +341,14 @@ async function main() {
       ? {
           streamAudio: {
             start: async () => {
-              await prepareDesktopWechatCapture();
+              await ensureDesktopWechatReady();
               streamDecoder = new MsbcDecoder();
-              await virtualMicrophone.start();
+              try {
+                await bufferedWechatMicrophone.start();
+              } catch (error) {
+                streamDecoder = null;
+                throw error;
+              }
             },
             decodeFrame: (frame) => {
               if (!streamDecoder) {
@@ -339,14 +357,21 @@ async function main() {
               const pcm = streamDecoder.decodeFrame(frame);
               return Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength);
             },
-            write: (pcm) => virtualMicrophone.write(pcm),
+            write: (pcm) => bufferedWechatMicrophone.write(pcm),
             stop: async () => {
-              await virtualMicrophone.stop();
-              streamDecoder = null;
+              sendDesktopCaptureStatus("wechat_replay");
+              try {
+                await bufferedWechatMicrophone.stop();
+              } finally {
+                streamDecoder = null;
+              }
             },
             cancel: async () => {
-              await virtualMicrophone.cancel();
-              streamDecoder = null;
+              try {
+                await bufferedWechatMicrophone.cancel();
+              } finally {
+                streamDecoder = null;
+              }
             }
           }
         }
@@ -354,7 +379,15 @@ async function main() {
           sendAudio: (pcm) => ws.send(pcm, { binary: true }),
           decodeFrames: (frames) => decodeMsbcFrames(frames)
         }),
-    onButtonEvent: (event) => menuGuard.handle(event)
+    onButtonEvent: (event) => {
+      // Phantom menu storms ride this path too: while a storm is being
+      // repaired, drop menu events here so they reach neither the guard nor
+      // the server's action mapper.
+      if (event.button === "menu" && Date.now() < menuSwallowUntil) {
+        return;
+      }
+      menuGuard.handle(event);
+    }
   });
 
   ws.on("message", (data) => {

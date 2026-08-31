@@ -16,9 +16,8 @@ contextBridge.exposeInMainWorld("vibeApp", {
   pickDirectory: (currentPath) => ipcRenderer.invoke("desktop:pick-directory", currentPath),
   openConfigFolder: () => ipcRenderer.invoke("desktop:open-config-folder"),
   overlayEvent: (payload) => ipcRenderer.send("overlay:event", payload),
-  prepareWechatCapture: (source) => ipcRenderer.invoke("desktop:prepare-wechat-capture", source),
-  finishWechatCapture: (source) => ipcRenderer.invoke("desktop:finish-wechat-capture", source),
-  cancelWechatCapture: (source) => ipcRenderer.invoke("desktop:cancel-wechat-capture", source),
+  ensureWechatReady: () => ipcRenderer.invoke("desktop:ensure-wechat-ready"),
+  openWechatInputSettings: () => ipcRenderer.invoke("desktop:open-wechat-input-settings"),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
   onState: (callback) => {
     if (typeof callback !== "function") {
@@ -31,11 +30,5 @@ contextBridge.exposeInMainWorld("vibeApp", {
       return;
     }
     ipcRenderer.on("desktop:global-hotkey", (_event, payload) => callback(payload));
-  },
-  onWechatCaptureResult: (callback) => {
-    if (typeof callback !== "function") {
-      return;
-    }
-    ipcRenderer.on("desktop:wechat-capture-result", (_event, payload) => callback(payload));
   }
 });

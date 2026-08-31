@@ -52,10 +52,13 @@ constexpr std::uint16_t kPcm16 = 2;
 constexpr std::uint16_t kStop = 3;
 constexpr std::uint16_t kCancel = 4;
 constexpr std::uint16_t kExit = 5;
+constexpr std::uint16_t kPrepare = 6;
 constexpr std::size_t kMaxPayload = 16 * 1024 * 1024;
 constexpr std::size_t kMaxQueuedSamples = 16'000 * 5;
 constexpr ULONGLONG kShortcutWatchdogMs = 2'000;
+constexpr ULONGLONG kPreparedRouteWatchdogMs = 60'000;
 constexpr DWORD kRouteSettleMs = 250;
+constexpr DWORD kWechatVoiceStartupMs = 350;
 constexpr DWORD kRouteRestoreDelayMs = 500;
 
 constexpr ERole kCaptureRoles[] = {eConsole, eMultimedia, eCommunications};
@@ -651,6 +654,36 @@ bool SendKeyboardScanCode(WORD scanCode, bool extended, bool keyUp) {
   return SendInput(1, &input, sizeof(INPUT)) == 1;
 }
 
+bool SendWechatVoiceToggleChord() {
+  // WeChat Input Method exposes Ctrl+Win+Shift as its tap-to-start/tap-to-stop
+  // voice shortcut. Send each modifier as a physical Set-1 scan code so its
+  // low-level hook sees the same sequence as a real keyboard.
+  const bool controlPressed = SendKeyboardScanCode(0x1d, false, false);
+  if (!controlPressed) {
+    return false;
+  }
+  Sleep(25);
+  const bool windowsPressed = SendKeyboardScanCode(0x5b, true, false);
+  if (!windowsPressed) {
+    SendKeyboardScanCode(0x1d, false, true);
+    return false;
+  }
+  Sleep(25);
+  const bool shiftPressed = SendKeyboardScanCode(0x2a, false, false);
+  if (!shiftPressed) {
+    SendKeyboardScanCode(0x5b, true, true);
+    SendKeyboardScanCode(0x1d, false, true);
+    return false;
+  }
+  Sleep(60);
+  const bool shiftReleased = SendKeyboardScanCode(0x2a, false, true);
+  Sleep(15);
+  const bool windowsReleased = SendKeyboardScanCode(0x5b, true, true);
+  Sleep(15);
+  const bool controlReleased = SendKeyboardScanCode(0x1d, false, true);
+  return shiftReleased && windowsReleased && controlReleased;
+}
+
 class WechatShortcut {
  public:
   WechatShortcut(bool enabled, std::wstring captureEndpointName, std::wstring routeStatePath)
@@ -661,73 +694,116 @@ class WechatShortcut {
     lastActivity_.store(GetTickCount64());
   }
 
+  bool Prepare() {
+    if (!enabled_) {
+      return true;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    lastActivity_.store(GetTickCount64());
+    if (active_) {
+      return false;
+    }
+    if (!routeActive_) {
+      if (!router_.Begin()) {
+        return false;
+      }
+      routeActive_ = true;
+      routePreparedAt_ = GetTickCount64();
+    }
+    WriteJsonLine("{\"type\":\"route_prepared\"}");
+    return true;
+  }
+
   bool Press() {
     if (!enabled_) {
       return true;
     }
     std::lock_guard<std::mutex> lock(mutex_);
     lastActivity_.store(GetTickCount64());
-    if (held_) {
-      return true;
-    }
-    if (!router_.Begin()) {
+    if (active_) {
+      WriteJsonLine("{\"type\":\"shortcut_error\",\"error\":\"shortcut already active\"}");
       return false;
     }
-    Sleep(kRouteSettleMs);
-    // Emit the same Set-1 scan-code sequence as a physical left Ctrl + left
-    // Windows chord. WeChat's low-level shortcut hook is stricter than normal
-    // application accelerators and can ignore a batched virtual-key-only Win
-    // event that lacks KEYEVENTF_EXTENDEDKEY.
-    const bool controlPressed = SendKeyboardScanCode(0x1d, false, false);
-    Sleep(35);
-    const bool windowsPressed = controlPressed && SendKeyboardScanCode(0x5b, true, false);
-    if (controlPressed && windowsPressed) {
-      held_ = true;
-      WriteJsonLine("{\"type\":\"shortcut_pressed\",\"shortcut\":\"Ctrl+Win\","
-                    "\"method\":\"scan_code\"}");
+    if (!routeActive_) {
+      if (!router_.Begin()) {
+        return false;
+      }
+      routeActive_ = true;
+      routePreparedAt_ = GetTickCount64();
+    }
+    const ULONGLONG now = GetTickCount64();
+    const ULONGLONG preparedFor = routePreparedAt_ == 0 ? 0 : now - routePreparedAt_;
+    if (preparedFor < kRouteSettleMs) {
+      Sleep(static_cast<DWORD>(kRouteSettleMs - preparedFor));
+    }
+    if (SendWechatVoiceToggleChord()) {
+      active_ = true;
+      routePreparedAt_ = 0;
+      // Acknowledge only after WeChat has had time to create its recognition
+      // session and open the already-prepared virtual capture endpoint.
+      Sleep(kWechatVoiceStartupMs);
+      WriteJsonLine("{\"type\":\"shortcut_pressed\",\"shortcut\":\"Ctrl+Win+Shift\","
+                    "\"method\":\"scan_code_toggle\"}");
       return true;
     }
-    if (windowsPressed) {
-      SendKeyboardScanCode(0x5b, true, true);
-    }
-    if (controlPressed) {
-      SendKeyboardScanCode(0x1d, false, true);
-    }
     router_.Restore();
+    routeActive_ = false;
+    routePreparedAt_ = 0;
     WriteJsonLine("{\"type\":\"shortcut_error\",\"error\":\"scan-code SendInput failed\"}");
     return false;
   }
 
-  void Release() {
+  void Release(const char* reason) {
     if (!enabled_) {
       return;
     }
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!held_) {
-      // The desktop mic and Xiaomi remote each own a publisher process but
-      // intentionally share one crash-recovery route-state file. An idle
-      // publisher must not restore the route that the other publisher is
-      // actively using.
+    if (!active_ && !routeActive_) {
       return;
     }
-    SendKeyboardScanCode(0x5b, true, true);
-    Sleep(20);
-    SendKeyboardScanCode(0x1d, false, true);
-    held_ = false;
-    WriteJsonLine("{\"type\":\"shortcut_released\",\"shortcut\":\"Ctrl+Win\"}");
-    Sleep(kRouteRestoreDelayMs);
-    router_.Restore();
+    const bool shortcutWasActive = active_;
+    if (shortcutWasActive) {
+      const bool stopped = SendWechatVoiceToggleChord();
+      active_ = false;
+      if (stopped) {
+        WriteJsonLine("{\"type\":\"shortcut_released\",\"shortcut\":\"Ctrl+Win+Shift\","
+                      "\"method\":\"scan_code_toggle\"}");
+      } else {
+        WriteJsonLine("{\"type\":\"shortcut_error\","
+                      "\"error\":\"scan-code stop toggle failed\"}");
+      }
+      Sleep(kRouteRestoreDelayMs);
+    }
+    if (routeActive_) {
+      router_.Restore();
+      routeActive_ = false;
+    }
+    routePreparedAt_ = 0;
+    WriteJsonLine("{\"type\":\"session_idle\",\"reason\":\"" +
+                  JsonEscape(reason ? reason : "unknown") + "\"}");
   }
 
   void ReleaseIfStale() {
-    if (enabled_ && GetTickCount64() - lastActivity_.load() > kShortcutWatchdogMs) {
-      Release();
+    if (!enabled_) {
+      return;
+    }
+    const ULONGLONG elapsed = GetTickCount64() - lastActivity_.load();
+    bool shouldRelease = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      shouldRelease = (active_ && elapsed > kShortcutWatchdogMs) ||
+                      (!active_ && routeActive_ && elapsed > kPreparedRouteWatchdogMs);
+    }
+    if (shouldRelease) {
+      Release("watchdog");
     }
   }
 
  private:
   bool enabled_ = false;
-  bool held_ = false;
+  bool active_ = false;
+  bool routeActive_ = false;
+  ULONGLONG routePreparedAt_ = 0;
   std::atomic<ULONGLONG> lastActivity_{0};
   std::mutex mutex_;
   DefaultCaptureRouter router_;
@@ -754,6 +830,11 @@ void ProtocolReader(HANDLE input, SampleQueue& queue, WechatShortcut& shortcut,
     }
     shortcut.Touch();
     switch (header.type) {
+      case kPrepare:
+        if (!shortcut.Prepare()) {
+          exiting.store(true);
+        }
+        break;
       case kStart:
         sessionAudioBytes = 0;
         queue.Start();
@@ -782,10 +863,10 @@ void ProtocolReader(HANDLE input, SampleQueue& queue, WechatShortcut& shortcut,
         break;
       case kCancel:
         queue.Cancel();
-        shortcut.Release();
+        shortcut.Release("cancel");
         break;
       case kExit:
-        shortcut.Release();
+        shortcut.Release("exit");
         exiting.store(true);
         break;
       default:
@@ -794,7 +875,7 @@ void ProtocolReader(HANDLE input, SampleQueue& queue, WechatShortcut& shortcut,
         break;
     }
   }
-  shortcut.Release();
+  shortcut.Release("reader_closed");
 }
 
 int RunPublisher(const std::wstring& endpointName,
@@ -905,11 +986,11 @@ int RunPublisher(const std::wstring& endpointName,
     std::fill(output + copied, output + available, std::int16_t{0});
     renderClient->ReleaseBuffer(available, 0);
     if (queue.ConsumeDrainCompleted()) {
-      shortcut.Release();
+      shortcut.Release("drain");
     }
   }
 
-  shortcut.Release();
+  shortcut.Release("shutdown");
   CancelSynchronousIo(reader.native_handle());
   if (reader.joinable()) {
     reader.join();

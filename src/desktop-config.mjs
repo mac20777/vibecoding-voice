@@ -30,6 +30,7 @@ export function buildDesktopFormState(config, desktopSettings = {}) {
     sttProvider: normalizeChoice(detectConfiguredSttProvider(config), "volcengine", VALID_STT_PROVIDERS),
     openaiApiKey: String(config.openaiApiKey || ""),
     openaiModel: String(config.openaiModel || "whisper-1"),
+    volcengineApiKey: String(config.volcengineApiKey || ""),
     volcengineAppKey: String(config.volcengineAppKey || ""),
     volcengineAccessKey: String(config.volcengineAccessKey || ""),
     transcriptDeliveryMode:
@@ -42,7 +43,7 @@ export function buildDesktopFormState(config, desktopSettings = {}) {
         : "type_and_enter",
     voiceTranslationEnabled: config.voiceTranslationEnabled === true,
     voiceTranslationApiKey: String(config.voiceTranslationApiKey || ""),
-    voiceTranslationModel: String(config.voiceTranslationModel || "deepseek-chat"),
+    voiceTranslationModel: String(config.voiceTranslationModel || "deepseek-v4-flash"),
     voiceTranslationBaseUrl: String(config.voiceTranslationBaseUrl || "https://api.deepseek.com"),
     voiceTranslationTimeoutMs: String(config.voiceTranslationTimeoutMs || "12000"),
     voiceTranslationPrompt: String(config.voiceTranslationPrompt || DEFAULT_VOICE_TRANSLATION_PROMPT),
@@ -86,6 +87,7 @@ export function buildUserConfigUpdates(formState = {}) {
     STT_PROVIDER: sttProvider,
     OPENAI_API_KEY: normalizeOptionalText(formState.openaiApiKey),
     OPENAI_TRANSCRIBE_MODEL: normalizeOptionalText(formState.openaiModel),
+    VOLCENGINE_API_KEY: normalizeOptionalText(formState.volcengineApiKey),
     VOLCENGINE_APP_KEY: normalizeOptionalText(formState.volcengineAppKey),
     VOLCENGINE_ACCESS_KEY: normalizeOptionalText(formState.volcengineAccessKey),
     TRANSCRIPT_DELIVERY_MODE:
@@ -102,7 +104,7 @@ export function buildUserConfigUpdates(formState = {}) {
       ? normalizeOptionalText(formState.voiceTranslationApiKey)
       : null,
     VOICE_TRANSLATION_MODEL: formState.voiceTranslationEnabled
-      ? normalizeOptionalText(formState.voiceTranslationModel) || "deepseek-chat"
+      ? normalizeOptionalText(formState.voiceTranslationModel) || "deepseek-v4-flash"
       : null,
     VOICE_TRANSLATION_BASE_URL: formState.voiceTranslationEnabled
       ? normalizeOptionalText(formState.voiceTranslationBaseUrl) || "https://api.deepseek.com"

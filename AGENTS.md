@@ -51,7 +51,14 @@ server.mjs (entry point — HTTP + WebSocket server)
 │   └── remote-buttons.mjs   — maps button gestures to actions: key/combo/app/text/prompt/system
 │                              (inject-key.ps1 handles single keys and modifier chords;
 │                              system-actions.mjs runs shutdown/restart/sleep/lock —
-│                              shutdown/restart get an on-screen confirm, OK=run, Back=cancel)
+│                              shutdown/restart get an on-screen confirm, OK=run, Back=cancel).
+│                              menu defaults to `none` (Windows already delivers usage 0x65
+│                              natively as VK_APPS, suppressed by the desktop global hook).
+│                              Phantom menu storms are a known HID-child fault:
+│                              xiaomi-remote-menu-guard.mjs trips at ≥6 releases/2.5s and
+│                              restarts the HID child; menu events are swallowed during
+│                              repair, and menu/power actions are rate-limited in server.mjs
+│                              against isolated phantom presses below the guard threshold
 ├── stt.mjs              — speech-to-text (OpenAI Whisper / Volcengine ASR)
 │   ├── wav.mjs          — PCM16 → WAV header conversion
 │   └── paths.mjs        — resolves project root from import.meta.url
@@ -75,14 +82,15 @@ server.mjs (entry point — HTTP + WebSocket server)
 - **Codex session**: Spawns via PowerShell wrapper, tracks thread ID for `codex exec resume` continuity
 - **CLI projector**: Maintains rolling 8-line log buffer, truncates for e-paper constraints
 - **Dictation relay**: Lifecycle events (recording/transcribing/typed/transcript_final…) are sent to the originating client and relayed to `desktop-window` clients (`sendDictationJson` in server.mjs) so the desktop UI can show live status, record transcripts, and drive the floating overlay
-- **WeChat voice mode is global**: when `XIAOMI_REMOTE_VOICE_MODE=wechat`, both the Xiaomi remote and the desktop F8 mic (`desktop_mic`) stream PCM straight into the virtual microphone publisher (`WindowsVirtualMicrophonePublisher` in server.mjs for the desktop mic) → VB-CABLE → WeChat's own voice-to-text — no STT API key needed. WeChat is only the recognizer: before recognition the desktop steals focus into a hidden textarea in the floating overlay (`prepareWechatCapture` in desktop/main.mjs, `#wechat-capture` in overlay.html), so the recognized text lands in our window, never in the original input; the captured text then goes to the server as a `wechat_transcript` message and always enters the `remote_preview` flow (`handleWechatTranscript` in server.mjs) — segments append, F10/Back undoes, F9/OK injects the joined text into the restored original focus in one shot
+- **WeChat voice mode is global and direct-only**: when `XIAOMI_REMOTE_VOICE_MODE=wechat`, both the Xiaomi remote and the desktop F8 mic (`desktop_mic`) stream PCM straight into the virtual microphone publisher (`WindowsVirtualMicrophonePublisher` in server.mjs for the desktop mic) → VB-CABLE → WeChat Input Method's voice-to-text — no STT API key needed. WeChat Input Method keeps focus in the user's current input and types there directly; the app does not open a dictation overlay, capture IME text, relay recognized text through the bridge, or reinject it. WeChat Input Method must be configured once to use `CABLE Output (VB-Audio Virtual Cable)`; the Remote page can open its settings and persists `wechatVirtualMicConfirmed`, while `ensureWechatReady` blocks both remote and F8 dictation until that confirmation exists. For the Xiaomi remote, `BufferedWechatVirtualMicrophoneSession.start()` records PCM and sends the native `PREPARE` message while the key is held so capture routing settles early; after release the native publisher taps `Ctrl+Win+Shift` to start, waits for `shortcut_pressed` before replaying the buffered remote PCM, taps the same shortcut to stop after drain, and waits for `session_idle` after route restoration before allowing the next session. Power confirmations remain allowed to use the general overlay. `ensureWechatReady` checks `wetype_server.exe` rather than the unrelated Weixin/WeChat chat client; it wakes Windows Text Services with `ctfmon.exe` once and otherwise fails the press with an actionable prompt to activate WeChat Input Method. Detection caches a positive answer for 10s (negative for 1.5s) to keep PTT latency at zero.
 - **Floating overlay**: `desktop/overlay.html` + `overlay-preload.cjs` — frameless always-on-top window, `focusable: false` so it never steals the injection target's focus; draggable, position persisted in desktop-settings.json (`overlayX/overlayY`)
+- **Desktop bridge lifecycle**: the desktop app forks `src/server.mjs` as its bridge child (`VIBE_DESKTOP=1`). The server exits immediately when the IPC channel disconnects (parent crash/force-quit), so it never lingers as an orphan holding the voice port. As a second net, `startBridgeProcess` kills a port-holding orphan before reporting "port in use" — but only when the listener's command line matches this app's server entry AND its parent process is already gone (`findOrphanedBridgePid` in desktop/main.mjs); a deliberately started `npm start` server is left untouched. `stopBridgeProcess` escalates to `taskkill /T /F` if the child ignores the polite kill for 2s.
 
 ## Configuration (.env)
 
 **Required** (one STT provider):
 - `OPENAI_API_KEY` — for Whisper
-- `VOLCENGINE_APP_KEY` + `VOLCENGINE_ACCESS_KEY` — for Volcengine ASR
+- `VOLCENGINE_API_KEY` — for Volcengine ASR (new console, single key; legacy console pair `VOLCENGINE_APP_KEY` + `VOLCENGINE_ACCESS_KEY` still works)
 
 **Key settings**:
 - `SEND_TARGET`: `text_injector` (default), `codex_exec`, or `Codex`
