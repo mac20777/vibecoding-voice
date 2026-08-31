@@ -4,6 +4,14 @@
 
 Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac20777)
 
+![VibeCoding Voice Xiaomi remote control page](docs/screenshot-remote-control.png)
+
+> **Windows remote control center / Windows 遥控器控制中心**
+>
+> Pair a Xiaomi Bluetooth voice remote, check its connection and battery status, choose built-in STT or WeChat Input Method, and configure click, double-click, and hold actions from one page.
+>
+> 在同一页面完成小米蓝牙语音遥控器配对，查看连接、电量和麦克风状态，切换内置语音识别或微信输入法，并配置单击、双击和长按动作。语音键固定为按住录音；使用微信模式前，需要在微信输入法中把麦克风设为 `CABLE Output (VB-Audio Virtual Cable)`。按住遥控器时录制遥控器麦克风，松开后再调用微信输入法并回放这段录音。
+
 ---
 
 ## English
@@ -19,7 +27,7 @@ Follow the author on X: [@mac20777](https://x.com/intent/follow?screen_name=mac2
 `vibecoding-voice` now works even without the ESP32 board. The Windows desktop app can use a normal PC microphone or USB microphone as a second voice input device, then sends the audio through the same STT, translation, confirmation, and Inject / Codex / Claude pipeline.
 
 - **Global push-to-talk**: hold `F8` anywhere on Windows to record, release to transcribe. With confirmation enabled (the default), the transcript previews in the floating overlay first — press `F9` to insert it or `F10` to discard; with immediate delivery it is inserted right away.
-- **WeChat voice input**: WeChat types directly into the focused input without opening the floating overlay or moving focus to an intermediate capture window. For the Xiaomi remote, the audio route is prepared while the key is held; releasing the key triggers WeChat, and the next press waits until the previous shortcut and route restoration have fully completed.
+- **WeChat voice input**: WeChat types directly into the focused input without opening the floating overlay or moving focus to an intermediate capture window. First select `CABLE Output (VB-Audio Virtual Cable)` as the microphone in WeChat Input Method and confirm it on the app's Remote page. The Xiaomi remote records while held; after release, the app triggers WeChat and replays that buffered remote-microphone audio through VB-CABLE. The next press waits until the previous recognition and audio-route restoration have completed.
 - **Desktop send shortcut**: press `F9` to submit the active text field, or to send pending text when confirmation is enabled; press `F10` to undo pending text.
 - **English-output shortcut**: press `F7` to toggle Chinese speech -> English-only output; press it again to return to normal transcript output.
 - **Configurable keys**: change record / send / undo / English-output shortcuts from the desktop app's Speech tab.
@@ -143,8 +151,6 @@ npm install
 ```
 
 #### Desktop App (Windows)
-
-![VibeCoding Voice desktop UI](docs/screenshot-desktop-ui.png)
 
 If you want a normal desktop app instead of a terminal window, this repo now includes an Electron wrapper with:
 
@@ -672,8 +678,6 @@ npm install
 ```
 
 #### Windows 桌面版
-
-![VibeCoding Voice 桌面界面](docs/screenshot-desktop-ui.png)
 
 如果你不想让普通用户面对命令行，现在仓库里已经带了一个 Electron 桌面壳，支持：
 
